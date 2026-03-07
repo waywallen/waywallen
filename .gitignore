@@ -1,0 +1,6 @@
+/target
+/test*.sh
+/build.sh
+/Cargo.lock
+/.env
+/.llm
