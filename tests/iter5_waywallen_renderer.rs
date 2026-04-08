@@ -121,7 +121,37 @@ fn waywallen_renderer_bind_handshake() {
         other => panic!("expected BindBuffers, got {other:?}"),
     }
 
-    // 3. Send Shutdown and wait for the child to exit.
+    // 3. Drain 6 FrameReady events (2 full cycles) and assert that the
+    //    slot index cycles 0,1,2,0,1,2 — i.e. the renderer's frame loop
+    //    really is picking slots deterministically.
+    let mut observed_slots = Vec::<u32>::new();
+    let mut last_seq: i64 = -1;
+    for _ in 0..6 {
+        let (ev, fds) = recv_msg::<EventMsg>(&stream).expect("recv FrameReady");
+        assert!(fds.is_empty(), "FrameReady must not carry fds");
+        match ev {
+            EventMsg::FrameReady {
+                image_index,
+                seq,
+                ts_ns,
+            } => {
+                assert!(ts_ns > 0, "ts_ns must be monotonic");
+                assert!((seq as i64) > last_seq, "seq must be monotonic");
+                last_seq = seq as i64;
+                observed_slots.push(image_index);
+            }
+            other => panic!("expected FrameReady, got {other:?}"),
+        }
+    }
+    assert_eq!(observed_slots, vec![0, 1, 2, 0, 1, 2]);
+
+    // Pixel-level verification via mmap is deliberately skipped: AMD
+    // RADV allocates the DMA-BUFs in DEVICE_LOCAL VRAM, which isn't
+    // host-visible and therefore fails mmap(MAP_SHARED). The proper
+    // readback path is importing into a local Vulkan instance and
+    // issuing a copy — that happens in the M2 viewer milestone.
+
+    // 4. Send Shutdown and wait for the child to exit.
     send_msg(&stream, &ControlMsg::Shutdown, &[]).expect("send Shutdown");
     let (tx, rx) = std::sync::mpsc::channel();
     // Move child out of guard so we can wait() without dropping twice.

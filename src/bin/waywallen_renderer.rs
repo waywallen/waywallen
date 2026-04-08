@@ -8,14 +8,14 @@
 //! daemon routes the resulting frames to subscribed viewers exactly as
 //! it will for the real renderer.
 //!
-//! Iteration M1.3b (this file): connect to the daemon over the UDS
-//! passed via `--ipc`, send `EventMsg::Ready`, export 3 DMA-BUF FDs,
-//! send a `BindBuffers` event with them attached via SCM_RIGHTS, and
-//! wait for `ControlMsg::Shutdown` before tearing down. No rendering
-//! yet — the consumer sees valid (if zeroed) buffers.
+//! Iteration M1.4 (this file): in addition to the M1.3b handshake,
+//! open a graphics queue + transient command buffer and drive a real
+//! frame loop: each tick picks the next slot (seq % 3), records a
+//! `vkCmdClearColorImage` to a distinct solid colour (red/green/blue),
+//! submits + waits, and emits a `FrameReady` event. Pacing is driven by
+//! `--fps` (default 10).
 //!
 //! Roadmap for the next sub-iterations:
-//!   M1.4  per-frame vkCmdClearColorImage + FrameReady
 //!   M1.5  pipeline + triangle-strip solid quad on top of clear
 //!   M1.6  graceful shutdown / crash-resilient FD teardown
 
@@ -71,21 +71,24 @@ struct Args {
     ipc_path: String,
     width: u32,
     height: u32,
+    fps: u32,
 }
 
 fn parse_args() -> Result<Args> {
     let mut ipc_path: Option<String> = None;
     let mut width: u32 = 512;
     let mut height: u32 = 512;
+    let mut fps: u32 = 10;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--ipc" => ipc_path = args.next(),
             "--width" => width = args.next().and_then(|s| s.parse().ok()).unwrap_or(512),
             "--height" => height = args.next().and_then(|s| s.parse().ok()).unwrap_or(512),
+            "--fps" => fps = args.next().and_then(|s| s.parse().ok()).unwrap_or(10),
             // Accepted for CLI parity with mock_renderer_host / the C++
             // host. Ignored at this milestone.
-            "--fps" | "--scene" | "--assets" => {
+            "--scene" | "--assets" => {
                 let _ = args.next();
             }
             _ => {}
@@ -96,6 +99,7 @@ fn parse_args() -> Result<Args> {
         ipc_path,
         width,
         height,
+        fps: fps.max(1),
     })
 }
 
@@ -269,10 +273,82 @@ fn run(instance: &Instance, args: &Args) -> Result<()> {
         });
     }
 
-    // Spin until the control thread flips the flag. M1.4 replaces this
-    // with a real frame loop that also emits FrameReady.
+    // ------ frame loop ------
+    let queue = unsafe { device.get_device_queue(gfx_family, 0) };
+    let cmd_pool = unsafe {
+        device
+            .create_command_pool(
+                &vk::CommandPoolCreateInfo::default()
+                    .queue_family_index(gfx_family)
+                    .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
+                None,
+            )
+            .context("create_command_pool")?
+    };
+    let cmd_buf = unsafe {
+        device
+            .allocate_command_buffers(
+                &vk::CommandBufferAllocateInfo::default()
+                    .command_pool(cmd_pool)
+                    .level(vk::CommandBufferLevel::PRIMARY)
+                    .command_buffer_count(1),
+            )
+            .context("allocate_command_buffers")?[0]
+    };
+
+    // One-time initial layout transition UNDEFINED → GENERAL for every
+    // slot so the subsequent clears see a valid layout.
+    initial_layout_transition(&device, queue, cmd_buf, &slots)?;
+
+    let frame_period = std::time::Duration::from_secs_f64(1.0 / args.fps as f64);
+    let start = std::time::Instant::now();
+    let colors: [[f32; 4]; 3] = [
+        [1.0, 0.0, 0.0, 1.0], // red
+        [0.0, 1.0, 0.0, 1.0], // green
+        [0.0, 0.0, 1.0, 1.0], // blue
+    ];
+    let mut seq: u64 = 0;
     while !shutdown.load(Ordering::SeqCst) {
-        thread::sleep(std::time::Duration::from_millis(50));
+        let slot = (seq as usize) % slots.len();
+        let color = colors[slot];
+        record_and_submit_clear(&device, queue, cmd_buf, slots[slot].image, color)
+            .with_context(|| format!("record/submit slot {slot} seq {seq}"))?;
+
+        let ts_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        let ev = EventMsg::FrameReady {
+            image_index: slot as u32,
+            seq,
+            ts_ns,
+        };
+        if let Err(e) = send_msg(&stream, &ev, &[]) {
+            log::warn!("send FrameReady failed: {e}; exiting loop");
+            break;
+        }
+
+        seq += 1;
+        let next = start + frame_period * (seq as u32);
+        let now = std::time::Instant::now();
+        if next > now {
+            let remaining = next - now;
+            // Chunk the sleep so shutdown latency stays bounded.
+            let step = std::time::Duration::from_millis(10);
+            let mut slept = std::time::Duration::ZERO;
+            while slept < remaining && !shutdown.load(Ordering::SeqCst) {
+                let t = step.min(remaining - slept);
+                thread::sleep(t);
+                slept += t;
+            }
+        }
+    }
+    log::info!("frame loop stopped after {seq} frames");
+
+    // Wait for any in-flight GPU work before tearing the pool down.
+    unsafe {
+        let _ = device.device_wait_idle();
+        device.destroy_command_pool(cmd_pool, None);
     }
 
     // Drop exports so the exported FDs close only after the daemon has
@@ -291,6 +367,106 @@ fn run(instance: &Instance, args: &Args) -> Result<()> {
     unsafe { device.destroy_device(None) };
     log::info!("renderer exit 0");
     Ok(())
+}
+
+fn initial_layout_transition(
+    device: &Device,
+    queue: vk::Queue,
+    cmd_buf: vk::CommandBuffer,
+    slots: &[FrameSlot],
+) -> Result<()> {
+    unsafe {
+        device
+            .reset_command_buffer(cmd_buf, vk::CommandBufferResetFlags::empty())
+            .context("reset cmd buf")?;
+        device
+            .begin_command_buffer(
+                cmd_buf,
+                &vk::CommandBufferBeginInfo::default()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+            )
+            .context("begin cmd buf")?;
+        let barriers: Vec<vk::ImageMemoryBarrier> = slots
+            .iter()
+            .map(|s| {
+                vk::ImageMemoryBarrier::default()
+                    .src_access_mask(vk::AccessFlags::empty())
+                    .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                    .old_layout(vk::ImageLayout::UNDEFINED)
+                    .new_layout(vk::ImageLayout::GENERAL)
+                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                    .image(s.image)
+                    .subresource_range(color_range())
+            })
+            .collect();
+        device.cmd_pipeline_barrier(
+            cmd_buf,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &barriers,
+        );
+        device.end_command_buffer(cmd_buf).context("end cmd buf")?;
+
+        let cmd_bufs = [cmd_buf];
+        let submit = vk::SubmitInfo::default().command_buffers(&cmd_bufs);
+        device
+            .queue_submit(queue, &[submit], vk::Fence::null())
+            .context("queue submit init barriers")?;
+        device.queue_wait_idle(queue).context("queue wait idle")?;
+    }
+    Ok(())
+}
+
+fn record_and_submit_clear(
+    device: &Device,
+    queue: vk::Queue,
+    cmd_buf: vk::CommandBuffer,
+    image: vk::Image,
+    color: [f32; 4],
+) -> Result<()> {
+    unsafe {
+        device
+            .reset_command_buffer(cmd_buf, vk::CommandBufferResetFlags::empty())
+            .context("reset cmd buf")?;
+        device
+            .begin_command_buffer(
+                cmd_buf,
+                &vk::CommandBufferBeginInfo::default()
+                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
+            )
+            .context("begin cmd buf")?;
+        let clear = vk::ClearColorValue { float32: color };
+        let ranges = [color_range()];
+        device.cmd_clear_color_image(
+            cmd_buf,
+            image,
+            vk::ImageLayout::GENERAL,
+            &clear,
+            &ranges,
+        );
+        device.end_command_buffer(cmd_buf).context("end cmd buf")?;
+
+        let cmd_bufs = [cmd_buf];
+        let submit = vk::SubmitInfo::default().command_buffers(&cmd_bufs);
+        device
+            .queue_submit(queue, &[submit], vk::Fence::null())
+            .context("queue submit clear")?;
+        device.queue_wait_idle(queue).context("queue wait idle")?;
+    }
+    Ok(())
+}
+
+fn color_range() -> vk::ImageSubresourceRange {
+    vk::ImageSubresourceRange::default()
+        .aspect_mask(vk::ImageAspectFlags::COLOR)
+        .base_mip_level(0)
+        .level_count(1)
+        .base_array_layer(0)
+        .layer_count(1)
 }
 
 /// Map an R8G8B8A8_UNORM VkFormat to its DRM fourcc code. Matches
