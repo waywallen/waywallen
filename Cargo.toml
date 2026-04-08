@@ -22,3 +22,7 @@ nix = { version = "0.29", features = ["fs", "ioctl", "socket", "uio"] }
 libc = "0.2"
 base64 = "0.22"
 smallvec = "1.13"
+# waywallen-renderer subprocess: ash for raw Vulkan control over DMA-BUF
+# export and drm-fourcc for DRM format code mapping.
+ash = "0.38"
+drm-fourcc = "2"
