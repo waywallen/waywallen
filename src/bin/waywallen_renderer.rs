@@ -8,21 +8,29 @@
 //! daemon routes the resulting frames to subscribed viewers exactly as
 //! it will for the real renderer.
 //!
-//! Iteration M1.3a (this file): export DMA-BUF file descriptors from
-//! the 3 VkDeviceMemory objects, query each image's plane-0 subresource
-//! layout to get stride and offset, and log the per-slot DRM metadata.
-//! Still no IPC.
+//! Iteration M1.3b (this file): connect to the daemon over the UDS
+//! passed via `--ipc`, send `EventMsg::Ready`, export 3 DMA-BUF FDs,
+//! send a `BindBuffers` event with them attached via SCM_RIGHTS, and
+//! wait for `ControlMsg::Shutdown` before tearing down. No rendering
+//! yet — the consumer sees valid (if zeroed) buffers.
 //!
 //! Roadmap for the next sub-iterations:
-//!   M1.3b wire IPC, send Ready + BindBuffers with the exported FDs
 //!   M1.4  per-frame vkCmdClearColorImage + FrameReady
 //!   M1.5  pipeline + triangle-strip solid quad on top of clear
-//!   M1.6  Shutdown handling
+//!   M1.6  graceful shutdown / crash-resilient FD teardown
 
 use std::ffi::{CStr, CString};
+use std::os::fd::AsRawFd;
+use std::os::unix::net::UnixStream;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
 
 use anyhow::{anyhow, Context, Result};
 use ash::{vk, Device, Entry, Instance};
+
+use kwallpaper_backend::ipc::proto::{ControlMsg, EventMsg};
+use kwallpaper_backend::ipc::uds::{recv_msg, send_msg};
 
 /// One logical frame slot in the triple buffer. Each slot owns a
 /// VkImage + the VkDeviceMemory backing it. The memory is allocated
@@ -59,10 +67,44 @@ const REQUIRED_DEVICE_EXTENSIONS: &[&CStr] = &[
     vk::EXT_QUEUE_FAMILY_FOREIGN_NAME,
 ];
 
+struct Args {
+    ipc_path: String,
+    width: u32,
+    height: u32,
+}
+
+fn parse_args() -> Result<Args> {
+    let mut ipc_path: Option<String> = None;
+    let mut width: u32 = 512;
+    let mut height: u32 = 512;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--ipc" => ipc_path = args.next(),
+            "--width" => width = args.next().and_then(|s| s.parse().ok()).unwrap_or(512),
+            "--height" => height = args.next().and_then(|s| s.parse().ok()).unwrap_or(512),
+            // Accepted for CLI parity with mock_renderer_host / the C++
+            // host. Ignored at this milestone.
+            "--fps" | "--scene" | "--assets" => {
+                let _ = args.next();
+            }
+            _ => {}
+        }
+    }
+    let ipc_path = ipc_path.ok_or_else(|| anyhow!("--ipc <path> is required"))?;
+    Ok(Args {
+        ipc_path,
+        width,
+        height,
+    })
+}
+
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp_micros()
         .init();
+
+    let args = parse_args()?;
 
     // Safety: `Entry::load()` dlopens libvulkan.so at runtime. We must
     // keep the returned Entry alive for the lifetime of the Instance
@@ -95,7 +137,7 @@ fn main() -> Result<()> {
     };
     log::info!("VkInstance created (api 1.2)");
 
-    let result = run(&instance);
+    let result = run(&instance, &args);
 
     unsafe {
         instance.destroy_instance(None);
@@ -103,7 +145,7 @@ fn main() -> Result<()> {
     result
 }
 
-fn run(instance: &Instance) -> Result<()> {
+fn run(instance: &Instance, args: &Args) -> Result<()> {
     let phys_devices = unsafe {
         instance
             .enumerate_physical_devices()
@@ -147,9 +189,8 @@ fn run(instance: &Instance) -> Result<()> {
     let device = create_device(instance, phys, gfx_family)?;
     log::info!("VkDevice created");
 
-    // For M1.2 hard-code 512x512 until --width/--height arrive in M1.3.
-    let width = 512u32;
-    let height = 512u32;
+    let width = args.width;
+    let height = args.height;
 
     let slots = create_frame_slots(instance, phys, &device, width, height)?;
     log::info!(
@@ -161,7 +202,7 @@ fn run(instance: &Instance) -> Result<()> {
     for (i, e) in exports.iter().enumerate() {
         log::info!(
             "  slot {i}: fd={} fourcc=0x{:08x} modifier=0x{:016x} offset={} stride={}",
-            std::os::fd::AsRawFd::as_raw_fd(&e.fd),
+            e.fd.as_raw_fd(),
             e.drm_fourcc,
             e.drm_modifier,
             e.plane0_offset,
@@ -169,9 +210,74 @@ fn run(instance: &Instance) -> Result<()> {
         );
     }
 
-    // The OwnedFds in `exports` drop here, closing the duplicated DMA-BUF
-    // FDs. In M1.3b they will instead be handed off to the IPC sender so
-    // the daemon can forward them to viewers via SCM_RIGHTS.
+    // ------ IPC: connect, send Ready, send BindBuffers ------
+    let stream = UnixStream::connect(&args.ipc_path)
+        .with_context(|| format!("connect {}", args.ipc_path))?;
+    log::info!("connected to daemon at {}", args.ipc_path);
+    send_msg(&stream, &EventMsg::Ready, &[]).context("send Ready")?;
+    log::info!("sent Ready");
+
+    // BindBuffers is uniform across slots (all 3 VkImages were created
+    // identically above). Assert they really agree before flattening
+    // into the wire schema.
+    let first = &exports[0];
+    for (i, e) in exports.iter().enumerate() {
+        if e.drm_fourcc != first.drm_fourcc
+            || e.drm_modifier != first.drm_modifier
+            || e.plane0_stride != first.plane0_stride
+            || e.plane0_offset != first.plane0_offset
+        {
+            return Err(anyhow!("slot {i} export layout disagrees with slot 0"));
+        }
+    }
+    let slot_size = u64::from(first.plane0_stride) * u64::from(height);
+    let bind = EventMsg::BindBuffers {
+        count: exports.len() as u32,
+        fourcc: first.drm_fourcc,
+        width,
+        height,
+        stride: first.plane0_stride as u32,
+        modifier: first.drm_modifier,
+        plane_offset: first.plane0_offset,
+        sizes: vec![slot_size; exports.len()],
+    };
+    let fds: Vec<std::os::fd::RawFd> = exports.iter().map(|e| e.fd.as_raw_fd()).collect();
+    send_msg(&stream, &bind, &fds).context("send BindBuffers")?;
+    log::info!("sent BindBuffers with {} fds", fds.len());
+
+    // ------ control reader: wait for Shutdown ------
+    let shutdown = Arc::new(AtomicBool::new(false));
+    {
+        let shutdown = shutdown.clone();
+        let read_stream = stream
+            .try_clone()
+            .context("clone stream for control reader")?;
+        thread::spawn(move || loop {
+            match recv_msg::<ControlMsg>(&read_stream) {
+                Ok((ControlMsg::Shutdown, _)) => {
+                    log::info!("received Shutdown");
+                    shutdown.store(true, Ordering::SeqCst);
+                    return;
+                }
+                Ok(_) => continue,
+                Err(e) => {
+                    log::warn!("control read error: {e}");
+                    shutdown.store(true, Ordering::SeqCst);
+                    return;
+                }
+            }
+        });
+    }
+
+    // Spin until the control thread flips the flag. M1.4 replaces this
+    // with a real frame loop that also emits FrameReady.
+    while !shutdown.load(Ordering::SeqCst) {
+        thread::sleep(std::time::Duration::from_millis(50));
+    }
+
+    // Drop exports so the exported FDs close only after the daemon has
+    // dup'd them during BindBuffers delivery (it already has, since
+    // send_msg returned).
     drop(exports);
 
     // Tear down in reverse order. Kernel refcounting keeps the DMA-BUFs
@@ -183,6 +289,7 @@ fn run(instance: &Instance) -> Result<()> {
         }
     }
     unsafe { device.destroy_device(None) };
+    log::info!("renderer exit 0");
     Ok(())
 }
 
