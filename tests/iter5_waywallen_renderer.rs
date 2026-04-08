@@ -134,6 +134,7 @@ fn waywallen_renderer_bind_handshake() {
                 image_index,
                 seq,
                 ts_ns,
+                ..
             } => {
                 assert!(ts_ns > 0, "ts_ns must be monotonic");
                 assert!((seq as i64) > last_seq, "seq must be monotonic");

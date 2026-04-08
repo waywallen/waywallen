@@ -136,6 +136,7 @@ fn main() {
             image_index: (seq % 3) as u32,
             seq,
             ts_ns: now_ns(),
+            has_sync_fd: false,
         };
         {
             let s = stream.lock().unwrap();

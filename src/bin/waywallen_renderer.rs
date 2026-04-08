@@ -1,706 +1,173 @@
 //! waywallen-renderer — Rust-side producer subprocess (M1 milestone).
-//!
-//! The long-term renderer is the C++ `open-wallpaper-engine` host under
-//! `/open-wallpaper-engine/host/`. While the C++ pipeline is under
-//! construction this Rust binary stands in as a minimal producer: it
-//! opens a headless Vulkan 1.2 context, allocates 3 DMA-BUF-backed
-//! VkImages, and cycles through them clearing to solid colours. The
-//! daemon routes the resulting frames to subscribed viewers exactly as
-//! it will for the real renderer.
-//!
-//! Iteration M1.4 (this file): in addition to the M1.3b handshake,
-//! open a graphics queue + transient command buffer and drive a real
-//! frame loop: each tick picks the next slot (seq % 3), records a
-//! `vkCmdClearColorImage` to a distinct solid colour (red/green/blue),
-//! submits + waits, and emits a `FrameReady` event. Pacing is driven by
-//! `--fps` (default 10).
-//!
-//! Roadmap for the next sub-iterations:
-//!   M1.5  pipeline + triangle-strip solid quad on top of clear
-//!   M1.6  graceful shutdown / crash-resilient FD teardown
 
-use std::ffi::{CStr, CString};
-use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
 use anyhow::{anyhow, Context, Result};
-use ash::{vk, Device, Entry, Instance};
+use ash::{vk, Entry, Instance};
 
 use kwallpaper_backend::ipc::proto::{ControlMsg, EventMsg};
 use kwallpaper_backend::ipc::uds::{recv_msg, send_msg};
 
-/// One logical frame slot in the triple buffer. Each slot owns a
-/// VkImage + the VkDeviceMemory backing it. The memory is allocated
-/// with VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT so its FD can be
-/// exported and handed to consumers via SCM_RIGHTS.
-struct FrameSlot {
-    image: vk::Image,
-    memory: vk::DeviceMemory,
-    width: u32,
-    height: u32,
-}
-
-/// Metadata needed by a consumer to import a slot's DMA-BUF back into
-/// its own Vulkan instance. Maps directly onto the fields the daemon
-/// forwards in `ipc::proto::BindBuffers`.
-#[derive(Debug)]
-struct SlotExport {
-    fd: std::os::fd::OwnedFd,
-    drm_fourcc: u32,
-    drm_modifier: u64,
-    plane0_offset: u64,
-    plane0_stride: u64,
-}
-
 const SLOT_COUNT: usize = 3;
 const RENDER_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
 
-/// Required device extensions for DMA-BUF export + DRM modifier paths.
-/// Matches the C++ host's `VulkanRender.cpp` when `offscreen=true`.
-const REQUIRED_DEVICE_EXTENSIONS: &[&CStr] = &[
-    vk::KHR_EXTERNAL_MEMORY_FD_NAME,
-    vk::EXT_EXTERNAL_MEMORY_DMA_BUF_NAME,
-    vk::EXT_IMAGE_DRM_FORMAT_MODIFIER_NAME,
-    vk::EXT_QUEUE_FAMILY_FOREIGN_NAME,
-];
+struct FrameSlot {
+    image: vk::Image,
+    memory: vk::DeviceMemory,
+}
 
+#[derive(Debug, serde::Deserialize)]
 struct Args {
-    ipc_path: String,
+    #[serde(default)]
+    ipc: Option<String>,
+    #[serde(default = "default_width")]
     width: u32,
+    #[serde(default = "default_height")]
     height: u32,
+    #[serde(default = "default_fps")]
     fps: u32,
 }
 
-fn parse_args() -> Result<Args> {
-    let mut ipc_path: Option<String> = None;
-    let mut width: u32 = 512;
-    let mut height: u32 = 512;
-    let mut fps: u32 = 10;
-    let mut args = std::env::args().skip(1);
-    while let Some(a) = args.next() {
+fn default_width() -> u32 { 1280 }
+fn default_height() -> u32 { 720 }
+fn default_fps() -> u32 { 60 }
+
+fn parse_args() -> Args {
+    let mut args = Args { ipc: None, width: 1280, height: 720, fps: 60 };
+    let mut iter = std::env::args().skip(1);
+    while let Some(a) = iter.next() {
         match a.as_str() {
-            "--ipc" => ipc_path = args.next(),
-            "--width" => width = args.next().and_then(|s| s.parse().ok()).unwrap_or(512),
-            "--height" => height = args.next().and_then(|s| s.parse().ok()).unwrap_or(512),
-            "--fps" => fps = args.next().and_then(|s| s.parse().ok()).unwrap_or(10),
-            // Accepted for CLI parity with mock_renderer_host / the C++
-            // host. Ignored at this milestone.
-            "--scene" | "--assets" => {
-                let _ = args.next();
-            }
-            _ => {}
+            "--ipc" => args.ipc = iter.next(),
+            "--width" => args.width = iter.next().and_then(|s| s.parse().ok()).unwrap_or(1280),
+            "--height" => args.height = iter.next().and_then(|s| s.parse().ok()).unwrap_or(720),
+            "--fps" => args.fps = iter.next().and_then(|s| s.parse().ok()).unwrap_or(60),
+            _ => { let _ = iter.next(); }
         }
     }
-    let ipc_path = ipc_path.ok_or_else(|| anyhow!("--ipc <path> is required"))?;
-    Ok(Args {
-        ipc_path,
-        width,
-        height,
-        fps: fps.max(1),
-    })
+    args
 }
 
 fn main() -> Result<()> {
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
-        .format_timestamp_micros()
-        .init();
-
-    let args = parse_args()?;
-
-    // Safety: `Entry::load()` dlopens libvulkan.so at runtime. We must
-    // keep the returned Entry alive for the lifetime of the Instance
-    // below, which is the case here.
-    let entry = unsafe { Entry::load().context("failed to load libvulkan.so")? };
-
-    let app_name = CString::new("waywallen-renderer").unwrap();
-    let engine_name = CString::new("waywallen").unwrap();
-    let app_info = vk::ApplicationInfo::default()
-        .application_name(app_name.as_c_str())
-        .application_version(vk::make_api_version(0, 0, 1, 0))
-        .engine_name(engine_name.as_c_str())
-        .engine_version(vk::make_api_version(0, 0, 1, 0))
-        .api_version(vk::make_api_version(0, 1, 2, 0));
-
-    // Instance-level extensions we require: external-memory capabilities
-    // must be queryable at the physical-device level before we pick one.
-    let instance_exts = [
-        vk::KHR_EXTERNAL_MEMORY_CAPABILITIES_NAME.as_ptr(),
-        vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_NAME.as_ptr(),
-    ];
-    let create_info = vk::InstanceCreateInfo::default()
-        .application_info(&app_info)
-        .enabled_extension_names(&instance_exts);
-
-    let instance: Instance = unsafe {
-        entry
-            .create_instance(&create_info, None)
-            .context("vkCreateInstance failed — check Vulkan driver installation")?
+    env_logger::init();
+    let args = parse_args();
+    let entry = unsafe { Entry::load().context("load Vulkan")? };
+    let app_info = vk::ApplicationInfo::default().api_version(vk::make_api_version(0, 1, 2, 0));
+    let instance = unsafe {
+        entry.create_instance(&vk::InstanceCreateInfo::default().application_info(&app_info), None)?
     };
-    log::info!("VkInstance created (api 1.2)");
-
+    unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM); }
     let result = run(&instance, &args);
-
-    unsafe {
-        instance.destroy_instance(None);
-    }
+    unsafe { instance.destroy_instance(None); }
     result
 }
 
 fn run(instance: &Instance, args: &Args) -> Result<()> {
-    let phys_devices = unsafe {
-        instance
-            .enumerate_physical_devices()
-            .context("enumerate_physical_devices failed")?
+    let phys = unsafe { instance.enumerate_physical_devices()?[0] };
+    let families = unsafe { instance.get_physical_device_queue_family_properties(phys) };
+    let gfx_family = families.iter().enumerate().find(|(_, f)| f.queue_flags.contains(vk::QueueFlags::GRAPHICS)).map(|(i, _)| i as u32).ok_or_else(|| anyhow!("no gfx"))?;
+    
+    let ext_names = [
+        vk::KHR_EXTERNAL_MEMORY_NAME.as_ptr(),
+        vk::KHR_EXTERNAL_MEMORY_FD_NAME.as_ptr(),
+        vk::EXT_EXTERNAL_MEMORY_DMA_BUF_NAME.as_ptr(),
+        vk::EXT_IMAGE_DRM_FORMAT_MODIFIER_NAME.as_ptr(),
+    ];
+    let device = unsafe {
+        instance.create_device(phys, &vk::DeviceCreateInfo::default()
+            .queue_create_infos(&[vk::DeviceQueueCreateInfo::default().queue_family_index(gfx_family).queue_priorities(&[1.0])])
+            .enabled_extension_names(&ext_names), None)?
     };
-    if phys_devices.is_empty() {
-        return Err(anyhow!("no Vulkan-capable physical devices"));
+
+    let mut slots = vec![];
+    let mem_props = unsafe { instance.get_physical_device_memory_properties(phys) };
+    for _ in 0..SLOT_COUNT {
+        let mut mod_list = vk::ImageDrmFormatModifierListCreateInfoEXT::default().drm_format_modifiers(&[0]);
+        let mut ext_info = vk::ExternalMemoryImageCreateInfo::default().handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
+        let img = unsafe { device.create_image(&vk::ImageCreateInfo::default().image_type(vk::ImageType::TYPE_2D).format(RENDER_FORMAT).extent(vk::Extent3D{width:args.width,height:args.height,depth:1}).mip_levels(1).array_layers(1).samples(vk::SampleCountFlags::TYPE_1).tiling(vk::ImageTiling::DRM_FORMAT_MODIFIER_EXT).usage(vk::ImageUsageFlags::TRANSFER_DST).push_next(&mut mod_list).push_next(&mut ext_info), None)? };
+        let req = unsafe { device.get_image_memory_requirements(img) };
+        let mtype = (0..mem_props.memory_type_count).find(|&i| (req.memory_type_bits & (1 << i)) != 0 && mem_props.memory_types[i as usize].property_flags.contains(vk::MemoryPropertyFlags::DEVICE_LOCAL)).unwrap_or(0);
+        let mut exp = vk::ExportMemoryAllocateInfo::default().handle_types(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
+        let mem = unsafe { device.allocate_memory(&vk::MemoryAllocateInfo::default().allocation_size(req.size).memory_type_index(mtype).push_next(&mut exp), None)? };
+        unsafe { device.bind_image_memory(img, mem, 0)?; }
+        slots.push(FrameSlot { image: img, memory: mem });
     }
 
-    let mut chosen: Option<vk::PhysicalDevice> = None;
-    for &pd in &phys_devices {
-        let props = unsafe { instance.get_physical_device_properties(pd) };
-        let name = unsafe { CStr::from_ptr(props.device_name.as_ptr()) }
-            .to_string_lossy()
-            .into_owned();
-        let has_all = check_device_extensions(instance, pd)?;
-        log::info!(
-            "  candidate: {name} (type={:?}, ext_ok={has_all})",
-            props.device_type
-        );
-        if has_all && chosen.is_none() {
-            chosen = Some(pd);
-        }
+    let ext_mem_fd = ash::khr::external_memory_fd::Device::new(instance, &device);
+    let drm_mod = ash::ext::image_drm_format_modifier::Device::new(instance, &device);
+    
+    let mut exports = vec![];
+    for s in &slots {
+        let fd = unsafe { ext_mem_fd.get_memory_fd(&vk::MemoryGetFdInfoKHR::default().memory(s.memory).handle_type(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT))? };
+        let mut props = vk::ImageDrmFormatModifierPropertiesEXT::default();
+        unsafe { drm_mod.get_image_drm_format_modifier_properties(s.image, &mut props)?; }
+        let layout = unsafe { device.get_image_subresource_layout(s.image, vk::ImageSubresource { aspect_mask: vk::ImageAspectFlags::MEMORY_PLANE_0_EXT, mip_level: 0, array_layer: 0 }) };
+        exports.push((fd, props.drm_format_modifier, layout.row_pitch));
     }
 
-    let phys = chosen.ok_or_else(|| {
-        anyhow!(
-            "no physical device supports all required extensions: {:?}",
-            REQUIRED_DEVICE_EXTENSIONS
-        )
-    })?;
-    let props = unsafe { instance.get_physical_device_properties(phys) };
-    let name = unsafe { CStr::from_ptr(props.device_name.as_ptr()) }
-        .to_string_lossy()
-        .into_owned();
-    log::info!("picked device: {name}");
-
-    let gfx_family = pick_graphics_queue_family(instance, phys)?;
-    log::info!("graphics queue family: {gfx_family}");
-
-    let device = create_device(instance, phys, gfx_family)?;
-    log::info!("VkDevice created");
-
-    let width = args.width;
-    let height = args.height;
-
-    let slots = create_frame_slots(instance, phys, &device, width, height)?;
-    log::info!(
-        "allocated {} exportable DMA-BUF frame slots ({width}x{height})",
-        slots.len()
-    );
-
-    let exports = export_slots(instance, &device, &slots)?;
-    for (i, e) in exports.iter().enumerate() {
-        log::info!(
-            "  slot {i}: fd={} fourcc=0x{:08x} modifier=0x{:016x} offset={} stride={}",
-            e.fd.as_raw_fd(),
-            e.drm_fourcc,
-            e.drm_modifier,
-            e.plane0_offset,
-            e.plane0_stride,
-        );
-    }
-
-    // ------ IPC: connect, send Ready, send BindBuffers ------
-    let stream = UnixStream::connect(&args.ipc_path)
-        .with_context(|| format!("connect {}", args.ipc_path))?;
-    log::info!("connected to daemon at {}", args.ipc_path);
-    send_msg(&stream, &EventMsg::Ready, &[]).context("send Ready")?;
-    log::info!("sent Ready");
-
-    // BindBuffers is uniform across slots (all 3 VkImages were created
-    // identically above). Assert they really agree before flattening
-    // into the wire schema.
-    let first = &exports[0];
-    for (i, e) in exports.iter().enumerate() {
-        if e.drm_fourcc != first.drm_fourcc
-            || e.drm_modifier != first.drm_modifier
-            || e.plane0_stride != first.plane0_stride
-            || e.plane0_offset != first.plane0_offset
-        {
-            return Err(anyhow!("slot {i} export layout disagrees with slot 0"));
-        }
-    }
-    let slot_size = u64::from(first.plane0_stride) * u64::from(height);
+    let ipc_path = args.ipc.as_ref().ok_or_else(|| anyhow!("--ipc required"))?;
+    let stream = UnixStream::connect(ipc_path)?;
+    send_msg(&stream, &EventMsg::Ready, &[])?;
+    
     let bind = EventMsg::BindBuffers {
-        count: exports.len() as u32,
-        fourcc: first.drm_fourcc,
-        width,
-        height,
-        stride: first.plane0_stride as u32,
-        modifier: first.drm_modifier,
-        plane_offset: first.plane0_offset,
-        sizes: vec![slot_size; exports.len()],
+        count: SLOT_COUNT as u32, fourcc: 0x34324241, width: args.width, height: args.height,
+        stride: exports[0].2 as u32, modifier: exports[0].1, plane_offset: 0,
+        sizes: vec![exports[0].2 * args.height as u64; SLOT_COUNT],
     };
-    let fds: Vec<std::os::fd::RawFd> = exports.iter().map(|e| e.fd.as_raw_fd()).collect();
-    send_msg(&stream, &bind, &fds).context("send BindBuffers")?;
-    log::info!("sent BindBuffers with {} fds", fds.len());
+    send_msg(&stream, &bind, &exports.iter().map(|e| e.0).collect::<Vec<_>>())?;
 
-    // ------ control reader: wait for Shutdown ------
     let shutdown = Arc::new(AtomicBool::new(false));
-    {
-        let shutdown = shutdown.clone();
-        let read_stream = stream
-            .try_clone()
-            .context("clone stream for control reader")?;
-        thread::spawn(move || loop {
-            match recv_msg::<ControlMsg>(&read_stream) {
-                Ok((ControlMsg::Shutdown, _)) => {
-                    log::info!("received Shutdown");
-                    shutdown.store(true, Ordering::SeqCst);
-                    return;
-                }
-                Ok(_) => continue,
-                Err(e) => {
-                    log::warn!("control read error: {e}");
-                    shutdown.store(true, Ordering::SeqCst);
-                    return;
-                }
-            }
-        });
-    }
+    let s2 = shutdown.clone();
+    let rs = stream.try_clone()?;
+    thread::spawn(move || {
+        while let Ok((ControlMsg::Shutdown, _)) = recv_msg::<ControlMsg>(&rs) {
+            s2.store(true, Ordering::SeqCst);
+            break;
+        }
+    });
 
-    // ------ frame loop ------
     let queue = unsafe { device.get_device_queue(gfx_family, 0) };
-    let cmd_pool = unsafe {
-        device
-            .create_command_pool(
-                &vk::CommandPoolCreateInfo::default()
-                    .queue_family_index(gfx_family)
-                    .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER),
-                None,
-            )
-            .context("create_command_pool")?
-    };
-    let cmd_buf = unsafe {
-        device
-            .allocate_command_buffers(
-                &vk::CommandBufferAllocateInfo::default()
-                    .command_pool(cmd_pool)
-                    .level(vk::CommandBufferLevel::PRIMARY)
-                    .command_buffer_count(1),
-            )
-            .context("allocate_command_buffers")?[0]
-    };
+    let cmd_pool = unsafe { device.create_command_pool(&vk::CommandPoolCreateInfo::default().queue_family_index(gfx_family).flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER), None)? };
+    let cmd_buf = unsafe { device.allocate_command_buffers(&vk::CommandBufferAllocateInfo::default().command_pool(cmd_pool).level(vk::CommandBufferLevel::PRIMARY).command_buffer_count(1))?[0] };
 
-    // One-time initial layout transition UNDEFINED → GENERAL for every
-    // slot so the subsequent clears see a valid layout.
-    initial_layout_transition(&device, queue, cmd_buf, &slots)?;
+    // Initial transition to GENERAL
+    unsafe {
+        device.begin_command_buffer(cmd_buf, &vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT))?;
+        for s in &slots {
+            let b = vk::ImageMemoryBarrier::default().old_layout(vk::ImageLayout::UNDEFINED).new_layout(vk::ImageLayout::GENERAL).image(s.image).subresource_range(vk::ImageSubresourceRange::default().aspect_mask(vk::ImageAspectFlags::COLOR).level_count(1).layer_count(1));
+            device.cmd_pipeline_barrier(cmd_buf, vk::PipelineStageFlags::TOP_OF_PIPE, vk::PipelineStageFlags::TRANSFER, vk::DependencyFlags::empty(), &[], &[], &[b]);
+        }
+        device.end_command_buffer(cmd_buf)?;
+        device.queue_submit(queue, &[vk::SubmitInfo::default().command_buffers(&[cmd_buf])], vk::Fence::null())?;
+        device.queue_wait_idle(queue)?;
+    }
 
     let frame_period = std::time::Duration::from_secs_f64(1.0 / args.fps as f64);
     let start = std::time::Instant::now();
-    let colors: [[f32; 4]; 3] = [
-        [1.0, 0.0, 0.0, 1.0], // red
-        [0.0, 1.0, 0.0, 1.0], // green
-        [0.0, 0.0, 1.0, 1.0], // blue
-    ];
     let mut seq: u64 = 0;
     while !shutdown.load(Ordering::SeqCst) {
-        let slot = (seq as usize) % slots.len();
-        let color = colors[slot];
-        record_and_submit_clear(&device, queue, cmd_buf, slots[slot].image, color)
-            .with_context(|| format!("record/submit slot {slot} seq {seq}"))?;
-
-        let ts_ns = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0);
-        let ev = EventMsg::FrameReady {
-            image_index: slot as u32,
-            seq,
-            ts_ns,
-        };
-        if let Err(e) = send_msg(&stream, &ev, &[]) {
-            log::warn!("send FrameReady failed: {e}; exiting loop");
-            break;
+        let slot = (seq as usize) % SLOT_COUNT;
+        let r = (seq as f32 * 0.1).sin() * 0.5 + 0.5;
+        unsafe {
+            device.begin_command_buffer(cmd_buf, &vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT))?;
+            device.cmd_clear_color_image(cmd_buf, slots[slot].image, vk::ImageLayout::GENERAL, &vk::ClearColorValue { float32: [r, 0.5, 0.5, 1.0] }, &[vk::ImageSubresourceRange::default().aspect_mask(vk::ImageAspectFlags::COLOR).level_count(1).layer_count(1)]);
+            device.end_command_buffer(cmd_buf)?;
+            device.queue_submit(queue, &[vk::SubmitInfo::default().command_buffers(&[cmd_buf])], vk::Fence::null())?;
+            device.queue_wait_idle(queue)?;
         }
-
+        let _ = send_msg(&stream, &EventMsg::FrameReady { image_index: slot as u32, seq, ts_ns: 0, has_sync_fd: false }, &[]);
         seq += 1;
-        let next = start + frame_period * (seq as u32);
+        let next = start + frame_period * seq as u32;
         let now = std::time::Instant::now();
-        if next > now {
-            let remaining = next - now;
-            // Chunk the sleep so shutdown latency stays bounded.
-            let step = std::time::Duration::from_millis(10);
-            let mut slept = std::time::Duration::ZERO;
-            while slept < remaining && !shutdown.load(Ordering::SeqCst) {
-                let t = step.min(remaining - slept);
-                thread::sleep(t);
-                slept += t;
-            }
-        }
+        if next > now { thread::sleep(next - now); }
     }
-    log::info!("frame loop stopped after {seq} frames");
 
-    // Wait for any in-flight GPU work before tearing the pool down.
     unsafe {
-        let _ = device.device_wait_idle();
-        device.destroy_command_pool(cmd_pool, None);
-    }
-
-    // Drop exports so the exported FDs close only after the daemon has
-    // dup'd them during BindBuffers delivery (it already has, since
-    // send_msg returned).
-    drop(exports);
-
-    // Tear down in reverse order. Kernel refcounting keeps the DMA-BUFs
-    // alive across consumer imports regardless of local cleanup order.
-    for slot in &slots {
-        unsafe {
-            device.destroy_image(slot.image, None);
-            device.free_memory(slot.memory, None);
-        }
-    }
-    unsafe { device.destroy_device(None) };
-    log::info!("renderer exit 0");
-    Ok(())
-}
-
-fn initial_layout_transition(
-    device: &Device,
-    queue: vk::Queue,
-    cmd_buf: vk::CommandBuffer,
-    slots: &[FrameSlot],
-) -> Result<()> {
-    unsafe {
-        device
-            .reset_command_buffer(cmd_buf, vk::CommandBufferResetFlags::empty())
-            .context("reset cmd buf")?;
-        device
-            .begin_command_buffer(
-                cmd_buf,
-                &vk::CommandBufferBeginInfo::default()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-            )
-            .context("begin cmd buf")?;
-        let barriers: Vec<vk::ImageMemoryBarrier> = slots
-            .iter()
-            .map(|s| {
-                vk::ImageMemoryBarrier::default()
-                    .src_access_mask(vk::AccessFlags::empty())
-                    .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
-                    .old_layout(vk::ImageLayout::UNDEFINED)
-                    .new_layout(vk::ImageLayout::GENERAL)
-                    .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
-                    .image(s.image)
-                    .subresource_range(color_range())
-            })
-            .collect();
-        device.cmd_pipeline_barrier(
-            cmd_buf,
-            vk::PipelineStageFlags::TOP_OF_PIPE,
-            vk::PipelineStageFlags::TRANSFER,
-            vk::DependencyFlags::empty(),
-            &[],
-            &[],
-            &barriers,
-        );
-        device.end_command_buffer(cmd_buf).context("end cmd buf")?;
-
-        let cmd_bufs = [cmd_buf];
-        let submit = vk::SubmitInfo::default().command_buffers(&cmd_bufs);
-        device
-            .queue_submit(queue, &[submit], vk::Fence::null())
-            .context("queue submit init barriers")?;
-        device.queue_wait_idle(queue).context("queue wait idle")?;
+        device.device_wait_idle()?;
+        for s in slots { device.destroy_image(s.image, None); device.free_memory(s.memory, None); }
+        device.destroy_device(None);
     }
     Ok(())
-}
-
-fn record_and_submit_clear(
-    device: &Device,
-    queue: vk::Queue,
-    cmd_buf: vk::CommandBuffer,
-    image: vk::Image,
-    color: [f32; 4],
-) -> Result<()> {
-    unsafe {
-        device
-            .reset_command_buffer(cmd_buf, vk::CommandBufferResetFlags::empty())
-            .context("reset cmd buf")?;
-        device
-            .begin_command_buffer(
-                cmd_buf,
-                &vk::CommandBufferBeginInfo::default()
-                    .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
-            )
-            .context("begin cmd buf")?;
-        let clear = vk::ClearColorValue { float32: color };
-        let ranges = [color_range()];
-        device.cmd_clear_color_image(
-            cmd_buf,
-            image,
-            vk::ImageLayout::GENERAL,
-            &clear,
-            &ranges,
-        );
-        device.end_command_buffer(cmd_buf).context("end cmd buf")?;
-
-        let cmd_bufs = [cmd_buf];
-        let submit = vk::SubmitInfo::default().command_buffers(&cmd_bufs);
-        device
-            .queue_submit(queue, &[submit], vk::Fence::null())
-            .context("queue submit clear")?;
-        device.queue_wait_idle(queue).context("queue wait idle")?;
-    }
-    Ok(())
-}
-
-fn color_range() -> vk::ImageSubresourceRange {
-    vk::ImageSubresourceRange::default()
-        .aspect_mask(vk::ImageAspectFlags::COLOR)
-        .base_mip_level(0)
-        .level_count(1)
-        .base_array_layer(0)
-        .layer_count(1)
-}
-
-/// Map an R8G8B8A8_UNORM VkFormat to its DRM fourcc code. Matches
-/// `VkFormatToDrmFourcc()` in the C++ host (TextureCache.cpp).
-fn vk_format_to_drm_fourcc(fmt: vk::Format) -> Result<u32> {
-    use drm_fourcc::DrmFourcc;
-    match fmt {
-        vk::Format::R8G8B8A8_UNORM => Ok(DrmFourcc::Abgr8888 as u32),
-        vk::Format::B8G8R8A8_UNORM => Ok(DrmFourcc::Argb8888 as u32),
-        _ => Err(anyhow!("no DRM fourcc mapping for {fmt:?}")),
-    }
-}
-
-fn export_slots(
-    instance: &Instance,
-    device: &Device,
-    slots: &[FrameSlot],
-) -> Result<Vec<SlotExport>> {
-    use std::os::fd::FromRawFd;
-
-    let ext_mem_fd = ash::khr::external_memory_fd::Device::new(instance, device);
-    let drm_mod = ash::ext::image_drm_format_modifier::Device::new(instance, device);
-
-    let mut out = Vec::with_capacity(slots.len());
-    for (i, slot) in slots.iter().enumerate() {
-        let fd_info = vk::MemoryGetFdInfoKHR::default()
-            .memory(slot.memory)
-            .handle_type(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
-        let raw_fd = unsafe {
-            ext_mem_fd
-                .get_memory_fd(&fd_info)
-                .with_context(|| format!("vkGetMemoryFdKHR failed for slot {i}"))?
-        };
-        // SAFETY: raw_fd is a freshly-created OS fd the kernel just handed
-        // us; taking ownership is correct and releases on drop.
-        let owned_fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw_fd) };
-
-        // Query the modifier the driver actually ended up assigning. With
-        // only DRM_FORMAT_MOD_LINEAR in the list this will always be 0,
-        // but keep the query in place so future tiled modifiers light up
-        // automatically.
-        let mut mod_props = vk::ImageDrmFormatModifierPropertiesEXT::default();
-        unsafe {
-            drm_mod
-                .get_image_drm_format_modifier_properties(slot.image, &mut mod_props)
-                .with_context(|| format!("vkGetImageDrmFormatModifierPropertiesEXT slot {i}"))?;
-        }
-
-        // Plane-0 layout: vkGetImageSubresourceLayout needs
-        // MEMORY_PLANE_0_BIT aspect for DRM-modifier images.
-        let subresource = vk::ImageSubresource {
-            aspect_mask: vk::ImageAspectFlags::MEMORY_PLANE_0_EXT,
-            mip_level: 0,
-            array_layer: 0,
-        };
-        let layout = unsafe { device.get_image_subresource_layout(slot.image, subresource) };
-
-        out.push(SlotExport {
-            fd: owned_fd,
-            drm_fourcc: vk_format_to_drm_fourcc(RENDER_FORMAT)?,
-            drm_modifier: mod_props.drm_format_modifier,
-            plane0_offset: layout.offset,
-            plane0_stride: layout.row_pitch,
-        });
-    }
-    Ok(out)
-}
-
-fn pick_graphics_queue_family(instance: &Instance, phys: vk::PhysicalDevice) -> Result<u32> {
-    let families = unsafe { instance.get_physical_device_queue_family_properties(phys) };
-    families
-        .iter()
-        .enumerate()
-        .find(|(_, f)| f.queue_flags.contains(vk::QueueFlags::GRAPHICS))
-        .map(|(i, _)| i as u32)
-        .ok_or_else(|| anyhow!("no graphics queue family"))
-}
-
-fn create_device(
-    instance: &Instance,
-    phys: vk::PhysicalDevice,
-    gfx_family: u32,
-) -> Result<Device> {
-    let priorities = [1.0f32];
-    let queue_infos = [vk::DeviceQueueCreateInfo::default()
-        .queue_family_index(gfx_family)
-        .queue_priorities(&priorities)];
-
-    // Raw const* -> needs stable backing store for the lifetime of the
-    // DeviceCreateInfo.
-    let ext_ptrs: Vec<*const i8> = REQUIRED_DEVICE_EXTENSIONS
-        .iter()
-        .map(|e| e.as_ptr())
-        .collect();
-
-    let features = vk::PhysicalDeviceFeatures::default();
-    let create_info = vk::DeviceCreateInfo::default()
-        .queue_create_infos(&queue_infos)
-        .enabled_extension_names(&ext_ptrs)
-        .enabled_features(&features);
-
-    let device = unsafe {
-        instance
-            .create_device(phys, &create_info, None)
-            .context("vkCreateDevice failed")?
-    };
-    Ok(device)
-}
-
-fn create_frame_slots(
-    instance: &Instance,
-    phys: vk::PhysicalDevice,
-    device: &Device,
-    width: u32,
-    height: u32,
-) -> Result<Vec<FrameSlot>> {
-    let mut slots = Vec::with_capacity(SLOT_COUNT);
-    for i in 0..SLOT_COUNT {
-        let slot = create_one_slot(instance, phys, device, width, height)
-            .with_context(|| format!("failed to allocate slot {i}"))?;
-        slots.push(slot);
-    }
-    Ok(slots)
-}
-
-fn create_one_slot(
-    instance: &Instance,
-    phys: vk::PhysicalDevice,
-    device: &Device,
-    width: u32,
-    height: u32,
-) -> Result<FrameSlot> {
-    // Pick DRM_FORMAT_MOD_LINEAR (0) to match what the C++ host currently
-    // exports. Future work: query vkGetPhysicalDeviceImageFormatProperties2
-    // + VkPhysicalDeviceImageDrmFormatModifierInfoEXT to negotiate a
-    // tiled modifier with the consumer.
-    let modifiers = [0u64]; // DRM_FORMAT_MOD_LINEAR
-    let mut modifier_list = vk::ImageDrmFormatModifierListCreateInfoEXT::default()
-        .drm_format_modifiers(&modifiers);
-
-    let handle_types = vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT;
-    let mut external_info =
-        vk::ExternalMemoryImageCreateInfo::default().handle_types(handle_types);
-
-    let image_info = vk::ImageCreateInfo::default()
-        .image_type(vk::ImageType::TYPE_2D)
-        .format(RENDER_FORMAT)
-        .extent(vk::Extent3D {
-            width,
-            height,
-            depth: 1,
-        })
-        .mip_levels(1)
-        .array_layers(1)
-        .samples(vk::SampleCountFlags::TYPE_1)
-        .tiling(vk::ImageTiling::DRM_FORMAT_MODIFIER_EXT)
-        .usage(vk::ImageUsageFlags::COLOR_ATTACHMENT | vk::ImageUsageFlags::TRANSFER_DST)
-        .sharing_mode(vk::SharingMode::EXCLUSIVE)
-        .initial_layout(vk::ImageLayout::UNDEFINED)
-        .push_next(&mut modifier_list)
-        .push_next(&mut external_info);
-
-    let image = unsafe {
-        device
-            .create_image(&image_info, None)
-            .context("vkCreateImage (DMA-BUF) failed")?
-    };
-
-    let mem_req = unsafe { device.get_image_memory_requirements(image) };
-
-    let mem_props = unsafe { instance.get_physical_device_memory_properties(phys) };
-    let mem_type_index = pick_memory_type(
-        &mem_props,
-        mem_req.memory_type_bits,
-        vk::MemoryPropertyFlags::DEVICE_LOCAL,
-    )
-    .ok_or_else(|| anyhow!("no suitable device-local memory type"))?;
-
-    let mut export_info =
-        vk::ExportMemoryAllocateInfo::default().handle_types(handle_types);
-    let mut dedicated_info = vk::MemoryDedicatedAllocateInfo::default().image(image);
-    let alloc_info = vk::MemoryAllocateInfo::default()
-        .allocation_size(mem_req.size)
-        .memory_type_index(mem_type_index)
-        .push_next(&mut export_info)
-        .push_next(&mut dedicated_info);
-
-    let memory = unsafe {
-        device
-            .allocate_memory(&alloc_info, None)
-            .context("vkAllocateMemory (exportable) failed")?
-    };
-
-    unsafe {
-        device
-            .bind_image_memory(image, memory, 0)
-            .context("vkBindImageMemory failed")?;
-    }
-
-    Ok(FrameSlot {
-        image,
-        memory,
-        width,
-        height,
-    })
-}
-
-fn pick_memory_type(
-    mem_props: &vk::PhysicalDeviceMemoryProperties,
-    type_bits: u32,
-    required_flags: vk::MemoryPropertyFlags,
-) -> Option<u32> {
-    (0..mem_props.memory_type_count).find(|&i| {
-        let bit = 1u32 << i;
-        let t = mem_props.memory_types[i as usize];
-        (type_bits & bit) != 0 && t.property_flags.contains(required_flags)
-    })
-}
-
-fn check_device_extensions(instance: &Instance, pd: vk::PhysicalDevice) -> Result<bool> {
-    let available = unsafe {
-        instance
-            .enumerate_device_extension_properties(pd)
-            .context("enumerate_device_extension_properties failed")?
-    };
-    for required in REQUIRED_DEVICE_EXTENSIONS {
-        let found = available.iter().any(|ext| {
-            let n = unsafe { CStr::from_ptr(ext.extension_name.as_ptr()) };
-            n == *required
-        });
-        if !found {
-            log::debug!("  missing extension: {}", required.to_string_lossy());
-            return Ok(false);
-        }
-    }
-    Ok(true)
 }

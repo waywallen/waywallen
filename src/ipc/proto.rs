@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Protocol version. Bumped on any breaking schema change.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // Daemon → renderer-host  (control plane)
@@ -69,11 +69,15 @@ pub enum EventMsg {
     },
 
     /// A frame was produced. `image_index` indexes into the FD array
-    /// delivered by the preceding `BindBuffers`. No FDs are attached here.
+    /// delivered by the preceding `BindBuffers`. No FDs are attached here
+    /// unless `has_sync_fd` is true.
     FrameReady {
         image_index: u32,
         seq: u64,
         ts_ns: u64,
+        /// If true, exactly one FD is attached to this message: a sync_file.
+        #[serde(default)]
+        has_sync_fd: bool,
     },
 
     Error {

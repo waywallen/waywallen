@@ -155,6 +155,7 @@ async fn end_to_end_dma_buf_dump() {
                 image_index,
                 seq,
                 ts_ns,
+                ..
             } => {
                 assert!(image_index < 3, "image_index in [0,3): {image_index}");
                 assert_eq!(seq, expected as u64, "seq monotonic");

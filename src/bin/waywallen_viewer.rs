@@ -109,6 +109,8 @@ struct SharedIpc {
     frame_count: AtomicU32,
     /// Set by the IPC thread on socket error / clean shutdown.
     ipc_dead: AtomicBool,
+    /// M3: sync_file FD for the next blit. Consumed by the draw loop.
+    pending_sync_fd: Mutex<Option<OwnedFd>>,
 }
 
 impl SharedIpc {
@@ -118,6 +120,7 @@ impl SharedIpc {
             current_slot: AtomicU32::new(0),
             frame_count: AtomicU32::new(0),
             ipc_dead: AtomicBool::new(false),
+            pending_sync_fd: Mutex::new(None),
         }
     }
 }
@@ -140,6 +143,24 @@ fn spawn_ipc_thread(
 }
 
 fn run_ipc(viewer_sock: &std::path::Path, renderer_id: &str, shared: &SharedIpc) -> Result<()> {
+    loop {
+        shared.ipc_dead.store(false, Ordering::SeqCst);
+        let res = run_ipc_session(viewer_sock, renderer_id, shared);
+        shared.ipc_dead.store(true, Ordering::SeqCst);
+
+        match res {
+            Ok(_) => log::info!("IPC session ended cleanly; reconnecting in 2s..."),
+            Err(e) => log::error!("IPC session failed: {e:#}; reconnecting in 2s..."),
+        }
+        thread::sleep(std::time::Duration::from_secs(2));
+    }
+}
+
+fn run_ipc_session(
+    viewer_sock: &std::path::Path,
+    renderer_id: &str,
+    shared: &SharedIpc,
+) -> Result<()> {
     let stream = UnixStream::connect(viewer_sock)
         .with_context(|| format!("connect {}", viewer_sock.display()))?;
     log::info!("viewer IPC connected to {}", viewer_sock.display());
@@ -204,11 +225,18 @@ fn run_ipc(viewer_sock: &std::path::Path, renderer_id: &str, shared: &SharedIpc)
     // Stream FrameReady events.
     loop {
         match recv_msg::<EventMsg>(&stream) {
-            Ok((EventMsg::FrameReady { image_index, seq, .. }, _fds)) => {
+            Ok((EventMsg::FrameReady { image_index, seq, has_sync_fd, .. }, fds)) => {
                 shared.current_slot.store(image_index, Ordering::SeqCst);
                 let n = shared.frame_count.fetch_add(1, Ordering::SeqCst) + 1;
                 if n % 30 == 0 {
                     log::info!("viewer observed {n} frames (seq={seq}, slot={image_index})");
+                }
+
+                if has_sync_fd {
+                    if let Some(fd) = fds.into_iter().next() {
+                        let mut guard = shared.pending_sync_fd.lock().map_err(|e| anyhow!("sync_fd mutex: {e}"))?;
+                        *guard = Some(fd);
+                    }
                 }
             }
             Ok((other, _)) => {
@@ -333,6 +361,7 @@ struct VulkanState {
     graphics_queue: vk::Queue,
 
     swapchain_loader: khr::swapchain::Device,
+    semaphore_loader: ash::khr::external_semaphore_fd::Device,
     swapchain: vk::SwapchainKHR,
     swapchain_format: vk::Format,
     swapchain_extent: vk::Extent2D,
@@ -343,6 +372,7 @@ struct VulkanState {
 
     image_available: vk::Semaphore,
     render_finished: vk::Semaphore,
+    sync_semaphore: vk::Semaphore,
     in_flight: vk::Fence,
 
     // M2.4: imported DMA-BUF slots, populated lazily on first draw
@@ -352,6 +382,8 @@ struct VulkanState {
     // Shared IPC state, cloned from the App so the draw loop can read
     // the latest slot index and the BindState.
     shared: Arc<SharedIpc>,
+
+    is_stale: bool,
 }
 
 /// Local mirror of the renderer's triple buffer: 3 VkImages + the
@@ -432,6 +464,7 @@ impl VulkanState {
             vk::KHR_EXTERNAL_MEMORY_FD_NAME.as_ptr(),
             vk::EXT_EXTERNAL_MEMORY_DMA_BUF_NAME.as_ptr(),
             vk::EXT_IMAGE_DRM_FORMAT_MODIFIER_NAME.as_ptr(),
+            vk::KHR_EXTERNAL_SEMAPHORE_FD_NAME.as_ptr(),
         ];
         let priorities = [1.0f32];
         let queue_infos = [vk::DeviceQueueCreateInfo::default()
@@ -450,6 +483,7 @@ impl VulkanState {
         let graphics_queue = unsafe { device.get_device_queue(graphics_family, 0) };
 
         let swapchain_loader = khr::swapchain::Device::new(&instance, &device);
+        let semaphore_loader = ash::khr::external_semaphore_fd::Device::new(&instance, &device);
         let (swapchain, swapchain_format, swapchain_extent, swapchain_images) =
             create_swapchain(
                 &instance,
@@ -461,6 +495,7 @@ impl VulkanState {
                 graphics_family,
                 window.inner_size().width,
                 window.inner_size().height,
+                vk::SwapchainKHR::null(),
             )?;
         log::info!(
             "swapchain: {}x{} format={:?} images={}",
@@ -501,6 +536,11 @@ impl VulkanState {
                 .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
                 .context("semaphore")?
         };
+        let sync_semaphore = unsafe {
+            device
+                .create_semaphore(&vk::SemaphoreCreateInfo::default(), None)
+                .context("semaphore")?
+        };
         let in_flight = unsafe {
             device
                 .create_fence(
@@ -521,6 +561,7 @@ impl VulkanState {
             device,
             graphics_queue,
             swapchain_loader,
+            semaphore_loader,
             swapchain,
             swapchain_format,
             swapchain_extent,
@@ -529,9 +570,11 @@ impl VulkanState {
             cmd_buffers,
             image_available,
             render_finished,
+            sync_semaphore,
             in_flight,
             imported: None,
             shared,
+            is_stale: false,
         })
     }
 
@@ -541,9 +584,6 @@ impl VulkanState {
     /// the FDs into Vulkan exactly once and then mark the slot
     /// permanently imported.
     fn try_import_buffers(&mut self) -> Result<()> {
-        if self.imported.is_some() {
-            return Ok(());
-        }
         let mut bind_guard = match self.shared.bind.lock() {
             Ok(g) => g,
             Err(_) => return Ok(()),
@@ -553,6 +593,7 @@ impl VulkanState {
             None => return Ok(()),
         };
         drop(bind_guard);
+
         log::info!(
             "viewer importing 3 DMA-BUF slots ({}x{} fourcc=0x{:08x} mod=0x{:016x})",
             bind.width,
@@ -560,19 +601,110 @@ impl VulkanState {
             bind.fourcc,
             bind.modifier
         );
+
+        // If we already have imported slots, destroy them first. This
+        // happens on renderer restart/rebind.
+        if let Some(old) = self.imported.take() {
+            log::info!("destroying old imported slots before re-import");
+            unsafe {
+                let _ = self.device.device_wait_idle();
+                for img in old.images {
+                    self.device.destroy_image(img, None);
+                }
+                for mem in old.memories {
+                    self.device.free_memory(mem, None);
+                }
+            }
+        }
+
         let imported = import_dma_buf_slots(&self.instance, &self.device, self.physical, bind)
             .context("import_dma_buf_slots")?;
         self.imported = Some(imported);
         Ok(())
     }
 
-    fn handle_resize(&mut self, _w: u32, _h: u32) -> Result<()> {
-        // Swapchain recreation lands with M2.6 — for the bring-up iter
-        // a stale swapchain just keeps rendering the clear colour.
+    fn handle_resize(&mut self, w: u32, h: u32) -> Result<()> {
+        if w == 0 || h == 0 {
+            return Ok(());
+        }
+        log::info!("resize to {w}x{h}, recreating swapchain");
+        unsafe {
+            self.device
+                .device_wait_idle()
+                .context("device_wait_idle before resize")?;
+        }
+
+        let (swapchain, format, extent, images) = create_swapchain(
+            &self.instance,
+            &self.device,
+            &self.surface_loader,
+            &self.swapchain_loader,
+            self.physical,
+            self.surface,
+            self.graphics_family,
+            w,
+            h,
+            self.swapchain,
+        )?;
+
+        unsafe {
+            // Destroy the old swapchain. This also destroys the old
+            // swapchain images, so we must refresh our local vec.
+            self.swapchain_loader.destroy_swapchain(self.swapchain, None);
+
+            // Re-allocate command buffers to match the new image count.
+            self.device
+                .free_command_buffers(self.cmd_pool, &self.cmd_buffers);
+            self.cmd_buffers = self.device
+                .allocate_command_buffers(
+                    &vk::CommandBufferAllocateInfo::default()
+                        .command_pool(self.cmd_pool)
+                        .level(vk::CommandBufferLevel::PRIMARY)
+                        .command_buffer_count(images.len() as u32),
+                )
+                .context("allocate_command_buffers after resize")?;
+        }
+
+        self.swapchain = swapchain;
+        self.swapchain_format = format;
+        self.swapchain_extent = extent;
+        self.swapchain_images = images;
+
         Ok(())
     }
 
     fn draw(&mut self) -> Result<()> {
+        let dead = self.shared.ipc_dead.load(Ordering::Relaxed);
+        if dead != self.is_stale {
+            self.is_stale = dead;
+            let title = if dead {
+                "waywallen viewer [stale]"
+            } else {
+                "waywallen viewer"
+            };
+            self.window.set_title(title);
+        }
+
+        // M3: pull in any pending sync_file FD and import it into
+        // sync_semaphore.
+        let sync_fd = match self.shared.pending_sync_fd.lock() {
+            Ok(mut g) => g.take(),
+            Err(_) => None,
+        };
+        if let Some(fd) = sync_fd {
+            use std::os::fd::IntoRawFd;
+            let import_info = vk::ImportSemaphoreFdInfoKHR::default()
+                .semaphore(self.sync_semaphore)
+                .handle_type(vk::ExternalSemaphoreHandleTypeFlags::SYNC_FD)
+                .fd(fd.into_raw_fd())
+                .flags(vk::SemaphoreImportFlags::TEMPORARY);
+            unsafe {
+                self.semaphore_loader
+                    .import_semaphore_fd(&import_info)
+                    .context("import_semaphore_fd")?;
+            }
+        }
+
         // Best-effort: pull in any pending BindBuffers before drawing.
         // A failure here doesn't kill the window — we still present
         // the clear colour so the user can see something on screen.
@@ -608,12 +740,44 @@ impl VulkanState {
                 &vk::CommandBufferBeginInfo::default()
                     .flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT),
             )?;
-            record_clear(&self.device, cmd_buf, image, CLEAR_COLOR);
+
+            let mut used_blit = false;
+            if let Some(imported) = &self.imported {
+                let slot = self.shared.current_slot.load(Ordering::SeqCst) as usize % 3;
+                let src_image = imported.images[slot];
+                let src_extent = vk::Extent2D {
+                    width: imported.width,
+                    height: imported.height,
+                };
+                record_blit(
+                    &self.device,
+                    cmd_buf,
+                    src_image,
+                    src_extent,
+                    image,
+                    self.swapchain_extent,
+                );
+                used_blit = true;
+            }
+
+            if !used_blit {
+                record_clear(&self.device, cmd_buf, image, CLEAR_COLOR);
+            }
+
             self.device.end_command_buffer(cmd_buf)?;
 
-            let wait_semaphores = [self.image_available];
+            let mut wait_semaphores = vec![self.image_available];
+            let mut wait_stages = vec![vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+            if !self.is_stale && self.shared.frame_count.load(Ordering::Relaxed) > 0 {
+                // If we've seen at least one frame, we might have
+                // imported a sync_file into sync_semaphore above.
+                // Even if we didn't get a NEW one this frame (lazy
+                // viewer), we should wait on the most recent one.
+                wait_semaphores.push(self.sync_semaphore);
+                wait_stages.push(vk::PipelineStageFlags::TRANSFER);
+            }
+
             let signal_semaphores = [self.render_finished];
-            let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
             let cmd_bufs = [cmd_buf];
             let submit = vk::SubmitInfo::default()
                 .wait_semaphores(&wait_semaphores)
@@ -868,6 +1032,123 @@ fn record_clear(device: &Device, cmd_buf: vk::CommandBuffer, image: vk::Image, c
     }
 }
 
+fn record_blit(
+    device: &Device,
+    cmd_buf: vk::CommandBuffer,
+    src_image: vk::Image,
+    src_extent: vk::Extent2D,
+    dst_image: vk::Image,
+    dst_extent: vk::Extent2D,
+) {
+    let range = vk::ImageSubresourceRange::default()
+        .aspect_mask(vk::ImageAspectFlags::COLOR)
+        .base_mip_level(0)
+        .level_count(1)
+        .base_array_layer(0)
+        .layer_count(1);
+
+    unsafe {
+        // Transition src: UNDEFINED -> TRANSFER_SRC_OPTIMAL
+        // Transition dst: UNDEFINED -> TRANSFER_DST_OPTIMAL
+        //
+        // Note: Using UNDEFINED for src_image is slightly risky but per
+        // plan.md M2.5 it's the bring-up path.
+        let barriers = [
+            vk::ImageMemoryBarrier::default()
+                .src_access_mask(vk::AccessFlags::empty())
+                .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(src_image)
+                .subresource_range(range),
+            vk::ImageMemoryBarrier::default()
+                .src_access_mask(vk::AccessFlags::empty())
+                .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+                .old_layout(vk::ImageLayout::UNDEFINED)
+                .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+                .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+                .image(dst_image)
+                .subresource_range(range),
+        ];
+
+        device.cmd_pipeline_barrier(
+            cmd_buf,
+            vk::PipelineStageFlags::TOP_OF_PIPE,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &barriers,
+        );
+
+        let blit = vk::ImageBlit::default()
+            .src_subresource(
+                vk::ImageSubresourceLayers::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .mip_level(0)
+                    .base_array_layer(0)
+                    .layer_count(1),
+            )
+            .src_offsets([
+                vk::Offset3D { x: 0, y: 0, z: 0 },
+                vk::Offset3D {
+                    x: src_extent.width as i32,
+                    y: src_extent.height as i32,
+                    z: 1,
+                },
+            ])
+            .dst_subresource(
+                vk::ImageSubresourceLayers::default()
+                    .aspect_mask(vk::ImageAspectFlags::COLOR)
+                    .mip_level(0)
+                    .base_array_layer(0)
+                    .layer_count(1),
+            )
+            .dst_offsets([
+                vk::Offset3D { x: 0, y: 0, z: 0 },
+                vk::Offset3D {
+                    x: dst_extent.width as i32,
+                    y: dst_extent.height as i32,
+                    z: 1,
+                },
+            ]);
+
+        device.cmd_blit_image(
+            cmd_buf,
+            src_image,
+            vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+            dst_image,
+            vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+            &[blit],
+            vk::Filter::LINEAR,
+        );
+
+        // Transition dst: TRANSFER_DST_OPTIMAL -> PRESENT_SRC_KHR
+        let to_present = vk::ImageMemoryBarrier::default()
+            .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+            .dst_access_mask(vk::AccessFlags::empty())
+            .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+            .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+            .src_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .dst_queue_family_index(vk::QUEUE_FAMILY_IGNORED)
+            .image(dst_image)
+            .subresource_range(range);
+
+        device.cmd_pipeline_barrier(
+            cmd_buf,
+            vk::PipelineStageFlags::TRANSFER,
+            vk::PipelineStageFlags::BOTTOM_OF_PIPE,
+            vk::DependencyFlags::empty(),
+            &[],
+            &[],
+            &[to_present],
+        );
+    }
+}
+
 fn find_graphics_present_family(
     instance: &Instance,
     surface_loader: &khr::surface::Instance,
@@ -902,6 +1183,7 @@ fn create_swapchain(
     graphics_family: u32,
     req_w: u32,
     req_h: u32,
+    old_swapchain: vk::SwapchainKHR,
 ) -> Result<(vk::SwapchainKHR, vk::Format, vk::Extent2D, Vec<vk::Image>)> {
     let caps = unsafe {
         surface_loader
@@ -962,6 +1244,7 @@ fn create_swapchain(
         .pre_transform(caps.current_transform)
         .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
         .present_mode(present_mode)
+        .old_swapchain(old_swapchain)
         .clipped(true);
     let swapchain = unsafe {
         swapchain_loader
