@@ -4,13 +4,14 @@
 //! Long-term goal (M2 milestone roadmap):
 //!   M2.1/M2.2  open a winit window, bring up a Vulkan swapchain,
 //!              present a solid clear colour every frame. [done]
-//!   M2.3       (this iteration) spawn a background IPC thread that
-//!              connects to the daemon's viewer socket, performs the
-//!              Hello/Subscribe handshake, receives BindBuffers with
-//!              3 DMA-BUF fds, and logs each FrameReady event.
-//!   M2.4       import the 3 DMA-BUF fds as local VkImages via
-//!              VK_EXT_external_memory_dma_buf +
-//!              VK_EXT_image_drm_format_modifier.
+//!   M2.3       background IPC thread: Hello/Subscribe handshake +
+//!              BindBuffers receive + FrameReady tracking. [done]
+//!   M2.4       (this iteration) import the 3 DMA-BUF fds as local
+//!              VkImages via VK_EXT_external_memory_dma_buf +
+//!              VK_EXT_image_drm_format_modifier. Imports happen
+//!              lazily on the first draw call after BindBuffers
+//!              lands; the window keeps showing its clear colour
+//!              until M2.5 wires the blit.
 //!   M2.5       on FrameReady, blit the matching imported image into
 //!              the current swapchain image and present.
 //!   M2.6       resize / close / disconnect handling.
@@ -280,7 +281,7 @@ impl ApplicationHandler for App {
                 return;
             }
         };
-        match VulkanState::new(window) {
+        match VulkanState::new(window, self.shared.clone()) {
             Ok(s) => self.state = Some(s),
             Err(e) => {
                 self.error = Some(e.context("VulkanState::new"));
@@ -343,10 +344,29 @@ struct VulkanState {
     image_available: vk::Semaphore,
     render_finished: vk::Semaphore,
     in_flight: vk::Fence,
+
+    // M2.4: imported DMA-BUF slots, populated lazily on first draw
+    // after BindBuffers arrives. None until then; Some forever after.
+    imported: Option<ImportedSlots>,
+
+    // Shared IPC state, cloned from the App so the draw loop can read
+    // the latest slot index and the BindState.
+    shared: Arc<SharedIpc>,
+}
+
+/// Local mirror of the renderer's triple buffer: 3 VkImages + the
+/// VkDeviceMemory each was imported into. The producer's FDs were
+/// transferred to Vulkan during vkAllocateMemory, so this struct owns
+/// only the resulting handles, not the original OwnedFds.
+struct ImportedSlots {
+    images: [vk::Image; 3],
+    memories: [vk::DeviceMemory; 3],
+    width: u32,
+    height: u32,
 }
 
 impl VulkanState {
-    fn new(window: Window) -> Result<Self> {
+    fn new(window: Window, shared: Arc<SharedIpc>) -> Result<Self> {
         let entry = unsafe { Entry::load().context("load libvulkan.so")? };
 
         let app_name = CString::new("waywallen-viewer").unwrap();
@@ -405,7 +425,14 @@ impl VulkanState {
         .into_owned();
         log::info!("viewer picked device: {name} (family {graphics_family})");
 
-        let device_exts = [vk::KHR_SWAPCHAIN_NAME.as_ptr()];
+        // Swapchain for the window + DMA-BUF import set so M2.4 can
+        // pull renderer output into local VkImages.
+        let device_exts = [
+            vk::KHR_SWAPCHAIN_NAME.as_ptr(),
+            vk::KHR_EXTERNAL_MEMORY_FD_NAME.as_ptr(),
+            vk::EXT_EXTERNAL_MEMORY_DMA_BUF_NAME.as_ptr(),
+            vk::EXT_IMAGE_DRM_FORMAT_MODIFIER_NAME.as_ptr(),
+        ];
         let priorities = [1.0f32];
         let queue_infos = [vk::DeviceQueueCreateInfo::default()
             .queue_family_index(graphics_family)
@@ -503,7 +530,40 @@ impl VulkanState {
             image_available,
             render_finished,
             in_flight,
+            imported: None,
+            shared,
         })
+    }
+
+    /// Lazily import the renderer's 3 DMA-BUF fds into local VkImages
+    /// the first time we observe a populated `BindState`. The IPC
+    /// thread parks the BindState behind the shared mutex; we move
+    /// the FDs into Vulkan exactly once and then mark the slot
+    /// permanently imported.
+    fn try_import_buffers(&mut self) -> Result<()> {
+        if self.imported.is_some() {
+            return Ok(());
+        }
+        let mut bind_guard = match self.shared.bind.lock() {
+            Ok(g) => g,
+            Err(_) => return Ok(()),
+        };
+        let bind = match bind_guard.take() {
+            Some(b) => b,
+            None => return Ok(()),
+        };
+        drop(bind_guard);
+        log::info!(
+            "viewer importing 3 DMA-BUF slots ({}x{} fourcc=0x{:08x} mod=0x{:016x})",
+            bind.width,
+            bind.height,
+            bind.fourcc,
+            bind.modifier
+        );
+        let imported = import_dma_buf_slots(&self.instance, &self.device, self.physical, bind)
+            .context("import_dma_buf_slots")?;
+        self.imported = Some(imported);
+        Ok(())
     }
 
     fn handle_resize(&mut self, _w: u32, _h: u32) -> Result<()> {
@@ -513,6 +573,13 @@ impl VulkanState {
     }
 
     fn draw(&mut self) -> Result<()> {
+        // Best-effort: pull in any pending BindBuffers before drawing.
+        // A failure here doesn't kill the window — we still present
+        // the clear colour so the user can see something on screen.
+        if let Err(e) = self.try_import_buffers() {
+            log::error!("import failed: {e:#}");
+        }
+
         let fences = [self.in_flight];
         unsafe {
             self.device
@@ -575,6 +642,14 @@ impl Drop for VulkanState {
     fn drop(&mut self) {
         unsafe {
             let _ = self.device.device_wait_idle();
+            if let Some(imported) = self.imported.take() {
+                for img in imported.images {
+                    self.device.destroy_image(img, None);
+                }
+                for mem in imported.memories {
+                    self.device.free_memory(mem, None);
+                }
+            }
             self.device.destroy_fence(self.in_flight, None);
             self.device.destroy_semaphore(self.render_finished, None);
             self.device.destroy_semaphore(self.image_available, None);
@@ -585,6 +660,152 @@ impl Drop for VulkanState {
             self.instance.destroy_instance(None);
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// DMA-BUF import
+// ---------------------------------------------------------------------------
+
+fn import_dma_buf_slots(
+    instance: &Instance,
+    device: &Device,
+    phys: vk::PhysicalDevice,
+    bind: BindState,
+) -> Result<ImportedSlots> {
+    use std::os::fd::IntoRawFd;
+
+    if bind.fds.len() != 3 {
+        return Err(anyhow!(
+            "expected 3 DMA-BUF fds, got {}",
+            bind.fds.len()
+        ));
+    }
+    let format = drm_fourcc_to_vk(bind.fourcc)
+        .ok_or_else(|| anyhow!("no VkFormat mapping for fourcc 0x{:08x}", bind.fourcc))?;
+
+    let ext_mem_fd = ash::khr::external_memory_fd::Device::new(instance, device);
+    let mem_props = unsafe { instance.get_physical_device_memory_properties(phys) };
+
+    let mut images = [vk::Image::null(); 3];
+    let mut memories = [vk::DeviceMemory::null(); 3];
+
+    // Move fds out of the BindState — vkAllocateMemory takes ownership.
+    let fds: Vec<std::os::fd::OwnedFd> = bind.fds.into_iter().collect();
+
+    for (i, fd) in fds.into_iter().enumerate() {
+        // ---- create the image with explicit DRM modifier ----
+        let plane_layouts = [vk::SubresourceLayout {
+            offset: bind.plane_offset,
+            size: 0,
+            row_pitch: bind.stride as u64,
+            array_pitch: 0,
+            depth_pitch: 0,
+        }];
+        let mut explicit = vk::ImageDrmFormatModifierExplicitCreateInfoEXT::default()
+            .drm_format_modifier(bind.modifier)
+            .plane_layouts(&plane_layouts);
+
+        let handle_types = vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT;
+        let mut external_info =
+            vk::ExternalMemoryImageCreateInfo::default().handle_types(handle_types);
+
+        let image_info = vk::ImageCreateInfo::default()
+            .image_type(vk::ImageType::TYPE_2D)
+            .format(format)
+            .extent(vk::Extent3D {
+                width: bind.width,
+                height: bind.height,
+                depth: 1,
+            })
+            .mip_levels(1)
+            .array_layers(1)
+            .samples(vk::SampleCountFlags::TYPE_1)
+            .tiling(vk::ImageTiling::DRM_FORMAT_MODIFIER_EXT)
+            .usage(vk::ImageUsageFlags::TRANSFER_SRC | vk::ImageUsageFlags::SAMPLED)
+            .sharing_mode(vk::SharingMode::EXCLUSIVE)
+            .initial_layout(vk::ImageLayout::UNDEFINED)
+            .push_next(&mut explicit)
+            .push_next(&mut external_info);
+
+        let image = unsafe {
+            device
+                .create_image(&image_info, None)
+                .with_context(|| format!("create_image slot {i}"))?
+        };
+
+        // ---- import the FD into VkDeviceMemory ----
+        let raw_fd = fd.into_raw_fd();
+        let mem_req = unsafe { device.get_image_memory_requirements(image) };
+        let mem_type_index = pick_memory_type(
+            &mem_props,
+            mem_req.memory_type_bits,
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        )
+        .ok_or_else(|| anyhow!("no DEVICE_LOCAL memory type for slot {i}"))?;
+
+        let mut import_info = vk::ImportMemoryFdInfoKHR::default()
+            .handle_type(handle_types)
+            .fd(raw_fd);
+        let mut dedicated_info =
+            vk::MemoryDedicatedAllocateInfo::default().image(image);
+        let alloc_info = vk::MemoryAllocateInfo::default()
+            .allocation_size(mem_req.size)
+            .memory_type_index(mem_type_index)
+            .push_next(&mut import_info)
+            .push_next(&mut dedicated_info);
+
+        let memory = unsafe {
+            device
+                .allocate_memory(&alloc_info, None)
+                .with_context(|| format!("import allocate_memory slot {i}"))?
+        };
+        // After vkAllocateMemory succeeds with VK_KHR_external_memory_fd
+        // semantics, the kernel transfers FD ownership to Vulkan; we
+        // must NOT close raw_fd ourselves.
+
+        unsafe {
+            device
+                .bind_image_memory(image, memory, 0)
+                .with_context(|| format!("bind_image_memory slot {i}"))?;
+        }
+
+        images[i] = image;
+        memories[i] = memory;
+    }
+
+    // Suppress the unused warning on ext_mem_fd: the import path goes
+    // through vkAllocateMemory + VkImportMemoryFdInfoKHR rather than
+    // calling get_memory_fd directly. We keep the loader instance for
+    // future calls (e.g. sync_file import in M3).
+    let _ = ext_mem_fd;
+
+    Ok(ImportedSlots {
+        images,
+        memories,
+        width: bind.width,
+        height: bind.height,
+    })
+}
+
+fn drm_fourcc_to_vk(fourcc: u32) -> Option<vk::Format> {
+    use drm_fourcc::DrmFourcc;
+    match DrmFourcc::try_from(fourcc).ok()? {
+        DrmFourcc::Abgr8888 => Some(vk::Format::R8G8B8A8_UNORM),
+        DrmFourcc::Argb8888 => Some(vk::Format::B8G8R8A8_UNORM),
+        _ => None,
+    }
+}
+
+fn pick_memory_type(
+    mem_props: &vk::PhysicalDeviceMemoryProperties,
+    type_bits: u32,
+    required_flags: vk::MemoryPropertyFlags,
+) -> Option<u32> {
+    (0..mem_props.memory_type_count).find(|&i| {
+        let bit = 1u32 << i;
+        let t = mem_props.memory_types[i as usize];
+        (type_bits & bit) != 0 && t.property_flags.contains(required_flags)
+    })
 }
 
 fn record_clear(device: &Device, cmd_buf: vk::CommandBuffer, image: vk::Image, color: [f32; 4]) {
