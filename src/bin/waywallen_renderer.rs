@@ -8,13 +8,13 @@
 //! daemon routes the resulting frames to subscribed viewers exactly as
 //! it will for the real renderer.
 //!
-//! Iteration M1.2 (this file): bring up VkInstance, pick a physical
-//! device, create a VkDevice with DMA-BUF + DRM format modifier
-//! extensions, and allocate 3 R8G8B8A8 VkImages backed by exportable
-//! DRM_FORMAT_MOD_LINEAR memory. Still no FD export, no IPC.
+//! Iteration M1.3a (this file): export DMA-BUF file descriptors from
+//! the 3 VkDeviceMemory objects, query each image's plane-0 subresource
+//! layout to get stride and offset, and log the per-slot DRM metadata.
+//! Still no IPC.
 //!
 //! Roadmap for the next sub-iterations:
-//!   M1.3  vkGetMemoryFdKHR + send BindBuffers to daemon
+//!   M1.3b wire IPC, send Ready + BindBuffers with the exported FDs
 //!   M1.4  per-frame vkCmdClearColorImage + FrameReady
 //!   M1.5  pipeline + triangle-strip solid quad on top of clear
 //!   M1.6  Shutdown handling
@@ -31,8 +31,20 @@ use ash::{vk, Device, Entry, Instance};
 struct FrameSlot {
     image: vk::Image,
     memory: vk::DeviceMemory,
-    _width: u32,
-    _height: u32,
+    width: u32,
+    height: u32,
+}
+
+/// Metadata needed by a consumer to import a slot's DMA-BUF back into
+/// its own Vulkan instance. Maps directly onto the fields the daemon
+/// forwards in `ipc::proto::BindBuffers`.
+#[derive(Debug)]
+struct SlotExport {
+    fd: std::os::fd::OwnedFd,
+    drm_fourcc: u32,
+    drm_modifier: u64,
+    plane0_offset: u64,
+    plane0_stride: u64,
 }
 
 const SLOT_COUNT: usize = 3;
@@ -145,8 +157,25 @@ fn run(instance: &Instance) -> Result<()> {
         slots.len()
     );
 
-    // Tear down in reverse order. FDs exported via vkGetMemoryFdKHR
-    // (M1.3) will outlive these handles thanks to kernel refcounting.
+    let exports = export_slots(instance, &device, &slots)?;
+    for (i, e) in exports.iter().enumerate() {
+        log::info!(
+            "  slot {i}: fd={} fourcc=0x{:08x} modifier=0x{:016x} offset={} stride={}",
+            std::os::fd::AsRawFd::as_raw_fd(&e.fd),
+            e.drm_fourcc,
+            e.drm_modifier,
+            e.plane0_offset,
+            e.plane0_stride,
+        );
+    }
+
+    // The OwnedFds in `exports` drop here, closing the duplicated DMA-BUF
+    // FDs. In M1.3b they will instead be handed off to the IPC sender so
+    // the daemon can forward them to viewers via SCM_RIGHTS.
+    drop(exports);
+
+    // Tear down in reverse order. Kernel refcounting keeps the DMA-BUFs
+    // alive across consumer imports regardless of local cleanup order.
     for slot in &slots {
         unsafe {
             device.destroy_image(slot.image, None);
@@ -155,6 +184,72 @@ fn run(instance: &Instance) -> Result<()> {
     }
     unsafe { device.destroy_device(None) };
     Ok(())
+}
+
+/// Map an R8G8B8A8_UNORM VkFormat to its DRM fourcc code. Matches
+/// `VkFormatToDrmFourcc()` in the C++ host (TextureCache.cpp).
+fn vk_format_to_drm_fourcc(fmt: vk::Format) -> Result<u32> {
+    use drm_fourcc::DrmFourcc;
+    match fmt {
+        vk::Format::R8G8B8A8_UNORM => Ok(DrmFourcc::Abgr8888 as u32),
+        vk::Format::B8G8R8A8_UNORM => Ok(DrmFourcc::Argb8888 as u32),
+        _ => Err(anyhow!("no DRM fourcc mapping for {fmt:?}")),
+    }
+}
+
+fn export_slots(
+    instance: &Instance,
+    device: &Device,
+    slots: &[FrameSlot],
+) -> Result<Vec<SlotExport>> {
+    use std::os::fd::FromRawFd;
+
+    let ext_mem_fd = ash::khr::external_memory_fd::Device::new(instance, device);
+    let drm_mod = ash::ext::image_drm_format_modifier::Device::new(instance, device);
+
+    let mut out = Vec::with_capacity(slots.len());
+    for (i, slot) in slots.iter().enumerate() {
+        let fd_info = vk::MemoryGetFdInfoKHR::default()
+            .memory(slot.memory)
+            .handle_type(vk::ExternalMemoryHandleTypeFlags::DMA_BUF_EXT);
+        let raw_fd = unsafe {
+            ext_mem_fd
+                .get_memory_fd(&fd_info)
+                .with_context(|| format!("vkGetMemoryFdKHR failed for slot {i}"))?
+        };
+        // SAFETY: raw_fd is a freshly-created OS fd the kernel just handed
+        // us; taking ownership is correct and releases on drop.
+        let owned_fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw_fd) };
+
+        // Query the modifier the driver actually ended up assigning. With
+        // only DRM_FORMAT_MOD_LINEAR in the list this will always be 0,
+        // but keep the query in place so future tiled modifiers light up
+        // automatically.
+        let mut mod_props = vk::ImageDrmFormatModifierPropertiesEXT::default();
+        unsafe {
+            drm_mod
+                .get_image_drm_format_modifier_properties(slot.image, &mut mod_props)
+                .with_context(|| format!("vkGetImageDrmFormatModifierPropertiesEXT slot {i}"))?;
+        }
+
+        // Plane-0 layout: vkGetImageSubresourceLayout needs
+        // MEMORY_PLANE_0_BIT aspect for DRM-modifier images.
+        let subresource = vk::ImageSubresource {
+            aspect_mask: vk::ImageAspectFlags::MEMORY_PLANE_0_EXT,
+            mip_level: 0,
+            array_layer: 0,
+        };
+        let layout = unsafe { device.get_image_subresource_layout(slot.image, subresource) };
+
+        out.push(SlotExport {
+            fd: owned_fd,
+            drm_fourcc: vk_format_to_drm_fourcc(RENDER_FORMAT)?,
+            drm_modifier: mod_props.drm_format_modifier,
+            plane0_offset: layout.offset,
+            plane0_stride: layout.row_pitch,
+        });
+    }
+    Ok(out)
 }
 
 fn pick_graphics_queue_family(instance: &Instance, phys: vk::PhysicalDevice) -> Result<u32> {
@@ -291,8 +386,8 @@ fn create_one_slot(
     Ok(FrameSlot {
         image,
         memory,
-        _width: width,
-        _height: height,
+        width,
+        height,
     })
 }
 
