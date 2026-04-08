@@ -2,13 +2,14 @@
 //! fabric.
 //!
 //! Long-term goal (M2 milestone roadmap):
-//!   M2.1/M2.2  (this iteration) open a winit window, bring up a
-//!              Vulkan swapchain, present a solid clear colour every
-//!              frame. No IPC, no DMA-BUF import.
-//!   M2.3       connect to the daemon's viewer socket and perform the
-//!              Hello/Subscribe handshake.
-//!   M2.4       on BindBuffers, import the 3 DMA-BUF fds as local
-//!              VkImages via VK_EXT_external_memory_dma_buf +
+//!   M2.1/M2.2  open a winit window, bring up a Vulkan swapchain,
+//!              present a solid clear colour every frame. [done]
+//!   M2.3       (this iteration) spawn a background IPC thread that
+//!              connects to the daemon's viewer socket, performs the
+//!              Hello/Subscribe handshake, receives BindBuffers with
+//!              3 DMA-BUF fds, and logs each FrameReady event.
+//!   M2.4       import the 3 DMA-BUF fds as local VkImages via
+//!              VK_EXT_external_memory_dma_buf +
 //!              VK_EXT_image_drm_format_modifier.
 //!   M2.5       on FrameReady, blit the matching imported image into
 //!              the current swapchain image and present.
@@ -18,6 +19,12 @@
 //! modules once the IPC path + DMA-BUF import path stabilise.
 
 use std::ffi::{CStr, CString};
+use std::os::fd::OwnedFd;
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use anyhow::{anyhow, Context, Result};
 use ash::{khr, vk, Device, Entry, Instance};
@@ -28,30 +35,231 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
+use kwallpaper_backend::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
+use kwallpaper_backend::ipc::uds::{recv_msg, send_msg};
+
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 720;
 const CLEAR_COLOR: [f32; 4] = [0.05, 0.05, 0.1, 1.0];
+
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+
+struct Args {
+    /// Daemon viewer socket. Defaults to $XDG_RUNTIME_DIR/waywallen/viewer.sock.
+    viewer_sock: Option<PathBuf>,
+    /// Renderer id to subscribe to. When absent, the IPC path is skipped
+    /// entirely and the window just shows a clear colour — useful for
+    /// bringing up the window outside of a full daemon+renderer stack.
+    renderer_id: Option<String>,
+}
+
+fn parse_args() -> Args {
+    let mut viewer_sock: Option<PathBuf> = None;
+    let mut renderer_id: Option<String> = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--viewer-sock" => viewer_sock = args.next().map(PathBuf::from),
+            "--renderer-id" => renderer_id = args.next(),
+            _ => {}
+        }
+    }
+    Args {
+        viewer_sock,
+        renderer_id,
+    }
+}
+
+fn default_viewer_sock() -> PathBuf {
+    std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("waywallen")
+        .join("viewer.sock")
+}
+
+// ---------------------------------------------------------------------------
+// Shared IPC state
+// ---------------------------------------------------------------------------
+
+/// Captured BindBuffers metadata + owned DMA-BUF FDs. The IPC thread
+/// populates this once after the handshake; the main thread reads it
+/// when it's ready to import the buffers (M2.4).
+struct BindState {
+    count: u32,
+    fourcc: u32,
+    width: u32,
+    height: u32,
+    stride: u32,
+    modifier: u64,
+    plane_offset: u64,
+    sizes: Vec<u64>,
+    fds: Vec<OwnedFd>,
+}
+
+struct SharedIpc {
+    /// Populated exactly once after the initial handshake.
+    bind: Mutex<Option<BindState>>,
+    /// Last image_index the renderer announced. Read by the draw loop.
+    current_slot: AtomicU32,
+    /// Number of frames observed (mostly for logging / tests).
+    frame_count: AtomicU32,
+    /// Set by the IPC thread on socket error / clean shutdown.
+    ipc_dead: AtomicBool,
+}
+
+impl SharedIpc {
+    fn new() -> Self {
+        Self {
+            bind: Mutex::new(None),
+            current_slot: AtomicU32::new(0),
+            frame_count: AtomicU32::new(0),
+            ipc_dead: AtomicBool::new(false),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IPC worker thread
+// ---------------------------------------------------------------------------
+
+fn spawn_ipc_thread(
+    viewer_sock: PathBuf,
+    renderer_id: String,
+    shared: Arc<SharedIpc>,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        if let Err(e) = run_ipc(&viewer_sock, &renderer_id, &shared) {
+            log::error!("viewer IPC thread died: {e:#}");
+        }
+        shared.ipc_dead.store(true, Ordering::SeqCst);
+    })
+}
+
+fn run_ipc(viewer_sock: &std::path::Path, renderer_id: &str, shared: &SharedIpc) -> Result<()> {
+    let stream = UnixStream::connect(viewer_sock)
+        .with_context(|| format!("connect {}", viewer_sock.display()))?;
+    log::info!("viewer IPC connected to {}", viewer_sock.display());
+
+    send_msg(
+        &stream,
+        &ViewerMsg::Hello {
+            client: "waywallen-viewer".into(),
+            version: PROTOCOL_VERSION,
+        },
+        &[],
+    )
+    .context("send Hello")?;
+    send_msg(
+        &stream,
+        &ViewerMsg::Subscribe {
+            renderer_id: renderer_id.into(),
+        },
+        &[],
+    )
+    .context("send Subscribe")?;
+
+    // Expect BindBuffers first.
+    let (msg, fds) = recv_msg::<EventMsg>(&stream).context("recv BindBuffers")?;
+    let bind = match msg {
+        EventMsg::BindBuffers {
+            count,
+            fourcc,
+            width,
+            height,
+            stride,
+            modifier,
+            plane_offset,
+            sizes,
+        } => BindState {
+            count,
+            fourcc,
+            width,
+            height,
+            stride,
+            modifier,
+            plane_offset,
+            sizes,
+            fds,
+        },
+        other => return Err(anyhow!("expected BindBuffers first, got {other:?}")),
+    };
+    log::info!(
+        "viewer got BindBuffers: {} fds, {}x{} fourcc=0x{:08x} mod=0x{:016x} stride={}",
+        bind.fds.len(),
+        bind.width,
+        bind.height,
+        bind.fourcc,
+        bind.modifier,
+        bind.stride,
+    );
+    {
+        let mut guard = shared.bind.lock().map_err(|e| anyhow!("bind mutex: {e}"))?;
+        *guard = Some(bind);
+    }
+
+    // Stream FrameReady events.
+    loop {
+        match recv_msg::<EventMsg>(&stream) {
+            Ok((EventMsg::FrameReady { image_index, seq, .. }, _fds)) => {
+                shared.current_slot.store(image_index, Ordering::SeqCst);
+                let n = shared.frame_count.fetch_add(1, Ordering::SeqCst) + 1;
+                if n % 30 == 0 {
+                    log::info!("viewer observed {n} frames (seq={seq}, slot={image_index})");
+                }
+            }
+            Ok((other, _)) => {
+                log::debug!("viewer ignored event {other:?}");
+            }
+            Err(e) => return Err(anyhow!("recv: {e}")),
+        }
+    }
+}
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp_micros()
         .init();
 
+    let args = parse_args();
+    let shared = Arc::new(SharedIpc::new());
+
+    // Spawn the IPC thread only when the user passed a renderer id.
+    // This keeps the window bring-up path runnable outside of a full
+    // daemon+renderer stack.
+    let ipc_thread = args.renderer_id.as_ref().map(|id| {
+        let sock = args.viewer_sock.clone().unwrap_or_else(default_viewer_sock);
+        log::info!(
+            "viewer: IPC enabled, sock={}, renderer_id={id}",
+            sock.display()
+        );
+        spawn_ipc_thread(sock, id.clone(), shared.clone())
+    });
+    if ipc_thread.is_none() {
+        log::info!("viewer: no --renderer-id, running standalone (clear colour only)");
+    }
+
     let event_loop = EventLoop::new().context("winit EventLoop::new")?;
-    let mut app = App::default();
+    let mut app = App {
+        shared,
+        state: None,
+        error: None,
+    };
     event_loop
         .run_app(&mut app)
         .context("winit event_loop.run_app")?;
-    // Anyhow can't cross the run_app boundary directly; if a frame
-    // failed we stored it in the app and surface it here.
     if let Some(err) = app.error.take() {
         return Err(err);
     }
+    // Best-effort join — the IPC thread only exits on socket error.
+    drop(ipc_thread);
     Ok(())
 }
 
-#[derive(Default)]
 struct App {
+    shared: Arc<SharedIpc>,
     state: Option<VulkanState>,
     error: Option<anyhow::Error>,
 }
