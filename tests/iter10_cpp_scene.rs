@@ -1,3 +1,6 @@
+#![cfg(feature = "legacy_proto_tests")]
+// Legacy viewer-protocol integration test; see Cargo.toml feature docs.
+
 //! I5 — End-to-end test with a real Wallpaper Engine scene.
 //!
 //! Unlike iter8, this does NOT use `--test-pattern`. The C++ host is

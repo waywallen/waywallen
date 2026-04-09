@@ -1,3 +1,6 @@
+#![cfg(feature = "legacy_proto_tests")]
+// Legacy viewer-protocol integration test; see Cargo.toml feature docs.
+
 //! Iteration 8: Full E2E smoke test.
 //! Renderer (Subprocess) -> Daemon (RendererManager + DisplayEndpoint) -> Display (Subprocess).
 //!

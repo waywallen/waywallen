@@ -24,6 +24,7 @@
 use anyhow::{Context, Result};
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
 use waywallen::display_endpoint;
+use waywallen::scheduler::Scheduler;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -116,9 +117,14 @@ async fn main() -> Result<()> {
     let _ = std::fs::remove_file(&display_sock);
     let mgr_for_endpoint = Arc::clone(&mgr);
     let sock_for_endpoint = display_sock.clone();
+    let sched_for_endpoint = Arc::new(std::sync::Mutex::new(Scheduler::new()));
     let endpoint = tokio::spawn(async move {
-        if let Err(e) =
-            display_endpoint::serve(&sock_for_endpoint, mgr_for_endpoint).await
+        if let Err(e) = display_endpoint::serve(
+            &sock_for_endpoint,
+            mgr_for_endpoint,
+            sched_for_endpoint,
+        )
+        .await
         {
             eprintln!("[waywallen_demo] display_endpoint exited: {e:#}");
         }

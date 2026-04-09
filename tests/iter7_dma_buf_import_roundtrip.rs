@@ -1,3 +1,6 @@
+#![cfg(feature = "legacy_proto_tests")]
+// Legacy viewer-protocol integration test; see Cargo.toml feature docs.
+
 //! Iteration 7 end-to-end test: DMA-BUF import roundtrip.
 //!
 //! Builds on iter6 by actually consuming the renderer's exported FDs:

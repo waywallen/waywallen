@@ -1,3 +1,6 @@
+#![cfg(feature = "legacy_proto_tests")]
+// Legacy viewer-protocol integration test; see Cargo.toml feature docs.
+
 //! Iteration 4 architecture-proven test.
 //!
 //! Spawns:

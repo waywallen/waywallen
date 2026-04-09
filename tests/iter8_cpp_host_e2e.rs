@@ -1,3 +1,6 @@
+#![cfg(feature = "legacy_proto_tests")]
+// Legacy viewer-protocol integration test; see Cargo.toml feature docs.
+
 //! I4 — end-to-end daemon + display_endpoint with the C++ `waywallen-
 //! renderer` host as the producer, running in `--test-pattern` mode so
 //! no Wallpaper Engine assets directory is required.

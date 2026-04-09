@@ -14,6 +14,9 @@ mod vulkan_dma_buf;
 mod dma_buf_stream;
 mod ipc;
 mod renderer_manager;
+mod display_proto;
+mod dummy_fence;
+mod scheduler;
 mod display_endpoint;
 
 use vulkan_dma_buf::{VulkanDmaBufProducer, DmaBufImage};
@@ -767,13 +770,15 @@ async fn main() -> std::io::Result<()> {
         renderer_manager: Arc::new(renderer_manager::RendererManager::new()),
     });
 
-    // Iteration 4: spawn the display endpoint task. It listens on a UDS
-    // and streams DMA-BUF metadata + frame events to subscribed clients.
+    // Iteration 4 (Phase 1 of waywallen-display-v1): spawn the display
+    // endpoint task. It listens on a UDS and serves the new display
+    // protocol to subscribed clients, coordinating via the Scheduler.
     {
         let mgr = state.renderer_manager.clone();
         let sock_path = display_endpoint::default_socket_path();
+        let sched = Arc::new(std::sync::Mutex::new(scheduler::Scheduler::new()));
         tokio::spawn(async move {
-            if let Err(e) = display_endpoint::serve(&sock_path, mgr).await {
+            if let Err(e) = display_endpoint::serve(&sock_path, mgr, sched).await {
                 log::error!("display endpoint exited: {e}");
             }
         });

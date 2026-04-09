@@ -1,3 +1,6 @@
+#![cfg(feature = "legacy_proto_tests")]
+// Legacy viewer-protocol integration test; see Cargo.toml feature docs.
+
 //! Iteration 6 end-to-end test: real GPU path.
 //!
 //! Wires together the same daemon + display_endpoint + client rig as

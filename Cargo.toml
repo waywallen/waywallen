@@ -4,6 +4,15 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
+[features]
+# Enable the legacy-protocol iter* integration tests. They predate the
+# waywallen-display-v1 rewrite and talk the old `ViewerMsg` / two-arg
+# `display_endpoint::serve` API. They remain in-tree as reference
+# material but are opt-in only — run with
+# `cargo test --features legacy_proto_tests`.
+default = []
+legacy_proto_tests = []
+
 [build-dependencies]
 wayproto-gen = { path = "tools/wayproto-gen" }
 
