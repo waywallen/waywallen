@@ -57,6 +57,12 @@ pub struct BindSnapshot {
     pub fds: Vec<OwnedFd>,
 }
 
+/// Upper bound on the number of per-seq sync_fd entries the reader
+/// keeps around before evicting the oldest. Renderers produce ~60 fps,
+/// so 16 gives display clients ~250 ms to drain before fences start
+/// dropping — plenty for a healthy event loop.
+const SYNC_FD_RETENTION: usize = 16;
+
 /// Per-renderer state. Cheap to clone via `Arc`; the inner fields are
 /// shared across HTTP handlers and the reader thread.
 pub struct RendererHandle {
@@ -78,6 +84,18 @@ pub struct RendererHandle {
     /// Populated when the host sends its first `BindBuffers` event.
     bind_snapshot: Arc<StdMutex<Option<BindSnapshot>>>,
 
+    /// Per-frame acquire fence file descriptors, indexed by `seq`.
+    /// The reader thread stashes the `OwnedFd` that arrives with each
+    /// `FrameReady { has_sync_fd: true }` event; the display endpoint
+    /// consumes it (exactly once per seq) via `take_sync_fd`. Older
+    /// entries are evicted once the map exceeds `SYNC_FD_RETENTION`.
+    ///
+    /// Phase 3b limitation: only one consumer gets the real fd per
+    /// (seq); additional display subscribers fall back to the
+    /// `dummy_fence` placeholder. Multi-display real-sync fan-out
+    /// will require a dup-on-take API.
+    sync_fds: Arc<StdMutex<std::collections::VecDeque<(u64, OwnedFd)>>>,
+
     /// The child process. Kept alive so dropping the manager reaps it.
     child: Arc<TokioMutex<Option<Child>>>,
 }
@@ -91,6 +109,17 @@ impl RendererHandle {
     /// first frame has been rendered and the fds arrived.
     pub fn bind_snapshot(&self) -> Arc<StdMutex<Option<BindSnapshot>>> {
         Arc::clone(&self.bind_snapshot)
+    }
+
+    /// Take the (single) acquire sync_fd that arrived with `FrameReady`
+    /// `seq`. Returns `None` if the fd was never recorded (producer
+    /// didn't export one, or it was already consumed) or has since
+    /// been evicted.
+    pub fn take_sync_fd(&self, seq: u64) -> Option<OwnedFd> {
+        let mut guard = self.sync_fds.lock().ok()?;
+        let pos = guard.iter().position(|(s, _)| *s == seq)?;
+        let (_, fd) = guard.remove(pos)?;
+        Some(fd)
     }
 }
 
@@ -211,14 +240,17 @@ impl RendererManager {
         let (events_tx, _events_rx) = broadcast::channel::<EventMsg>(256);
         let bind_snapshot: Arc<StdMutex<Option<BindSnapshot>>> =
             Arc::new(StdMutex::new(None));
+        let sync_fds: Arc<StdMutex<std::collections::VecDeque<(u64, OwnedFd)>>> =
+            Arc::new(StdMutex::new(std::collections::VecDeque::new()));
 
         let sock = Arc::new(StdMutex::new(std_stream));
         let reader_sock = sock.clone();
         let reader_events = events_tx.clone();
         let reader_snapshot = bind_snapshot.clone();
+        let reader_sync_fds = sync_fds.clone();
         let reader_id = id.clone();
         thread::spawn(move || {
-            run_reader(reader_id, reader_sock, reader_events, reader_snapshot);
+            run_reader(reader_id, reader_sock, reader_events, reader_snapshot, reader_sync_fds);
         });
 
         let handle = Arc::new(RendererHandle {
@@ -229,6 +261,7 @@ impl RendererManager {
             sock,
             events: events_tx,
             bind_snapshot,
+            sync_fds,
             child: Arc::new(TokioMutex::new(Some(child))),
         });
 
@@ -306,6 +339,7 @@ fn run_reader(
     sock: Arc<StdMutex<StdUnixStream>>,
     events: broadcast::Sender<EventMsg>,
     bind_snapshot: Arc<StdMutex<Option<BindSnapshot>>>,
+    sync_fds: Arc<StdMutex<std::collections::VecDeque<(u64, OwnedFd)>>>,
 ) {
     // Hold the stream by dup'ing the raw fd so the blocking recv is not
     // contending with sends on the same mutex. recvmsg on an AF_UNIX
@@ -368,10 +402,47 @@ fn run_reader(
                     *guard = Some(snap);
                     log::info!("renderer {id}: BindBuffers cached");
                 }
+                // A rebind retires any pending acquire fences — they
+                // belong to the previous buffer_generation and cannot
+                // be waited on against the new textures.
+                if let Ok(mut guard) = sync_fds.lock() {
+                    guard.clear();
+                }
+            }
+        } else if let EventMsg::FrameReady {
+            seq,
+            has_sync_fd,
+            ..
+        } = msg
+        {
+            // A real sync_fd arrived with this frame: stash it by seq
+            // for the display endpoint to pick up. Drop the oldest
+            // entry if we're over the retention budget.
+            if has_sync_fd && !fds.is_empty() {
+                let mut taken = fds;
+                let fd = taken.remove(0);
+                for extra in taken {
+                    log::warn!(
+                        "renderer {id}: FrameReady carried {} extra fds; dropping",
+                        1
+                    );
+                    drop(extra);
+                }
+                if let Ok(mut guard) = sync_fds.lock() {
+                    while guard.len() >= SYNC_FD_RETENTION {
+                        guard.pop_front();
+                    }
+                    guard.push_back((seq, fd));
+                }
+            } else if !fds.is_empty() {
+                log::warn!(
+                    "renderer {id}: FrameReady has_sync_fd=false but {} fds attached",
+                    fds.len()
+                );
             }
         } else if !fds.is_empty() {
             log::warn!(
-                "renderer {id}: unexpected fds on non-BindBuffers event, dropping"
+                "renderer {id}: unexpected fds on event {msg:?}, dropping"
             );
         }
 

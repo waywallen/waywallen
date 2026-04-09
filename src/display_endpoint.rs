@@ -40,7 +40,7 @@
 //!     not trigger a fresh `set_config` until a future milestone.
 
 use anyhow::{anyhow, Context, Result};
-use std::os::fd::{AsRawFd, RawFd};
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -494,6 +494,7 @@ async fn run_frame_loop(
                     Ok(EventMsg::FrameReady { image_index, seq, .. }) => {
                         if let Err(e) = forward_frame_ready(
                             &stream,
+                            &renderer,
                             buffer_generation,
                             image_index,
                             seq,
@@ -563,16 +564,43 @@ async fn run_frame_loop(
     result
 }
 
+/// Produce the sync_fd to attach to a forwarded FrameReady event.
+///
+/// Phase 3b preference order:
+///   1. Real `dma_fence` sync_file exported by the producer side —
+///      retrieved from `RendererHandle::take_sync_fd(seq)`.
+///   2. Already-signalled `eventfd` placeholder from `dummy_fence`,
+///      used when the producer didn't export one or another display
+///      already consumed this (gen, seq).
+///
+/// Path 1 feeds a real GPU-side fence into the display's EGL
+/// import path; path 2 keeps the protocol satisfied for stub-backend
+/// consumers (the headless Rust demo, multi-display non-primary
+/// subscribers).
+///
+/// Returns an `OwnedFd` that the caller must pass to SCM_RIGHTS and
+/// then drop.
+fn acquire_sync_fd(
+    renderer: &Arc<RendererHandle>,
+    seq: u64,
+) -> Result<OwnedFd> {
+    if let Some(fd) = renderer.take_sync_fd(seq) {
+        log::debug!("forwarding real acquire sync_fd for seq={seq}");
+        return Ok(fd);
+    }
+    log::debug!("falling back to dummy fence for seq={seq}");
+    dummy_fence::make_signaled_dummy_fence()
+        .map_err(|e| anyhow!("dummy fence: {e}"))
+}
+
 async fn forward_frame_ready(
     stream: &StdUnixStream,
+    renderer: &Arc<RendererHandle>,
     buffer_generation: u64,
     buffer_index: u32,
     seq: u64,
 ) -> Result<()> {
-    // Phase 1: synthesise an already-signalled dummy fence fd each
-    // frame. TODO(sync): replace with producer-exported dma_fence.
-    let fence = dummy_fence::make_signaled_dummy_fence()
-        .map_err(|e| anyhow!("dummy fence: {e}"))?;
+    let fence = acquire_sync_fd(renderer, seq)?;
     let fence_raw = fence.as_raw_fd();
     let send_stream = stream.try_clone().context("clone for frame_ready")?;
     let evt = Event::FrameReady {

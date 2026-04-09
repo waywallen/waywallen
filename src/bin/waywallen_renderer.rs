@@ -74,6 +74,8 @@ fn run(instance: &Instance, args: &Args) -> Result<()> {
         vk::KHR_EXTERNAL_MEMORY_FD_NAME.as_ptr(),
         vk::EXT_EXTERNAL_MEMORY_DMA_BUF_NAME.as_ptr(),
         vk::EXT_IMAGE_DRM_FORMAT_MODIFIER_NAME.as_ptr(),
+        vk::KHR_EXTERNAL_SEMAPHORE_NAME.as_ptr(),
+        vk::KHR_EXTERNAL_SEMAPHORE_FD_NAME.as_ptr(),
     ];
     let device = unsafe {
         instance.create_device(phys, &vk::DeviceCreateInfo::default()
@@ -132,6 +134,23 @@ fn run(instance: &Instance, args: &Args) -> Result<()> {
     let cmd_pool = unsafe { device.create_command_pool(&vk::CommandPoolCreateInfo::default().queue_family_index(gfx_family).flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER), None)? };
     let cmd_buf = unsafe { device.allocate_command_buffers(&vk::CommandBufferAllocateInfo::default().command_pool(cmd_pool).level(vk::CommandBufferLevel::PRIMARY).command_buffer_count(1))?[0] };
 
+    // Per-frame sync_fd export: one exportable semaphore, reused across
+    // frames. vkGetSemaphoreFdKHR with SYNC_FD handle type consumes the
+    // signaled state and leaves the semaphore unsignaled for the next
+    // submit (VK spec §7.4.3 "Importing Semaphore Payloads" note on
+    // permanence). The exported fd is a dma_fence sync_file that the
+    // display side can wait on via VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD
+    // or EGL_ANDROID_native_fence_sync.
+    let ext_sem_fd = ash::khr::external_semaphore_fd::Device::new(instance, &device);
+    let mut export_sem_info = vk::ExportSemaphoreCreateInfo::default()
+        .handle_types(vk::ExternalSemaphoreHandleTypeFlags::SYNC_FD);
+    let signal_sem = unsafe {
+        device.create_semaphore(
+            &vk::SemaphoreCreateInfo::default().push_next(&mut export_sem_info),
+            None,
+        )?
+    };
+
     // Initial transition to GENERAL
     unsafe {
         device.begin_command_buffer(cmd_buf, &vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT))?;
@@ -154,10 +173,42 @@ fn run(instance: &Instance, args: &Args) -> Result<()> {
             device.begin_command_buffer(cmd_buf, &vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT))?;
             device.cmd_clear_color_image(cmd_buf, slots[slot].image, vk::ImageLayout::GENERAL, &vk::ClearColorValue { float32: [r, 0.5, 0.5, 1.0] }, &[vk::ImageSubresourceRange::default().aspect_mask(vk::ImageAspectFlags::COLOR).level_count(1).layer_count(1)]);
             device.end_command_buffer(cmd_buf)?;
-            device.queue_submit(queue, &[vk::SubmitInfo::default().command_buffers(&[cmd_buf])], vk::Fence::null())?;
-            device.queue_wait_idle(queue)?;
+            let signal_sems = [signal_sem];
+            device.queue_submit(
+                queue,
+                &[vk::SubmitInfo::default()
+                    .command_buffers(&[cmd_buf])
+                    .signal_semaphores(&signal_sems)],
+                vk::Fence::null(),
+            )?;
         }
-        let _ = send_msg(&stream, &EventMsg::FrameReady { image_index: slot as u32, seq, ts_ns: 0, has_sync_fd: false }, &[]);
+        // Export the signaled semaphore as a dma_fence sync_file fd.
+        // This consumes the semaphore's signaled state; after this call
+        // the semaphore is unsignaled and can be signaled again by the
+        // next queue_submit. The returned fd is transferred to the
+        // sendmsg cmsg immediately below.
+        let sync_fd = unsafe {
+            ext_sem_fd.get_semaphore_fd(
+                &vk::SemaphoreGetFdInfoKHR::default()
+                    .semaphore(signal_sem)
+                    .handle_type(vk::ExternalSemaphoreHandleTypeFlags::SYNC_FD),
+            )?
+        };
+        let send_result = send_msg(
+            &stream,
+            &EventMsg::FrameReady {
+                image_index: slot as u32,
+                seq,
+                ts_ns: 0,
+                has_sync_fd: true,
+            },
+            &[sync_fd],
+        );
+        // SCM_RIGHTS dup'd the fd into the kernel's message buffer on
+        // success. Close our local copy either way: on success the
+        // receiver has its own copy, on failure it's just a leak.
+        unsafe { libc::close(sync_fd); }
+        let _ = send_result;
         seq += 1;
         let next = start + frame_period * seq as u32;
         let now = std::time::Instant::now();
@@ -166,6 +217,7 @@ fn run(instance: &Instance, args: &Args) -> Result<()> {
 
     unsafe {
         device.device_wait_idle()?;
+        device.destroy_semaphore(signal_sem, None);
         for s in slots { device.destroy_image(s.image, None); device.free_memory(s.memory, None); }
         device.destroy_device(None);
     }
