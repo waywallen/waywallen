@@ -18,8 +18,8 @@
 //! Wire format and message schema match the production host exactly so
 //! the daemon can't tell them apart.
 
-use kwallpaper_backend::ipc::proto::{ControlMsg, EventMsg};
-use kwallpaper_backend::ipc::uds::{recv_msg, send_msg};
+use waywallen::ipc::proto::{ControlMsg, EventMsg};
+use waywallen::ipc::uds::{recv_msg, send_msg};
 
 use nix::sys::memfd::{memfd_create, MemFdCreateFlag};
 use std::ffi::CString;

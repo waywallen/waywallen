@@ -8,8 +8,8 @@ use std::thread;
 use anyhow::{anyhow, Context, Result};
 use ash::{vk, Entry, Instance};
 
-use kwallpaper_backend::ipc::proto::{ControlMsg, EventMsg};
-use kwallpaper_backend::ipc::uds::{recv_msg, send_msg};
+use waywallen::ipc::proto::{ControlMsg, EventMsg};
+use waywallen::ipc::uds::{recv_msg, send_msg};
 
 const SLOT_COUNT: usize = 3;
 const RENDER_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;

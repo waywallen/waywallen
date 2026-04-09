@@ -3,8 +3,8 @@
 //! Skipped (not failed) when `WAYWALLEN_RENDERER_BIN` is unset, mirroring
 //! the iter2 test's contract.
 
-use kwallpaper_backend::ipc::proto::ControlMsg;
-use kwallpaper_backend::renderer_manager::{RendererManager, SpawnRequest};
+use waywallen::ipc::proto::ControlMsg;
+use waywallen::renderer_manager::{RendererManager, SpawnRequest};
 use std::time::Duration;
 
 fn skip_if_no_bin() -> bool {

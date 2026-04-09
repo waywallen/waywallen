@@ -11,8 +11,8 @@
 //! ffmpeg to turn the resulting raw frames into a video.
 
 use anyhow::{anyhow, bail, Context, Result};
-use kwallpaper_backend::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
-use kwallpaper_backend::ipc::uds::{recv_msg, send_msg};
+use waywallen::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
+use waywallen::ipc::uds::{recv_msg, send_msg};
 
 use std::io::Write;
 use std::os::fd::{AsRawFd, OwnedFd};

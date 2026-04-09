@@ -4,8 +4,8 @@
 //! This test launches every part of the pipeline as a subprocess/task and
 //! verifies that the Viewer observes FrameReady events from the Renderer.
 
-use kwallpaper_backend::renderer_manager::{RendererManager, SpawnRequest};
-use kwallpaper_backend::viewer_endpoint;
+use waywallen::renderer_manager::{RendererManager, SpawnRequest};
+use waywallen::viewer_endpoint;
 
 use std::path::PathBuf;
 use std::sync::Arc;

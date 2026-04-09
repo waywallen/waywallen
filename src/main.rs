@@ -613,7 +613,7 @@ async fn health_check() -> impl Responder {
         status: "success".to_string(),
         data: Some(serde_json::json!({
             "status": "healthy",
-            "service": "kwallpaper-backend"
+            "service": "waywallen"
         })),
         message: None,
     })

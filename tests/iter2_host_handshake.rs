@@ -17,8 +17,8 @@
 //! set, so `cargo test` stays green on machines that haven't built the
 //! C++ host.
 
-use kwallpaper_backend::ipc::proto::EventMsg;
-use kwallpaper_backend::ipc::uds::recv_msg;
+use waywallen::ipc::proto::EventMsg;
+use waywallen::ipc::uds::recv_msg;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;

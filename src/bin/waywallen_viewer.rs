@@ -36,8 +36,8 @@ use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::window::{Window, WindowId};
 
-use kwallpaper_backend::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
-use kwallpaper_backend::ipc::uds::{recv_msg, send_msg};
+use waywallen::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
+use waywallen::ipc::uds::{recv_msg, send_msg};
 
 const WINDOW_WIDTH: u32 = 1280;
 const WINDOW_HEIGHT: u32 = 720;

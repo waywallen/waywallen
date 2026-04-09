@@ -22,8 +22,8 @@
 //! pipeline.
 
 use anyhow::{Context, Result};
-use kwallpaper_backend::renderer_manager::{RendererManager, SpawnRequest};
-use kwallpaper_backend::viewer_endpoint;
+use waywallen::renderer_manager::{RendererManager, SpawnRequest};
+use waywallen::viewer_endpoint;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;

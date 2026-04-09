@@ -15,10 +15,10 @@
 //! and therefore fails CPU mmap. Proper pixel readback happens in M2.4
 //! once the viewer imports the FDs back into its own Vulkan instance.
 
-use kwallpaper_backend::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
-use kwallpaper_backend::ipc::uds::{recv_msg, send_msg};
-use kwallpaper_backend::renderer_manager::{RendererManager, SpawnRequest};
-use kwallpaper_backend::viewer_endpoint;
+use waywallen::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
+use waywallen::ipc::uds::{recv_msg, send_msg};
+use waywallen::renderer_manager::{RendererManager, SpawnRequest};
+use waywallen::viewer_endpoint;
 
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;

@@ -1,4 +1,4 @@
-use kwallpaper_backend::vulkan_dma_buf::VulkanDmaBufProducer;
+use waywallen::vulkan_dma_buf::VulkanDmaBufProducer;
 use vulkano::format::Format;
 
 #[test]

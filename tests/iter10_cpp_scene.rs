@@ -17,10 +17,10 @@
 //! Some scenes log glslang / missing-texture warnings during load; the
 //! test intentionally doesn't assert stderr is clean.
 
-use kwallpaper_backend::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
-use kwallpaper_backend::ipc::uds::{recv_msg, send_msg};
-use kwallpaper_backend::renderer_manager::{RendererManager, SpawnRequest};
-use kwallpaper_backend::viewer_endpoint;
+use waywallen::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
+use waywallen::ipc::uds::{recv_msg, send_msg};
+use waywallen::renderer_manager::{RendererManager, SpawnRequest};
+use waywallen::viewer_endpoint;
 
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;

@@ -13,8 +13,8 @@
 //! stands in for the C++ host over the same IPC wire format. Actual
 //! per-frame rendering (M1.4) is out of scope here.
 
-use kwallpaper_backend::ipc::proto::{ControlMsg, EventMsg};
-use kwallpaper_backend::ipc::uds::{recv_msg, send_msg};
+use waywallen::ipc::proto::{ControlMsg, EventMsg};
+use waywallen::ipc::uds::{recv_msg, send_msg};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
