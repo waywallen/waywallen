@@ -1,4 +1,4 @@
-//! viewerctl — minimal viewer client for the waywallen viewer endpoint.
+//! displayctl — minimal display client for the waywallen display endpoint.
 //!
 //! Subcommands:
 //!   dump  --renderer ID --frames N --out PATTERN [--socket PATH]
@@ -21,10 +21,10 @@ use std::path::{Path, PathBuf};
 
 fn usage() -> ! {
     eprintln!(
-        "usage: viewerctl dump --renderer ID --frames N --out PATH [--socket SOCK]\n\
+        "usage: displayctl dump --renderer ID --frames N --out PATH [--socket SOCK]\n\
          \n\
          PATH should contain `%03d` for the frame number (e.g. /tmp/f%03d.raw).\n\
-         SOCK defaults to $XDG_RUNTIME_DIR/waywallen/viewer.sock."
+         SOCK defaults to $XDG_RUNTIME_DIR/waywallen/display.sock."
     );
     std::process::exit(2);
 }
@@ -83,7 +83,7 @@ fn default_socket_path() -> PathBuf {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    runtime.join("waywallen").join("viewer.sock")
+    runtime.join("waywallen").join("display.sock")
 }
 
 fn dump(args: DumpArgs) -> Result<()> {
@@ -98,7 +98,7 @@ fn dump(args: DumpArgs) -> Result<()> {
     send_msg(
         &stream,
         &ViewerMsg::Hello {
-            client: "viewerctl".to_string(),
+            client: "displayctl".to_string(),
             version: PROTOCOL_VERSION,
         },
         &[],
@@ -131,7 +131,7 @@ fn dump(args: DumpArgs) -> Result<()> {
         );
     }
     eprintln!(
-        "[viewerctl] subscribed: {count} buffers, {width}x{height}, stride {stride}"
+        "[displayctl] subscribed: {count} buffers, {width}x{height}, stride {stride}"
     );
 
     // mmap each fd.
@@ -156,7 +156,7 @@ fn dump(args: DumpArgs) -> Result<()> {
             .with_context(|| format!("create {path_str}"))?;
         f.write_all(buf.as_bytes())
             .with_context(|| format!("write {path_str}"))?;
-        eprintln!("[viewerctl] frame {n:03} → {path_str} ({} bytes)", buf.len);
+        eprintln!("[displayctl] frame {n:03} → {path_str} ({} bytes)", buf.len);
     }
 
     Ok(())
@@ -231,7 +231,7 @@ fn main() {
         }
     };
     if let Err(e) = result {
-        eprintln!("viewerctl: {e:#}");
+        eprintln!("displayctl: {e:#}");
         std::process::exit(1);
     }
 }

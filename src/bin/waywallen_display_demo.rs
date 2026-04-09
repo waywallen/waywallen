@@ -1,4 +1,4 @@
-//! waywallen-viewer — minimal consumer window for the waywallen IPC
+//! waywallen-display-demo — minimal consumer window for the waywallen IPC
 //! fabric.
 //!
 //! Long-term goal (M2 milestone roadmap):
@@ -16,7 +16,7 @@
 //!              the current swapchain image and present.
 //!   M2.6       resize / close / disconnect handling.
 //!
-//! Viewer lives entirely in one file during bring-up; it'll split into
+//! The demo lives entirely in one file during bring-up; it'll split into
 //! modules once the IPC path + DMA-BUF import path stabilise.
 
 use std::ffi::{CStr, CString};
@@ -48,8 +48,8 @@ const CLEAR_COLOR: [f32; 4] = [0.05, 0.05, 0.1, 1.0];
 // ---------------------------------------------------------------------------
 
 struct Args {
-    /// Daemon viewer socket. Defaults to $XDG_RUNTIME_DIR/waywallen/viewer.sock.
-    viewer_sock: Option<PathBuf>,
+    /// Daemon display socket. Defaults to $XDG_RUNTIME_DIR/waywallen/display.sock.
+    display_sock: Option<PathBuf>,
     /// Renderer id to subscribe to. When absent, the IPC path is skipped
     /// entirely and the window just shows a clear colour — useful for
     /// bringing up the window outside of a full daemon+renderer stack.
@@ -57,28 +57,28 @@ struct Args {
 }
 
 fn parse_args() -> Args {
-    let mut viewer_sock: Option<PathBuf> = None;
+    let mut display_sock: Option<PathBuf> = None;
     let mut renderer_id: Option<String> = None;
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         match a.as_str() {
-            "--viewer-sock" => viewer_sock = args.next().map(PathBuf::from),
+            "--display-sock" => display_sock = args.next().map(PathBuf::from),
             "--renderer-id" => renderer_id = args.next(),
             _ => {}
         }
     }
     Args {
-        viewer_sock,
+        display_sock,
         renderer_id,
     }
 }
 
-fn default_viewer_sock() -> PathBuf {
+fn default_display_sock() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/tmp"))
         .join("waywallen")
-        .join("viewer.sock")
+        .join("display.sock")
 }
 
 // ---------------------------------------------------------------------------
@@ -130,22 +130,22 @@ impl SharedIpc {
 // ---------------------------------------------------------------------------
 
 fn spawn_ipc_thread(
-    viewer_sock: PathBuf,
+    display_sock: PathBuf,
     renderer_id: String,
     shared: Arc<SharedIpc>,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        if let Err(e) = run_ipc(&viewer_sock, &renderer_id, &shared) {
-            log::error!("viewer IPC thread died: {e:#}");
+        if let Err(e) = run_ipc(&display_sock, &renderer_id, &shared) {
+            log::error!("display IPC thread died: {e:#}");
         }
         shared.ipc_dead.store(true, Ordering::SeqCst);
     })
 }
 
-fn run_ipc(viewer_sock: &std::path::Path, renderer_id: &str, shared: &SharedIpc) -> Result<()> {
+fn run_ipc(display_sock: &std::path::Path, renderer_id: &str, shared: &SharedIpc) -> Result<()> {
     loop {
         shared.ipc_dead.store(false, Ordering::SeqCst);
-        let res = run_ipc_session(viewer_sock, renderer_id, shared);
+        let res = run_ipc_session(display_sock, renderer_id, shared);
         shared.ipc_dead.store(true, Ordering::SeqCst);
 
         match res {
@@ -157,18 +157,18 @@ fn run_ipc(viewer_sock: &std::path::Path, renderer_id: &str, shared: &SharedIpc)
 }
 
 fn run_ipc_session(
-    viewer_sock: &std::path::Path,
+    display_sock: &std::path::Path,
     renderer_id: &str,
     shared: &SharedIpc,
 ) -> Result<()> {
-    let stream = UnixStream::connect(viewer_sock)
-        .with_context(|| format!("connect {}", viewer_sock.display()))?;
-    log::info!("viewer IPC connected to {}", viewer_sock.display());
+    let stream = UnixStream::connect(display_sock)
+        .with_context(|| format!("connect {}", display_sock.display()))?;
+    log::info!("display IPC connected to {}", display_sock.display());
 
     send_msg(
         &stream,
         &ViewerMsg::Hello {
-            client: "waywallen-viewer".into(),
+            client: "waywallen-display-demo".into(),
             version: PROTOCOL_VERSION,
         },
         &[],
@@ -209,7 +209,7 @@ fn run_ipc_session(
         other => return Err(anyhow!("expected BindBuffers first, got {other:?}")),
     };
     log::info!(
-        "viewer got BindBuffers: {} fds, {}x{} fourcc=0x{:08x} mod=0x{:016x} stride={}",
+        "display got BindBuffers: {} fds, {}x{} fourcc=0x{:08x} mod=0x{:016x} stride={}",
         bind.fds.len(),
         bind.width,
         bind.height,
@@ -229,7 +229,7 @@ fn run_ipc_session(
                 shared.current_slot.store(image_index, Ordering::SeqCst);
                 let n = shared.frame_count.fetch_add(1, Ordering::SeqCst) + 1;
                 if n % 30 == 0 {
-                    log::info!("viewer observed {n} frames (seq={seq}, slot={image_index})");
+                    log::info!("display observed {n} frames (seq={seq}, slot={image_index})");
                 }
 
                 if has_sync_fd {
@@ -240,7 +240,7 @@ fn run_ipc_session(
                 }
             }
             Ok((other, _)) => {
-                log::debug!("viewer ignored event {other:?}");
+                log::debug!("display ignored event {other:?}");
             }
             Err(e) => return Err(anyhow!("recv: {e}")),
         }
@@ -259,15 +259,15 @@ fn main() -> Result<()> {
     // This keeps the window bring-up path runnable outside of a full
     // daemon+renderer stack.
     let ipc_thread = args.renderer_id.as_ref().map(|id| {
-        let sock = args.viewer_sock.clone().unwrap_or_else(default_viewer_sock);
+        let sock = args.display_sock.clone().unwrap_or_else(default_display_sock);
         log::info!(
-            "viewer: IPC enabled, sock={}, renderer_id={id}",
+            "display: IPC enabled, sock={}, renderer_id={id}",
             sock.display()
         );
         spawn_ipc_thread(sock, id.clone(), shared.clone())
     });
     if ipc_thread.is_none() {
-        log::info!("viewer: no --renderer-id, running standalone (clear colour only)");
+        log::info!("display: no --renderer-id, running standalone (clear colour only)");
     }
 
     let event_loop = EventLoop::new().context("winit EventLoop::new")?;
@@ -299,7 +299,7 @@ impl ApplicationHandler for App {
             return;
         }
         let attrs = Window::default_attributes()
-            .with_title("waywallen viewer")
+            .with_title("waywallen display demo")
             .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
         let window = match event_loop.create_window(attrs) {
             Ok(w) => w,
@@ -401,7 +401,7 @@ impl VulkanState {
     fn new(window: Window, shared: Arc<SharedIpc>) -> Result<Self> {
         let entry = unsafe { Entry::load().context("load libvulkan.so")? };
 
-        let app_name = CString::new("waywallen-viewer").unwrap();
+        let app_name = CString::new("waywallen-display-demo").unwrap();
         let app_info = vk::ApplicationInfo::default()
             .application_name(app_name.as_c_str())
             .api_version(vk::make_api_version(0, 1, 2, 0));
@@ -455,7 +455,7 @@ impl VulkanState {
         }
         .to_string_lossy()
         .into_owned();
-        log::info!("viewer picked device: {name} (family {graphics_family})");
+        log::info!("display picked device: {name} (family {graphics_family})");
 
         // Swapchain for the window + DMA-BUF import set so M2.4 can
         // pull renderer output into local VkImages.
@@ -595,7 +595,7 @@ impl VulkanState {
         drop(bind_guard);
 
         log::info!(
-            "viewer importing 3 DMA-BUF slots ({}x{} fourcc=0x{:08x} mod=0x{:016x})",
+            "display importing 3 DMA-BUF slots ({}x{} fourcc=0x{:08x} mod=0x{:016x})",
             bind.width,
             bind.height,
             bind.fourcc,
@@ -678,9 +678,9 @@ impl VulkanState {
         if dead != self.is_stale {
             self.is_stale = dead;
             let title = if dead {
-                "waywallen viewer [stale]"
+                "waywallen display demo [stale]"
             } else {
-                "waywallen viewer"
+                "waywallen display demo"
             };
             self.window.set_title(title);
         }
@@ -691,7 +691,7 @@ impl VulkanState {
         // the temporary import is consumed by the wait, after which the
         // semaphore reverts to its prior (unsignaled) state, and any
         // subsequent submit that waits on it would block forever GPU-
-        // side. That bug previously caused the viewer to display only
+        // side. That bug previously caused the display demo to display only
         // the first blit forever (wallpaper looked frozen).
         let mut have_sync_fd_this_frame = false;
         let sync_fd = match self.shared.pending_sync_fd.lock() {

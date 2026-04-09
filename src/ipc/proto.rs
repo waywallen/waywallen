@@ -86,7 +86,7 @@ pub enum EventMsg {
 }
 
 // ---------------------------------------------------------------------------
-// Viewer client ↔ daemon  (external viewer protocol)
+// Display client ↔ daemon  (legacy protocol, to be replaced)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

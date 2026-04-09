@@ -14,7 +14,7 @@ mod vulkan_dma_buf;
 mod dma_buf_stream;
 mod ipc;
 mod renderer_manager;
-mod viewer_endpoint;
+mod display_endpoint;
 
 use vulkan_dma_buf::{VulkanDmaBufProducer, DmaBufImage};
 use dma_buf_stream::DmaBufStreamManager;
@@ -767,14 +767,14 @@ async fn main() -> std::io::Result<()> {
         renderer_manager: Arc::new(renderer_manager::RendererManager::new()),
     });
 
-    // Iteration 4: spawn the viewer endpoint task. It listens on a UDS
+    // Iteration 4: spawn the display endpoint task. It listens on a UDS
     // and streams DMA-BUF metadata + frame events to subscribed clients.
     {
         let mgr = state.renderer_manager.clone();
-        let sock_path = viewer_endpoint::default_socket_path();
+        let sock_path = display_endpoint::default_socket_path();
         tokio::spawn(async move {
-            if let Err(e) = viewer_endpoint::serve(&sock_path, mgr).await {
-                log::error!("viewer endpoint exited: {e}");
+            if let Err(e) = display_endpoint::serve(&sock_path, mgr).await {
+                log::error!("display endpoint exited: {e}");
             }
         });
     }

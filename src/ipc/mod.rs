@@ -1,5 +1,5 @@
 //! IPC layer shared by the waywallen daemon, the renderer host subprocess,
-//! and external viewer clients.
+//! and external display clients.
 //!
 //! The wire format is a length-prefixed JSON frame:
 //!   [u32 BE length] [JSON body]

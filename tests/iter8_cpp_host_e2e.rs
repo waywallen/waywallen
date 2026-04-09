@@ -1,10 +1,10 @@
-//! I4 — end-to-end daemon + viewer_endpoint with the C++ `waywallen-
+//! I4 — end-to-end daemon + display_endpoint with the C++ `waywallen-
 //! renderer` host as the producer, running in `--test-pattern` mode so
 //! no Wallpaper Engine assets directory is required.
 //!
 //! This is the first test that proves the *C++* producer can be driven
 //! through `RendererManager` and its events rebroadcast to a
-//! `viewer_endpoint` client — the same pipeline `waywallen_viewer` will
+//! `display_endpoint` client — the same pipeline `waywallen_display_demo` will
 //! hit when we wire in a real scene (I5).
 //!
 //! Skipped when `WAYWALLEN_RENDERER_BIN` is not set. Set it to the path
@@ -14,7 +14,7 @@
 use waywallen::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
 use waywallen::ipc::uds::{recv_msg, send_msg};
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
-use waywallen::viewer_endpoint;
+use waywallen::display_endpoint;
 
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
@@ -35,8 +35,8 @@ async fn cpp_host_test_pattern_end_to_end() {
     }
 
     let mgr = Arc::new(RendererManager::new());
-    let viewer_sock: PathBuf = std::env::temp_dir().join(format!(
-        "waywallen-iter8-viewer-{}-{}.sock",
+    let display_sock: PathBuf = std::env::temp_dir().join(format!(
+        "waywallen-iter8-display-{}-{}.sock",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -44,9 +44,9 @@ async fn cpp_host_test_pattern_end_to_end() {
             .as_nanos()
     ));
     let mgr_clone = Arc::clone(&mgr);
-    let viewer_sock_for_task = viewer_sock.clone();
+    let display_sock_for_task = display_sock.clone();
     let endpoint = tokio::spawn(async move {
-        let _ = viewer_endpoint::serve(&viewer_sock_for_task, mgr_clone).await;
+        let _ = display_endpoint::serve(&display_sock_for_task, mgr_clone).await;
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -79,15 +79,15 @@ async fn cpp_host_test_pattern_end_to_end() {
         waited += Duration::from_millis(50);
     }
 
-    // Connect as a viewer client and assert BindBuffers + >=6 FrameReady
+    // Connect as a display client and assert BindBuffers + >=6 FrameReady
     // with the `(prev+1) % 3` slot cycle that the test-pattern pump
     // produces. Do this on the blocking pool — current_thread runtime
     // starvation fix (iter6).
-    let viewer_sock_for_client = viewer_sock.clone();
+    let display_sock_for_client = display_sock.clone();
     let renderer_id_for_client = id.clone();
     let summary = tokio::task::spawn_blocking(move || -> String {
-        let stream = UnixStream::connect(&viewer_sock_for_client)
-            .expect("connect viewer endpoint");
+        let stream = UnixStream::connect(&display_sock_for_client)
+            .expect("connect display endpoint");
         stream
             .set_read_timeout(Some(Duration::from_secs(8)))
             .expect("rd timeout");
@@ -182,5 +182,5 @@ async fn cpp_host_test_pattern_end_to_end() {
 
     mgr.kill(&id).await.expect("kill");
     endpoint.abort();
-    let _ = std::fs::remove_file(&viewer_sock);
+    let _ = std::fs::remove_file(&display_sock);
 }

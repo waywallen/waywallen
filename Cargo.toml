@@ -2,6 +2,10 @@
 name = "waywallen"
 version = "0.1.0"
 edition = "2021"
+build = "build.rs"
+
+[build-dependencies]
+wayproto-gen = { path = "tools/wayproto-gen" }
 
 [dependencies]
 actix-web = "4.0"
@@ -26,7 +30,7 @@ smallvec = "1.13"
 # export and drm-fourcc for DRM format code mapping.
 ash = "0.38"
 drm-fourcc = "2"
-# waywallen-viewer: window + Vulkan swapchain presenting imported
+# waywallen-display-demo: window + Vulkan swapchain presenting imported
 # DMA-BUFs from the daemon.
 ash-window = "0.13"
 winit = "0.30"

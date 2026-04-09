@@ -37,13 +37,13 @@ pub struct SpawnRequest {
     /// When true, pass `--test-pattern` to the renderer host, which
     /// bypasses `SceneWallpaper::loadScene` and drives the offscreen
     /// ExSwapchain ring on a host-owned timer. Used to bring up the
-    /// full daemon/viewer pipeline before a real Wallpaper Engine
+    /// full daemon/display pipeline before a real Wallpaper Engine
     /// assets directory is available (see plan.md I4).
     pub test_pattern: bool,
 }
 
 /// Snapshot of the most recent `BindBuffers` event, plus the DMA-BUF FDs
-/// the host attached to it. Owned by the manager; viewer endpoints will
+/// the host attached to it. Owned by the manager; display endpoints will
 /// `dup(2)` individual fds out of it when a new subscriber connects.
 pub struct BindSnapshot {
     pub count: u32,

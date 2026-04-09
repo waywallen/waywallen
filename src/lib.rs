@@ -4,6 +4,7 @@ pub mod producer;
 pub mod consumer;
 pub mod data_transfer;
 pub mod dma_buf_stream;
+pub mod display_endpoint;
+pub mod display_proto;
 pub mod ipc;
 pub mod renderer_manager;
-pub mod viewer_endpoint;

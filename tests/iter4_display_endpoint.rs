@@ -3,22 +3,22 @@
 //! Spawns:
 //!   - A `RendererManager` driving a `mock_renderer_host` subprocess
 //!     (the synthetic Rust binary; behaves identically to the C++ host).
-//!   - The `viewer_endpoint::serve` task on a tempfile UDS path.
+//!   - The `display_endpoint::serve` task on a tempfile UDS path.
 //!
-//! Then connects a viewer client manually, runs the Hello → Subscribe
+//! Then connects a display client manually, runs the Hello → Subscribe
 //! handshake, asserts that `BindBuffers` arrives with three real fds and
 //! that subsequent `FrameReady` events flow. mmaps slot 0 and verifies
 //! the synthetic "MOCK0\n" pattern the mock host wrote into it. That
 //! proves DMA-BUF metadata + FDs survive every leg of the round trip:
 //!
 //!   mock_renderer_host  ───sendmsg+SCM_RIGHTS─→  RendererManager
-//!     reader thread     ───broadcast → snapshot───→  viewer_endpoint
+//!     reader thread     ───broadcast → snapshot───→  display_endpoint
 //!     handle_client     ───sendmsg+SCM_RIGHTS─→  this test (mmap+verify)
 
 use waywallen::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
 use waywallen::ipc::uds::{recv_msg, send_msg};
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
-use waywallen::viewer_endpoint;
+use waywallen::display_endpoint;
 
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
@@ -40,10 +40,10 @@ async fn end_to_end_dma_buf_dump() {
 
     let mgr = Arc::new(RendererManager::new());
 
-    // Bind a per-test viewer socket so concurrent test runs don't
+    // Bind a per-test display socket so concurrent test runs don't
     // collide with the production default.
-    let viewer_sock: PathBuf = std::env::temp_dir().join(format!(
-        "waywallen-iter4-viewer-{}-{}.sock",
+    let display_sock: PathBuf = std::env::temp_dir().join(format!(
+        "waywallen-iter4-display-{}-{}.sock",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -51,9 +51,9 @@ async fn end_to_end_dma_buf_dump() {
             .as_nanos()
     ));
     let mgr_clone = Arc::clone(&mgr);
-    let viewer_sock_for_task = viewer_sock.clone();
+    let display_sock_for_task = display_sock.clone();
     let endpoint = tokio::spawn(async move {
-        let _ = viewer_endpoint::serve(&viewer_sock_for_task, mgr_clone).await;
+        let _ = display_endpoint::serve(&display_sock_for_task, mgr_clone).await;
     });
     // Give the listener a tick to bind.
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -88,9 +88,9 @@ async fn end_to_end_dma_buf_dump() {
         waited += Duration::from_millis(20);
     }
 
-    // Now connect a viewer client.
+    // Now connect a display client.
     let stream =
-        UnixStream::connect(&viewer_sock).expect("connect viewer socket");
+        UnixStream::connect(&display_sock).expect("connect display socket");
     send_msg(
         &stream,
         &ViewerMsg::Hello {
@@ -169,5 +169,5 @@ async fn end_to_end_dma_buf_dump() {
     // Cleanup.
     mgr.kill(&id).await.expect("kill");
     endpoint.abort();
-    let _ = std::fs::remove_file(&viewer_sock);
+    let _ = std::fs::remove_file(&display_sock);
 }

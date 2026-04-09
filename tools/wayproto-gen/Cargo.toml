@@ -1,0 +1,17 @@
+[package]
+name = "wayproto-gen"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal protocol codegen for waywallen-display wire format"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "wayproto_gen"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wayproto-gen"
+path = "src/main.rs"
+
+[dependencies]
+# No third-party deps — hand-rolled XML parser + hand-written emitters.

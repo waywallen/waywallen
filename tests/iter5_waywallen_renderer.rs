@@ -150,7 +150,7 @@ fn waywallen_renderer_bind_handshake() {
     // RADV allocates the DMA-BUFs in DEVICE_LOCAL VRAM, which isn't
     // host-visible and therefore fails mmap(MAP_SHARED). The proper
     // readback path is importing into a local Vulkan instance and
-    // issuing a copy — that happens in the M2 viewer milestone.
+    // issuing a copy — that happens in the M2 display milestone.
 
     // 4. Send Shutdown and wait for the child to exit.
     send_msg(&stream, &ControlMsg::Shutdown, &[]).expect("send Shutdown");

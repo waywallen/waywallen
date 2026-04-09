@@ -15,7 +15,7 @@
 use waywallen::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
 use waywallen::ipc::uds::{recv_msg, send_msg};
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
-use waywallen::viewer_endpoint;
+use waywallen::display_endpoint;
 
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
@@ -40,8 +40,8 @@ async fn producer_respawn_test() {
     }
 
     let mgr = Arc::new(RendererManager::new());
-    let viewer_sock: PathBuf = std::env::temp_dir().join(format!(
-        "waywallen-iter9-viewer-{}-{}.sock",
+    let display_sock: PathBuf = std::env::temp_dir().join(format!(
+        "waywallen-iter9-display-{}-{}.sock",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -49,9 +49,9 @@ async fn producer_respawn_test() {
             .as_nanos()
     ));
     let mgr_clone = Arc::clone(&mgr);
-    let viewer_sock_for_task = viewer_sock.clone();
+    let display_sock_for_task = display_sock.clone();
     let endpoint = tokio::spawn(async move {
-        let _ = viewer_endpoint::serve(&viewer_sock_for_task, mgr_clone).await;
+        let _ = display_endpoint::serve(&display_sock_for_task, mgr_clone).await;
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
 
@@ -69,9 +69,9 @@ async fn producer_respawn_test() {
         .await
         .expect("spawn initial renderer");
 
-    // 2. Connect viewer.
-    println!("[iter9] Connecting viewer client...");
-    let stream = UnixStream::connect(&viewer_sock).expect("connect viewer socket");
+    // 2. Connect display.
+    println!("[iter9] Connecting display client...");
+    let stream = UnixStream::connect(&display_sock).expect("connect display socket");
     send_msg(&stream, &ViewerMsg::Hello { client: "iter9-test".to_string(), version: PROTOCOL_VERSION }, &[]).expect("send Hello");
     send_msg(&stream, &ViewerMsg::Subscribe { renderer_id: id.clone() }, &[]).expect("send Subscribe");
 
@@ -126,6 +126,6 @@ async fn producer_respawn_test() {
     println!("[iter9] Cleaning up...");
     let _ = mgr.kill(&id).await;
     endpoint.abort();
-    let _ = std::fs::remove_file(&viewer_sock);
+    let _ = std::fs::remove_file(&display_sock);
     println!("[iter9] Success: Respawn verified!");
 }

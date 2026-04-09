@@ -1,7 +1,7 @@
 //! Iteration 6 end-to-end test: real GPU path.
 //!
-//! Wires together the same daemon + viewer_endpoint + client rig as
-//! iter4_viewer_endpoint, but replaces the synthetic `mock_renderer_host`
+//! Wires together the same daemon + display_endpoint + client rig as
+//! iter4_display_endpoint, but replaces the synthetic `mock_renderer_host`
 //! with the real `waywallen_renderer` ash binary. Asserts that:
 //!
 //!   1. `BindBuffers` arrives with 3 DMA-BUF fds, advertising the
@@ -13,12 +13,12 @@
 //! Pixel-level verification via mmap is intentionally omitted: RADV
 //! allocates the DMA-BUFs in DEVICE_LOCAL VRAM, which isn't host-visible
 //! and therefore fails CPU mmap. Proper pixel readback happens in M2.4
-//! once the viewer imports the FDs back into its own Vulkan instance.
+//! once the display imports the FDs back into its own Vulkan instance.
 
 use waywallen::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
 use waywallen::ipc::uds::{recv_msg, send_msg};
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
-use waywallen::viewer_endpoint;
+use waywallen::display_endpoint;
 
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
@@ -29,7 +29,7 @@ use std::time::Duration;
 const DRM_FORMAT_ABGR8888: u32 = 0x34324241;
 
 #[tokio::test]
-async fn real_renderer_viewer_handshake_and_frames() {
+async fn real_renderer_display_handshake_and_frames() {
     // SAFETY: single-threaded test runtime.
     unsafe {
         std::env::set_var(
@@ -40,8 +40,8 @@ async fn real_renderer_viewer_handshake_and_frames() {
 
     let mgr = Arc::new(RendererManager::new());
 
-    let viewer_sock: PathBuf = std::env::temp_dir().join(format!(
-        "waywallen-iter6-viewer-{}-{}.sock",
+    let display_sock: PathBuf = std::env::temp_dir().join(format!(
+        "waywallen-iter6-display-{}-{}.sock",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -49,9 +49,9 @@ async fn real_renderer_viewer_handshake_and_frames() {
             .as_nanos()
     ));
     let mgr_clone = Arc::clone(&mgr);
-    let viewer_sock_for_task = viewer_sock.clone();
+    let display_sock_for_task = display_sock.clone();
     let endpoint = tokio::spawn(async move {
-        let _ = viewer_endpoint::serve(&viewer_sock_for_task, mgr_clone).await;
+        let _ = display_endpoint::serve(&display_sock_for_task, mgr_clone).await;
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -85,12 +85,12 @@ async fn real_renderer_viewer_handshake_and_frames() {
 
     // The client interaction is synchronous (plain UnixStream +
     // recv_msg), so it must run off the tokio runtime thread —
-    // otherwise sync blocks would freeze the viewer_endpoint accept
+    // otherwise sync blocks would freeze the display_endpoint accept
     // task and the test would deadlock waiting for its own server.
-    let viewer_sock_for_client = viewer_sock.clone();
+    let display_sock_for_client = display_sock.clone();
     let renderer_id_for_client = id.clone();
     let (msg, fds): (EventMsg, Vec<OwnedFd>) = tokio::task::spawn_blocking(move || {
-        let stream = UnixStream::connect(&viewer_sock_for_client).expect("connect viewer socket");
+        let stream = UnixStream::connect(&display_sock_for_client).expect("connect display socket");
         send_msg(
             &stream,
             &ViewerMsg::Hello {
@@ -158,5 +158,5 @@ async fn real_renderer_viewer_handshake_and_frames() {
 
     mgr.kill(&id).await.expect("kill");
     endpoint.abort();
-    let _ = std::fs::remove_file(&viewer_sock);
+    let _ = std::fs::remove_file(&display_sock);
 }

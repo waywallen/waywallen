@@ -1,7 +1,13 @@
-//! Viewer endpoint — accepts external viewer client connections on a Unix
-//! socket and streams DMA-BUF metadata + frame events to them.
+//! Display endpoint — accepts external display client connections on a
+//! Unix socket and streams DMA-BUF metadata + frame events to them.
 //!
-//! Wire protocol:
+//! NOTE (Phase 1 rename): this file was renamed from `viewer_endpoint`
+//! to `display_endpoint` to align with the new `waywallen-display-v1`
+//! naming. The wire format on this socket is still the legacy
+//! serde-based `ViewerMsg` / `EventMsg` until the protocol swap lands;
+//! only the file name, module name, and socket path were changed.
+//!
+//! Wire protocol (legacy, to be replaced):
 //!
 //!   1. Client sends `ViewerMsg::Hello { client, version }`.
 //!   2. Client sends `ViewerMsg::Subscribe { renderer_id }`.
@@ -25,7 +31,7 @@ use crate::ipc::proto::{EventMsg, ViewerMsg};
 use crate::ipc::uds::{recv_msg, send_msg};
 use crate::renderer_manager::RendererManager;
 
-/// Default UDS path. Falls back to `/tmp/waywallen/viewer.sock` if
+/// Default UDS path. Falls back to `/tmp/waywallen/display.sock` if
 /// `XDG_RUNTIME_DIR` is unset.
 pub fn default_socket_path() -> PathBuf {
     let runtime = std::env::var_os("XDG_RUNTIME_DIR")
@@ -33,7 +39,7 @@ pub fn default_socket_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp"));
     let dir = runtime.join("waywallen");
     let _ = std::fs::create_dir_all(&dir);
-    dir.join("viewer.sock")
+    dir.join("display.sock")
 }
 
 /// Bind a listening UDS at `sock_path` (unlinking any stale file first)
@@ -46,14 +52,14 @@ pub async fn serve(sock_path: &Path, mgr: Arc<RendererManager>) -> Result<()> {
         let _ = std::fs::create_dir_all(parent);
     }
     let listener = tokio::net::UnixListener::bind(sock_path)
-        .with_context(|| format!("bind viewer socket at {}", sock_path.display()))?;
-    log::info!("viewer endpoint listening on {}", sock_path.display());
+        .with_context(|| format!("bind display socket at {}", sock_path.display()))?;
+    log::info!("display endpoint listening on {}", sock_path.display());
 
     loop {
         let (stream, _addr) = match listener.accept().await {
             Ok(x) => x,
             Err(e) => {
-                log::warn!("viewer accept failed: {e}");
+                log::warn!("display accept failed: {e}");
                 continue;
             }
         };
@@ -63,14 +69,14 @@ pub async fn serve(sock_path: &Path, mgr: Arc<RendererManager>) -> Result<()> {
         {
             Ok(s) => s,
             Err(e) => {
-                log::warn!("viewer into_std failed: {e}");
+                log::warn!("display into_std failed: {e}");
                 continue;
             }
         };
         let mgr = Arc::clone(&mgr);
         tokio::spawn(async move {
             if let Err(e) = handle_client(std_stream, mgr).await {
-                log::info!("viewer client closed: {e}");
+                log::info!("display client closed: {e}");
             }
         });
     }
@@ -192,7 +198,7 @@ async fn handle_client(stream: StdUnixStream, mgr: Arc<RendererManager>) -> Resu
                 return Err(anyhow!("renderer broadcast closed"));
             }
             Err(broadcast::error::RecvError::Lagged(n)) => {
-                log::warn!("viewer client lagged {n} frames; continuing");
+                log::warn!("display client lagged {n} frames; continuing");
                 continue;
             }
         };

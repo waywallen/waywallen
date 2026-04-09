@@ -1,0 +1,279 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  waywallen-display-v1
+
+  Wire protocol between a display client (libwaywallen_display, or any
+  other conforming consumer) and the waywallen daemon. Spoken over
+  SOCK_STREAM Unix Domain Socket at $XDG_RUNTIME_DIR/waywallen/display.sock.
+
+  Role model:
+    client  = display (passive output device; advertises size/name, does
+              not choose content)
+    server  = manager (waywallen daemon; decides which renderer feeds
+              which display, with what source_rect/dest_rect/transform)
+
+  Wire format (Wayland-inspired positional binary):
+
+    header: 4 bytes
+      u16 opcode
+      u16 total_length_in_bytes  (including the 4-byte header)
+
+    body: positional args, 4-byte aligned
+
+      u32/i32/f32 = 4 bytes LE
+      u64/i64/f64 = 8 bytes LE
+      string      = [u32 len_including_NUL] [utf8...] [NUL] [pad to 4]
+      array<T>    = [u32 count] [count * sizeof(T)] [pad to 4]
+      rect        = 4 * f32 = 16 bytes  (x, y, w, h)
+      kv_list     = [u32 count] [count * (string key, string value)]
+
+    fds: passed out-of-band via SCM_RIGHTS ancillary data. Order defined
+         per-message. The inline body never contains an fd word.
+
+  Invariants:
+
+    - The first Request on a new connection MUST be `hello`.
+    - The first Event in reply MUST be `welcome`.
+    - `register_display` MUST be sent exactly once per connection, after
+      the hello/welcome exchange.
+    - `buffer_generation` is monotonically increasing.
+    - `config_generation` is monotonically increasing and independent of
+      buffer_generation.
+    - `seq` is globally monotonic per stream, not reset across rebinds.
+    - A new `bind_buffers` implicitly retires all prior generations. The
+      display MUST NOT send `buffer_release` for any retired generation.
+    - Between receipt of `bind_buffers` and the corresponding
+      `set_config`, the display is in PENDING_CONFIG and MUST NOT accept
+      any `frame_ready`.
+    - `frame_ready` and `buffer_release` are strictly 1:1, matched by
+      (buffer_generation, buffer_index, seq).
+    - Every `frame_ready` MUST carry exactly one acquire sync_fd. v1
+      requires explicit sync; there is no fallback to implicit dma-fence.
+    - Display never panics/aborts; any wire or protocol error results
+      in on_disconnected and cleanup. Server is free to crash.
+
+  Version: 1
+  Required features (must appear in welcome.features): "explicit_sync_fd"
+  Optional features (reserved): "async_release", "drm_syncobj",
+                                "color_management", "hdr"
+-->
+<protocol name="waywallen_display" version="1">
+
+  <!-- ==================================================================
+       REQUESTS  (display -> manager)
+       ================================================================== -->
+
+  <!--
+    Opening handshake. Must be the first message on a new connection.
+    Server verifies `protocol == "waywallen-display-v1"` and replies
+    with `welcome`.
+  -->
+  <request name="hello" opcode="1">
+    <arg name="protocol" type="string"/>
+    <arg name="client_name" type="string"/>
+    <arg name="client_version" type="string"/>
+  </request>
+
+  <!--
+    Advertise this display as an output device. The manager uses the
+    advertised dimensions (+ any properties) to pick content and compute
+    source_rect / dest_rect. Sent once per connection, after welcome.
+
+    `refresh_mhz` is millihertz (e.g. 60000 = 60.000 Hz). Zero means
+    unknown; manager may pick a conservative frame budget.
+
+    `properties` is an open-ended kv list for forward compat. v1 defines
+    no keys — any unknown key is silently ignored by the server.
+  -->
+  <request name="register_display" opcode="2">
+    <arg name="name" type="string"/>
+    <arg name="width" type="u32"/>
+    <arg name="height" type="u32"/>
+    <arg name="refresh_mhz" type="u32"/>
+    <arg name="properties" type="kv_list"/>
+  </request>
+
+  <!--
+    Display size/properties changed (window resize, monitor mode switch).
+    Fire-and-forget: display does not wait for an ack and keeps
+    rendering with its current SetConfig. Manager may respond with a
+    new `set_config` to adapt `dest_rect`, or may ignore.
+  -->
+  <request name="update_display" opcode="3">
+    <arg name="width" type="u32"/>
+    <arg name="height" type="u32"/>
+    <arg name="properties" type="kv_list"/>
+  </request>
+
+  <!--
+    Return a frame slot to the producer so the buffer can be reused.
+    MUST be sent exactly once for every `frame_ready` the display has
+    received (while the frame's generation is still current).
+
+    v1: no fd attached. Caller MUST have completed its GPU reads before
+        sending this message (synchronous release).
+    v2: when the `async_release` feature is negotiated, this request
+        carries one release sync_fd indicating "my GPU is done reading";
+        producer waits on it before overwriting the buffer.
+  -->
+  <request name="buffer_release" opcode="4">
+    <arg name="buffer_generation" type="u64"/>
+    <arg name="buffer_index" type="u32"/>
+    <arg name="seq" type="u64"/>
+    <!-- v1 fds = 0; v2 async_release fds = 1 -->
+    <fds count="0"/>
+  </request>
+
+  <!--
+    Clean shutdown marker from the display side. After sending `bye`
+    the display closes its write half; it may still drain pending
+    events until the server closes the socket.
+  -->
+  <request name="bye" opcode="5">
+  </request>
+
+
+  <!-- ==================================================================
+       EVENTS  (manager -> display)
+       ================================================================== -->
+
+  <!--
+    Reply to `hello`. Advertises server version and supported features.
+    v1 clients MUST verify that `features` contains "explicit_sync_fd"
+    and disconnect otherwise.
+  -->
+  <event name="welcome" opcode="1">
+    <arg name="server_version" type="string"/>
+    <arg name="features" type="array" element="string"/>
+  </event>
+
+  <!--
+    Ack of `register_display`. `display_id` is an opaque u64 assigned
+    by the manager, intended for logs and debugging only.
+  -->
+  <event name="display_accepted" opcode="2">
+    <arg name="display_id" type="u64"/>
+  </event>
+
+  <!--
+    A new set of DMA-BUF backing buffers is being bound to this
+    display. All previously-bound buffers (if any) are implicitly
+    retired; the display MUST stop using any textures derived from
+    the prior generation and MUST NOT send buffer_release messages
+    for retired frames.
+
+    `count` is the number of buffers in the pool. `planes_per_buffer`
+    is 1 for single-plane formats (most DRM_FORMAT_* cases) and >1
+    for multi-plane (e.g. YUV). The attached fds are ordered
+    buffer-major, plane-minor:
+
+      [ b0p0, b0p1, ..., b0p(P-1),
+        b1p0, b1p1, ..., b1p(P-1),
+        ...
+        b(N-1)p0, ..., b(N-1)p(P-1) ]
+
+    Total fds = count * planes_per_buffer.
+
+    `stride`, `plane_offset`, and `size` arrays follow the same
+    buffer-major, plane-minor ordering and have the same length as
+    the fd array.
+
+    After `bind_buffers` the display is in PENDING_CONFIG and MUST
+    wait for a matching `set_config` before accepting `frame_ready`.
+  -->
+  <event name="bind_buffers" opcode="3">
+    <arg name="buffer_generation" type="u64"/>
+    <arg name="count" type="u32"/>
+    <arg name="width" type="u32"/>
+    <arg name="height" type="u32"/>
+    <arg name="fourcc" type="u32"/>
+    <arg name="modifier" type="u64"/>
+    <arg name="planes_per_buffer" type="u32"/>
+    <arg name="stride" type="array" element="u32"/>
+    <arg name="plane_offset" type="array" element="u32"/>
+    <arg name="size" type="array" element="u64"/>
+    <fds count_expr="count * planes_per_buffer"/>
+  </event>
+
+  <!--
+    Tell the display how to compose its output. `source_rect` is in
+    texture-pixel coordinates (the buffer_generation's width/height
+    space). `dest_rect` is in display-pixel coordinates (the last
+    advertised register/update_display width/height).
+
+    `transform` follows the Wayland wl_output.transform enum for
+    the low two bits:
+       0 = identity (0°)
+       1 = rotated 90° CCW
+       2 = rotated 180°
+       3 = rotated 270° CCW
+    Bit 7 (0x80) = horizontal flip applied before rotation.
+    All other bits are reserved and MUST be zero in v1.
+
+    `clear_color` is used to fill display pixels outside `dest_rect`
+    (letterbox bars in keep-aspect fit). RGBA, non-premultiplied,
+    straight alpha, sRGB.
+
+    `config_generation` is monotonic and independent of
+    buffer_generation. Manager guarantees that before sending any
+    `frame_ready` with a new buffer_generation it has already sent
+    at least one `set_config` for that buffer_generation.
+  -->
+  <event name="set_config" opcode="4">
+    <arg name="config_generation" type="u64"/>
+    <arg name="source_rect" type="rect"/>
+    <arg name="dest_rect" type="rect"/>
+    <arg name="transform" type="u32"/>
+    <arg name="clear_r" type="f32"/>
+    <arg name="clear_g" type="f32"/>
+    <arg name="clear_b" type="f32"/>
+    <arg name="clear_a" type="f32"/>
+  </event>
+
+  <!--
+    Producer has a new frame available in `buffer_index` of the
+    current buffer_generation. The display MUST wait on the attached
+    `acquire sync_fd` before sampling the texture, then (after its
+    own GPU work completes) send exactly one `buffer_release` for
+    this (buffer_generation, buffer_index, seq).
+
+    The acquire fd is a dma_fence sync_file handle (as produced by
+    `vkGetSemaphoreFdKHR` with VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD
+    or by `eglDupNativeFenceFDANDROID`). It is owned by the receiver
+    and must be closed after import.
+
+    `seq` is globally monotonic per connection; it does not reset
+    across `bind_buffers` rebinds.
+  -->
+  <event name="frame_ready" opcode="5">
+    <arg name="buffer_generation" type="u64"/>
+    <arg name="buffer_index" type="u32"/>
+    <arg name="seq" type="u64"/>
+    <fds count="1"/>
+  </event>
+
+  <!--
+    Retire the current buffer_generation without binding a new one.
+    Manager sends this when it wants the display to stop rendering
+    (for example: the renderer was stopped, or the scheduler
+    reassigned the display). The display transitions back to IDLE.
+
+    After `unbind` the display MUST NOT send any `buffer_release`
+    for the retired generation.
+  -->
+  <event name="unbind" opcode="6">
+    <arg name="buffer_generation" type="u64"/>
+  </event>
+
+  <!--
+    Protocol or server-side error. Manager MAY close the connection
+    immediately after sending. From the display's point of view this
+    is semantically identical to EOF + a descriptive message; the
+    display handles it the same as any other disconnect.
+  -->
+  <event name="error" opcode="7">
+    <arg name="code" type="u32"/>
+    <arg name="message" type="string"/>
+  </event>
+
+</protocol>

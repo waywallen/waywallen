@@ -20,7 +20,7 @@
 use waywallen::ipc::proto::{EventMsg, ViewerMsg, PROTOCOL_VERSION};
 use waywallen::ipc::uds::{recv_msg, send_msg};
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
-use waywallen::viewer_endpoint;
+use waywallen::display_endpoint;
 
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
@@ -58,8 +58,8 @@ async fn real_scene_end_to_end() {
     );
 
     let mgr = Arc::new(RendererManager::new());
-    let viewer_sock: PathBuf = std::env::temp_dir().join(format!(
-        "waywallen-iter10-viewer-{}-{}.sock",
+    let display_sock: PathBuf = std::env::temp_dir().join(format!(
+        "waywallen-iter10-display-{}-{}.sock",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -67,9 +67,9 @@ async fn real_scene_end_to_end() {
             .as_nanos()
     ));
     let mgr_clone = Arc::clone(&mgr);
-    let viewer_sock_for_task = viewer_sock.clone();
+    let display_sock_for_task = display_sock.clone();
     let endpoint = tokio::spawn(async move {
-        let _ = viewer_endpoint::serve(&viewer_sock_for_task, mgr_clone).await;
+        let _ = display_endpoint::serve(&display_sock_for_task, mgr_clone).await;
     });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -104,12 +104,12 @@ async fn real_scene_end_to_end() {
         waited += Duration::from_millis(100);
     }
 
-    // Subscribe as a viewer and collect frames.
-    let viewer_sock_for_client = viewer_sock.clone();
+    // Subscribe as a display and collect frames.
+    let display_sock_for_client = display_sock.clone();
     let renderer_id_for_client = id.clone();
     let summary = tokio::task::spawn_blocking(move || -> String {
-        let stream = UnixStream::connect(&viewer_sock_for_client)
-            .expect("connect viewer endpoint");
+        let stream = UnixStream::connect(&display_sock_for_client)
+            .expect("connect display endpoint");
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .expect("rd timeout");
@@ -182,5 +182,5 @@ async fn real_scene_end_to_end() {
 
     mgr.kill(&id).await.expect("kill");
     endpoint.abort();
-    let _ = std::fs::remove_file(&viewer_sock);
+    let _ = std::fs::remove_file(&display_sock);
 }
