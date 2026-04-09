@@ -19,6 +19,7 @@
 
 use kwallpaper_backend::ipc::proto::EventMsg;
 use kwallpaper_backend::ipc::uds::recv_msg;
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -81,9 +82,11 @@ fn hello_handshake() {
     cmd.arg("--ipc")
         .arg(&sock_path)
         .arg("--width")
-        .arg("640")
+        .arg("1280")
         .arg("--height")
-        .arg("360")
+        .arg("720")
+        .arg("--fps")
+        .arg("30")
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
@@ -124,4 +127,140 @@ fn hello_handshake() {
 
     // Done. ChildGuard::drop will SIGTERM the host; PR_SET_PDEATHSIG
     // plus our kill is belt-and-suspenders.
+}
+
+/// I2 extended smoke against the C++ host's `--test-pattern` mode.
+///
+/// Background: `SceneWallpaper::loadScene` early-returns when no assets
+/// directory is configured, so without a full Wallpaper Engine install
+/// there's nothing to drive `redraw_callback`. To unblock the Rust-side
+/// bring-up (I4) before we wire up a real scene, the C++ host gained a
+/// `--test-pattern` CLI flag that pumps the offscreen ExSwapchain ring
+/// directly from a host timer thread and emits BindBuffers + FrameReady
+/// events without any actual pixel drawing.
+///
+/// This test uses that mode to prove the wire end-to-end: Ready +
+/// BindBuffers(3 FDs, DMA-BUF metadata populated per I3 audit) + a few
+/// FrameReady events with distinct image indices.
+#[test]
+fn binding_and_frames_smoke() {
+    let Some(bin) = renderer_bin() else {
+        eprintln!("skipping: WAYWALLEN_RENDERER_BIN unset");
+        return;
+    };
+
+    let sock_path = std::env::temp_dir().join(format!(
+        "waywallen-iter2b-{}-{}.sock",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let _ = std::fs::remove_file(&sock_path);
+    let listener = UnixListener::bind(&sock_path).expect("bind");
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+    let _cleanup = Cleanup(sock_path.clone());
+
+    let mut cmd = Command::new(&bin);
+    cmd.arg("--ipc")
+        .arg(&sock_path)
+        .arg("--width")
+        .arg("1280")
+        .arg("--height")
+        .arg("720")
+        .arg("--fps")
+        .arg("30")
+        .arg("--test-pattern")
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    let mut guard = ChildGuard(cmd.spawn().expect("spawn host"));
+
+    let (stream, _) = {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let l_clone = listener.try_clone().unwrap();
+        std::thread::spawn(move || {
+            let _ = tx.send(l_clone.accept());
+        });
+        match rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(Ok(x)) => x,
+            _ => {
+                let _ = guard.0.kill();
+                panic!("accept timed out");
+            }
+        }
+    };
+    stream
+        .set_read_timeout(Some(Duration::from_secs(8)))
+        .expect("set rd timeout");
+
+    // Drain until Ready → BindBuffers → >=5 FrameReady, or timeout.
+    let mut saw_ready = false;
+    let mut bind: Option<(Vec<i32>, (u32, u32, u32, u32, u64, u64))> = None;
+    let mut frames = 0usize;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        let (msg, fds): (EventMsg, _) = match recv_msg(&stream) {
+            Ok(x) => x,
+            Err(e) => {
+                eprintln!("recv error (expected if hung): {e}");
+                break;
+            }
+        };
+        match msg {
+            EventMsg::Ready => saw_ready = true,
+            EventMsg::BindBuffers {
+                count,
+                fourcc,
+                width,
+                height,
+                stride,
+                modifier,
+                plane_offset,
+                sizes,
+            } => {
+                eprintln!(
+                    "I2 BindBuffers: count={} fourcc=0x{:08x} {}x{} stride={} mod=0x{:x} \
+                     plane_offset={} sizes={:?} fds={}",
+                    count,
+                    fourcc,
+                    width,
+                    height,
+                    stride,
+                    modifier,
+                    plane_offset,
+                    sizes,
+                    fds.len()
+                );
+                assert_eq!(count, 3, "expected 3 slots");
+                assert_eq!(fds.len(), 3, "expected 3 FDs via SCM_RIGHTS");
+                assert!(fourcc != 0, "fourcc must be non-zero");
+                assert!(u64::from(stride) >= u64::from(width) * 4, "stride sanity");
+                bind = Some((
+                    fds.iter().map(|f| f.as_raw_fd()).collect(),
+                    (count, fourcc, width, height, u64::from(stride), modifier),
+                ));
+                std::mem::forget(fds);
+            }
+            EventMsg::FrameReady { .. } => {
+                frames += 1;
+                if frames >= 5 && bind.is_some() {
+                    break;
+                }
+            }
+            other => eprintln!("unexpected msg: {other:?}"),
+        }
+    }
+
+    assert!(saw_ready, "never saw Ready event");
+    let bind = bind.expect("never saw BindBuffers under --test-pattern mode");
+    assert!(
+        frames >= 5,
+        "expected >=5 FrameReady, got {frames}; bind={bind:?}"
+    );
 }
