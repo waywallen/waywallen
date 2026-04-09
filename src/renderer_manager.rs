@@ -27,13 +27,19 @@ use crate::ipc::uds::{recv_msg, send_msg};
 
 pub type RendererId = String;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SpawnRequest {
     pub scene_pkg: String,
     pub assets: String,
     pub width: u32,
     pub height: u32,
     pub fps: u32,
+    /// When true, pass `--test-pattern` to the renderer host, which
+    /// bypasses `SceneWallpaper::loadScene` and drives the offscreen
+    /// ExSwapchain ring on a host-owned timer. Used to bring up the
+    /// full daemon/viewer pipeline before a real Wallpaper Engine
+    /// assets directory is available (see plan.md I4).
+    pub test_pattern: bool,
 }
 
 /// Snapshot of the most recent `BindBuffers` event, plus the DMA-BUF FDs
@@ -141,13 +147,18 @@ impl RendererManager {
             .arg(req.width.to_string())
             .arg("--height")
             .arg(req.height.to_string())
-            .arg("--scene")
-            .arg(&req.scene_pkg)
-            .arg("--assets")
-            .arg(&req.assets)
             .arg("--fps")
-            .arg(req.fps.to_string())
-            .kill_on_drop(true)
+            .arg(req.fps.to_string());
+        if !req.scene_pkg.is_empty() {
+            cmd.arg("--scene").arg(&req.scene_pkg);
+        }
+        if !req.assets.is_empty() {
+            cmd.arg("--assets").arg(&req.assets);
+        }
+        if req.test_pattern {
+            cmd.arg("--test-pattern");
+        }
+        cmd.kill_on_drop(true)
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
 

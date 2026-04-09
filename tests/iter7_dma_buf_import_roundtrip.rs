@@ -64,6 +64,7 @@ async fn end_to_end_dma_buf_vulkan_import() {
             width: 256,
             height: 256,
             fps: 30,
+            test_pattern: false,
         })
         .await
         .expect("spawn waywallen_renderer");

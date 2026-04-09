@@ -62,6 +62,7 @@ async fn real_renderer_viewer_handshake_and_frames() {
             width: 256,
             height: 256,
             fps: 30,
+            test_pattern: false,
         })
         .await
         .expect("spawn waywallen_renderer");

@@ -204,6 +204,7 @@ async fn renderer_spawn(
         width: r.width,
         height: r.height,
         fps: r.fps,
+        test_pattern: false,
     };
     match state.renderer_manager.spawn(spawn_req).await {
         Ok(id) => HttpResponse::Ok().json(ApiResponse {

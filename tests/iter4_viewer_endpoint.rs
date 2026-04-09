@@ -66,6 +66,7 @@ async fn end_to_end_dma_buf_dump() {
             width: 64,
             height: 64,
             fps: 30,
+            test_pattern: false,
         })
         .await
         .expect("spawn mock renderer");

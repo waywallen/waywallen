@@ -49,6 +49,7 @@ async fn full_pipeline_smoke_test() {
             width: 256,
             height: 256,
             fps: 10,
+            test_pattern: false,
         })
         .await
         .expect("spawn waywallen_renderer");
