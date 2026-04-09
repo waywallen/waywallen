@@ -686,7 +686,14 @@ impl VulkanState {
         }
 
         // M3: pull in any pending sync_file FD and import it into
-        // sync_semaphore.
+        // sync_semaphore. We must only wait on sync_semaphore in the
+        // submit below if we successfully imported one *this frame* —
+        // the temporary import is consumed by the wait, after which the
+        // semaphore reverts to its prior (unsignaled) state, and any
+        // subsequent submit that waits on it would block forever GPU-
+        // side. That bug previously caused the viewer to display only
+        // the first blit forever (wallpaper looked frozen).
+        let mut have_sync_fd_this_frame = false;
         let sync_fd = match self.shared.pending_sync_fd.lock() {
             Ok(mut g) => g.take(),
             Err(_) => None,
@@ -703,6 +710,7 @@ impl VulkanState {
                     .import_semaphore_fd(&import_info)
                     .context("import_semaphore_fd")?;
             }
+            have_sync_fd_this_frame = true;
         }
 
         // Best-effort: pull in any pending BindBuffers before drawing.
@@ -768,11 +776,10 @@ impl VulkanState {
 
             let mut wait_semaphores = vec![self.image_available];
             let mut wait_stages = vec![vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-            if !self.is_stale && self.shared.frame_count.load(Ordering::Relaxed) > 0 {
-                // If we've seen at least one frame, we might have
-                // imported a sync_file into sync_semaphore above.
-                // Even if we didn't get a NEW one this frame (lazy
-                // viewer), we should wait on the most recent one.
+            if have_sync_fd_this_frame {
+                // Only wait on sync_semaphore if we just imported a
+                // payload into it. Waiting on it without a fresh
+                // import deadlocks the GPU side of the submit.
                 wait_semaphores.push(self.sync_semaphore);
                 wait_stages.push(vk::PipelineStageFlags::TRANSFER);
             }
