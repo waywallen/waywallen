@@ -3,3 +3,5 @@ target
 /build.sh
 /Cargo.lock
 /.env
+build
+.cache
