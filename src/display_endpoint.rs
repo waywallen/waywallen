@@ -584,7 +584,7 @@ fn acquire_sync_fd(
     renderer: &Arc<RendererHandle>,
     seq: u64,
 ) -> Result<OwnedFd> {
-    if let Some(fd) = renderer.take_sync_fd(seq) {
+    if let Some(fd) = renderer.clone_sync_fd(seq) {
         log::debug!("forwarding real acquire sync_fd for seq={seq}");
         return Ok(fd);
     }

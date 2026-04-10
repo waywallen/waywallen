@@ -111,15 +111,26 @@ impl RendererHandle {
         Arc::clone(&self.bind_snapshot)
     }
 
-    /// Take the (single) acquire sync_fd that arrived with `FrameReady`
-    /// `seq`. Returns `None` if the fd was never recorded (producer
-    /// didn't export one, or it was already consumed) or has since
-    /// been evicted.
-    pub fn take_sync_fd(&self, seq: u64) -> Option<OwnedFd> {
-        let mut guard = self.sync_fds.lock().ok()?;
-        let pos = guard.iter().position(|(s, _)| *s == seq)?;
-        let (_, fd) = guard.remove(pos)?;
-        Some(fd)
+    /// Obtain a dup'd copy of the acquire sync_fd that arrived with
+    /// `FrameReady` seq. Each caller gets an independent kernel
+    /// reference to the same underlying `dma_fence` sync_file, so
+    /// multiple display subscribers can each wait on (or import) the
+    /// fence without interfering with one another.
+    ///
+    /// The original fd stays in the deque and is evicted only when
+    /// the retention limit is hit (new frames push out old ones) or
+    /// on a rebind.
+    ///
+    /// Returns `None` if the fd was never recorded (producer didn't
+    /// export one) or has already been evicted (>SYNC_FD_RETENTION
+    /// newer frames have arrived).
+    pub fn clone_sync_fd(&self, seq: u64) -> Option<OwnedFd> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        let guard = self.sync_fds.lock().ok()?;
+        let (_, fd) = guard.iter().find(|(s, _)| *s == seq)?;
+        let dup_raw = nix::unistd::dup(fd.as_raw_fd()).ok()?;
+        // SAFETY: nix::unistd::dup returned a fresh fd we now own.
+        Some(unsafe { OwnedFd::from_raw_fd(dup_raw) })
     }
 }
 
