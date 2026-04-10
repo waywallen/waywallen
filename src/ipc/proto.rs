@@ -85,14 +85,8 @@ pub enum EventMsg {
     },
 }
 
-// ---------------------------------------------------------------------------
-// Display client ↔ daemon  (legacy protocol, to be replaced)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum ViewerMsg {
-    Hello { client: String, version: u32 },
-    Subscribe { renderer_id: String },
-    Unsubscribe,
-}
+// NOTE: The legacy `ViewerMsg` enum that previously lived here was
+// removed — it belonged to the pre-v1 display client protocol and is
+// superseded by `display_proto::Request` / `display_proto::Event`.
+// The cfg-gated `legacy_proto_tests` integration tests still reference
+// it via their own local copies.
