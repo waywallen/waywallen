@@ -30,3 +30,9 @@ libc = "0.2"
 # waywallen-renderer subprocess: ash for raw Vulkan control over
 # DMA-BUF export + semaphore sync_fd export.
 ash = "0.38"
+toml = "0.8"
+glob = "0.3"
+mlua = { version = "0.10", features = ["lua54", "vendored", "send"] }
+
+[dev-dependencies]
+tempfile = "3"

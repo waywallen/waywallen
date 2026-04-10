@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context, Result};
 use std::collections::HashMap;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream as StdUnixStream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::thread;
@@ -20,6 +20,8 @@ use uuid::Uuid;
 
 use crate::ipc::proto::{ControlMsg, EventMsg};
 use crate::ipc::uds::{recv_msg, send_msg};
+use crate::plugin::renderer_registry::RendererRegistry;
+use crate::wallpaper_type::WallpaperType;
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -29,8 +31,12 @@ pub type RendererId = String;
 
 #[derive(Debug, Clone, Default)]
 pub struct SpawnRequest {
-    pub scene_pkg: String,
-    pub assets: String,
+    /// The wallpaper type determines which renderer binary is spawned.
+    pub wp_type: WallpaperType,
+    /// Type-specific key-value data forwarded as CLI args to the renderer.
+    /// For "scene": {"scene": "<pkg>", "assets": "<dir>"}.
+    /// For "image": {"path": "<file>"}.
+    pub metadata: HashMap<String, String>,
     pub width: u32,
     pub height: u32,
     pub fps: u32,
@@ -67,6 +73,7 @@ const SYNC_FD_RETENTION: usize = 16;
 /// shared across HTTP handlers and the reader thread.
 pub struct RendererHandle {
     pub id: RendererId,
+    pub wp_type: WallpaperType,
     pub width: u32,
     pub height: u32,
     pub fps: u32,
@@ -140,10 +147,8 @@ impl RendererHandle {
 
 pub struct RendererManager {
     inner: TokioMutex<Inner>,
-    /// Path to the `waywallen-renderer` binary. Looked up from
-    /// `WAYWALLEN_RENDERER_BIN`; fall back to `waywallen-renderer` on
-    /// $PATH.
-    renderer_bin: PathBuf,
+    /// Plugin registry mapping wallpaper types to renderer binaries.
+    registry: RendererRegistry,
 }
 
 struct Inner {
@@ -151,16 +156,26 @@ struct Inner {
 }
 
 impl RendererManager {
-    pub fn new() -> Self {
-        let renderer_bin = std::env::var_os("WAYWALLEN_RENDERER_BIN")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("waywallen-renderer"));
+    pub fn new(registry: RendererRegistry) -> Self {
         Self {
             inner: TokioMutex::new(Inner {
                 renderers: HashMap::new(),
             }),
-            renderer_bin,
+            registry,
         }
+    }
+
+    /// Create a manager with a default registry built from env vars and
+    /// XDG dirs. Convenience for tests and simple setups.
+    pub fn new_default() -> Self {
+        let registry = crate::plugin::renderer_registry::build_default_registry()
+            .unwrap_or_else(|_| RendererRegistry::new());
+        Self::new(registry)
+    }
+
+    /// Access the renderer registry (for HTTP introspection endpoints).
+    pub fn registry(&self) -> &RendererRegistry {
+        &self.registry
     }
 
     /// Spawn a fresh renderer-host subprocess, wait for its `Ready`
@@ -180,7 +195,13 @@ impl RendererManager {
         // the connection survives unlink(2).
         let _cleanup = TempUnlink(sock_path.clone());
 
-        let mut cmd = Command::new(&self.renderer_bin);
+        let renderer_def = self
+            .registry
+            .resolve(&req.wp_type)
+            .ok_or_else(|| anyhow!("no renderer registered for type '{}'", req.wp_type))?
+            .clone();
+
+        let mut cmd = Command::new(&renderer_def.bin);
         cmd.arg("--ipc")
             .arg(&sock_path)
             .arg("--width")
@@ -189,11 +210,13 @@ impl RendererManager {
             .arg(req.height.to_string())
             .arg("--fps")
             .arg(req.fps.to_string());
-        if !req.scene_pkg.is_empty() {
-            cmd.arg("--scene").arg(&req.scene_pkg);
+        // Forward type-specific metadata as --key value CLI args.
+        for (key, value) in &req.metadata {
+            cmd.arg(format!("--{key}")).arg(value);
         }
-        if !req.assets.is_empty() {
-            cmd.arg("--assets").arg(&req.assets);
+        // Append extra_args from the renderer manifest.
+        for arg in &renderer_def.extra_args {
+            cmd.arg(arg);
         }
         if req.test_pattern {
             cmd.arg("--test-pattern");
@@ -204,7 +227,7 @@ impl RendererManager {
 
         let mut child = cmd
             .spawn()
-            .with_context(|| format!("spawn {}", self.renderer_bin.display()))?;
+            .with_context(|| format!("spawn {}", renderer_def.bin.display()))?;
 
         // Accept, with a bound to avoid hanging forever on a broken host.
         let accept = listener.accept();
@@ -266,6 +289,7 @@ impl RendererManager {
 
         let handle = Arc::new(RendererHandle {
             id: id.clone(),
+            wp_type: req.wp_type.clone(),
             width: req.width,
             height: req.height,
             fps: req.fps,
@@ -484,4 +508,4 @@ impl Drop for TempUnlink {
 }
 
 #[allow(dead_code)]
-fn _assert_path_ok<P: AsRef<Path>>(_p: P) {} // compile-time shim
+fn _assert_path_ok<P: AsRef<std::path::Path>>(_p: P) {} // compile-time shim

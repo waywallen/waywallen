@@ -44,7 +44,7 @@ async fn handshake_up_to_display_accepted() {
     let sock = tmp_sock("handshake");
     let _ = std::fs::remove_file(&sock);
 
-    let mgr = Arc::new(RendererManager::new());
+    let mgr = Arc::new(RendererManager::new_default());
     let sched = Arc::new(Mutex::new(Scheduler::new()));
 
     let sock_for_task = sock.clone();
@@ -145,7 +145,7 @@ async fn rejects_wrong_protocol_string() {
     let sock = tmp_sock("bad-proto");
     let _ = std::fs::remove_file(&sock);
 
-    let mgr = Arc::new(RendererManager::new());
+    let mgr = Arc::new(RendererManager::new_default());
     let sched = Arc::new(Mutex::new(Scheduler::new()));
     let sock_for_task = sock.clone();
     let server_task = tokio::spawn({

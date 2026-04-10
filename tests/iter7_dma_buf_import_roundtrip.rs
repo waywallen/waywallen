@@ -44,7 +44,7 @@ async fn end_to_end_dma_buf_vulkan_import() {
         );
     }
 
-    let mgr = Arc::new(RendererManager::new());
+    let mgr = Arc::new(RendererManager::new_default());
     let display_sock: PathBuf = std::env::temp_dir().join(format!(
         "waywallen-iter7-display-{}-{}.sock",
         std::process::id(),
@@ -62,8 +62,8 @@ async fn end_to_end_dma_buf_vulkan_import() {
 
     let id = mgr
         .spawn(SpawnRequest {
-            scene_pkg: String::new(),
-            assets: String::new(),
+            wp_type: "scene".into(),
+            metadata: std::collections::HashMap::new(),
             width: 256,
             height: 256,
             fps: 30,

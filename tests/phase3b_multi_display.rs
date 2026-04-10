@@ -125,7 +125,7 @@ async fn two_displays_both_get_real_sync_fds() {
     let renderer_bin = env!("CARGO_BIN_EXE_waywallen_renderer");
     std::env::set_var("WAYWALLEN_RENDERER_BIN", renderer_bin);
 
-    let mgr = Arc::new(RendererManager::new());
+    let mgr = Arc::new(RendererManager::new_default());
     let sched = Arc::new(Mutex::new(Scheduler::new()));
     let sock = tmp_sock("multi");
     let _ = std::fs::remove_file(&sock);
@@ -145,8 +145,8 @@ async fn two_displays_both_get_real_sync_fds() {
 
     let spawn_res = mgr
         .spawn(SpawnRequest {
-            scene_pkg: String::new(),
-            assets: String::new(),
+            wp_type: "scene".into(),
+            metadata: std::collections::HashMap::new(),
             width: 640,
             height: 480,
             fps: 60,

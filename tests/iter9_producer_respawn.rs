@@ -42,7 +42,7 @@ async fn producer_respawn_test() {
         );
     }
 
-    let mgr = Arc::new(RendererManager::new());
+    let mgr = Arc::new(RendererManager::new_default());
     let display_sock: PathBuf = std::env::temp_dir().join(format!(
         "waywallen-iter9-display-{}-{}.sock",
         std::process::id(),
@@ -62,8 +62,8 @@ async fn producer_respawn_test() {
     println!("[iter9] Spawning initial renderer...");
     let id = mgr
         .spawn(SpawnRequest {
-            scene_pkg: String::new(),
-            assets: String::new(),
+            wp_type: "scene".into(),
+            metadata: std::collections::HashMap::new(),
             width: 64,
             height: 64,
             fps: 30,

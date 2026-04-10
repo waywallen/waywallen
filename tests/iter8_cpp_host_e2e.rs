@@ -37,7 +37,7 @@ async fn cpp_host_test_pattern_end_to_end() {
         return;
     }
 
-    let mgr = Arc::new(RendererManager::new());
+    let mgr = Arc::new(RendererManager::new_default());
     let display_sock: PathBuf = std::env::temp_dir().join(format!(
         "waywallen-iter8-display-{}-{}.sock",
         std::process::id(),
@@ -58,8 +58,8 @@ async fn cpp_host_test_pattern_end_to_end() {
     // a realistic size.
     let id = mgr
         .spawn(SpawnRequest {
-            scene_pkg: String::new(),
-            assets: String::new(),
+            wp_type: "scene".into(),
+            metadata: std::collections::HashMap::new(),
             width: 1280,
             height: 720,
             fps: 30,

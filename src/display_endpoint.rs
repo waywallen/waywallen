@@ -341,6 +341,7 @@ async fn send_initial_bind_and_config(
             .map_err(|e| anyhow!("scheduler poisoned: {e}"))?;
         let _ = s.set_active_binding(ActiveBinding {
             renderer_id: renderer.id.clone(),
+            wp_type: renderer.wp_type.clone(),
             buffer_generation,
             tex_width: renderer.width,
             tex_height: renderer.height,

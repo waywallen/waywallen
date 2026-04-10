@@ -24,14 +24,14 @@ async fn spawn_control_kill_roundtrip() {
         return;
     }
 
-    let mgr = RendererManager::new();
+    let mgr = RendererManager::new_default();
 
     // Spawn a renderer with bogus scene/assets — the host will start its
     // looper threads and emit Ready before noticing the scene is missing,
     // which is fine for this test (we only care about IPC liveness).
     let req = SpawnRequest {
-        scene_pkg: String::new(),
-        assets: String::new(),
+        wp_type: "scene".into(),
+        metadata: std::collections::HashMap::new(),
         width: 320,
         height: 240,
         fps: 15,

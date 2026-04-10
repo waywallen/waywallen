@@ -44,6 +44,7 @@ pub struct DisplayInfo {
 #[derive(Debug, Clone)]
 pub struct ActiveBinding {
     pub renderer_id: String,
+    pub wp_type: String,
     pub buffer_generation: u64,
     pub tex_width: u32,
     pub tex_height: u32,
@@ -335,6 +336,7 @@ mod tests {
     fn mk_binding(gen: u64) -> ActiveBinding {
         ActiveBinding {
             renderer_id: "r".into(),
+            wp_type: "scene".into(),
             buffer_generation: gen,
             tex_width: 1920,
             tex_height: 1080,

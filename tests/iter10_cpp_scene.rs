@@ -60,7 +60,7 @@ async fn real_scene_end_to_end() {
         "WAYWALLEN_WE_SCENE is not a file: {scene}"
     );
 
-    let mgr = Arc::new(RendererManager::new());
+    let mgr = Arc::new(RendererManager::new_default());
     let display_sock: PathBuf = std::env::temp_dir().join(format!(
         "waywallen-iter10-display-{}-{}.sock",
         std::process::id(),
@@ -78,8 +78,11 @@ async fn real_scene_end_to_end() {
 
     let id = mgr
         .spawn(SpawnRequest {
-            scene_pkg: scene.clone(),
-            assets: assets.clone(),
+            wp_type: "scene".into(),
+            metadata: [
+                ("scene".to_string(), scene.clone()),
+                ("assets".to_string(), assets.clone()),
+            ].into_iter().collect(),
             width: 1280,
             height: 720,
             fps: 30,

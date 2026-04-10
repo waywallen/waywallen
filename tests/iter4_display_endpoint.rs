@@ -41,7 +41,7 @@ async fn end_to_end_dma_buf_dump() {
         );
     }
 
-    let mgr = Arc::new(RendererManager::new());
+    let mgr = Arc::new(RendererManager::new_default());
 
     // Bind a per-test display socket so concurrent test runs don't
     // collide with the production default.
@@ -64,8 +64,8 @@ async fn end_to_end_dma_buf_dump() {
     // Spawn the mock renderer host.
     let id = mgr
         .spawn(SpawnRequest {
-            scene_pkg: String::new(),
-            assets: String::new(),
+            wp_type: "scene".into(),
+            metadata: std::collections::HashMap::new(),
             width: 64,
             height: 64,
             fps: 30,
