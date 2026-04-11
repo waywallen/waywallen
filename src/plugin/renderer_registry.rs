@@ -114,45 +114,54 @@ impl RendererRegistry {
     }
 }
 
-/// Build a registry with backward-compatible defaults:
-/// - Scans `$WAYWALLEN_RENDERER_DIR` or `$XDG_DATA_HOME/waywallen/renderers/`
-/// - If `WAYWALLEN_RENDERER_BIN` is set, inserts a legacy "scene" renderer at
-///   priority 50 so it doesn't override explicit manifests.
+/// Build a registry by scanning the two canonical plugin paths:
+/// 1. `<exec>/../share/waywallen/renderers/`  (bundled / system install)
+/// 2. `$XDG_DATA_HOME/waywallen/renderers/`   (user overrides)
+///
+/// User-local manifests (XDG) are loaded last so they can shadow bundled
+/// ones by name. Non-existent directories are silently skipped.
 pub fn build_default_registry() -> Result<RendererRegistry> {
-    let scan_dir = std::env::var_os("WAYWALLEN_RENDERER_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            let base = std::env::var_os("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| {
-                    let home = std::env::var_os("HOME").unwrap_or_default();
-                    PathBuf::from(home).join(".local/share")
-                });
-            base.join("waywallen/renderers")
-        });
+    let mut registry = RendererRegistry::new();
 
-    let mut registry = if scan_dir.is_dir() {
-        RendererRegistry::scan(&scan_dir)?
-    } else {
-        log::info!(
-            "renderer manifest dir does not exist: {}; starting with empty registry",
-            scan_dir.display()
-        );
-        RendererRegistry::new()
-    };
-
-    // Backward compat: WAYWALLEN_RENDERER_BIN → legacy scene renderer
-    if let Some(bin) = std::env::var_os("WAYWALLEN_RENDERER_BIN") {
-        let def = RendererDef {
-            name: "legacy".to_string(),
-            bin: PathBuf::from(bin),
-            types: vec!["scene".to_string()],
-            extra_args: vec![],
-            priority: 50,
-        };
-        log::info!("registered legacy renderer from WAYWALLEN_RENDERER_BIN");
-        registry.register(def);
+    for dir in standard_plugin_dirs("renderers") {
+        if dir.is_dir() {
+            match RendererRegistry::scan(&dir) {
+                Ok(scanned) => {
+                    for def in scanned.all_renderers() {
+                        registry.register(def.clone());
+                    }
+                }
+                Err(e) => log::warn!("scan {}: {e}", dir.display()),
+            }
+        }
     }
 
     Ok(registry)
+}
+
+/// Return the two canonical plugin directories (bundled + XDG) for a
+/// given subdirectory name (e.g. `"renderers"` or `"sources"`). Returned
+/// in load order: bundled first, user-local second.
+pub fn standard_plugin_dirs(subdir: &str) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+
+    // Bundled: <exec>/../share/waywallen/<subdir>/
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            if let Some(prefix) = parent.parent() {
+                dirs.push(prefix.join("share/waywallen").join(subdir));
+            }
+        }
+    }
+
+    // User-local: $XDG_DATA_HOME/waywallen/<subdir>/
+    let xdg = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let home = std::env::var_os("HOME").unwrap_or_default();
+            PathBuf::from(home).join(".local/share")
+        });
+    dirs.push(xdg.join("waywallen").join(subdir));
+
+    dirs
 }

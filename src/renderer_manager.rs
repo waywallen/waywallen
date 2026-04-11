@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 use crate::ipc::proto::{ControlMsg, EventMsg};
 use crate::ipc::uds::{recv_msg, send_msg};
-use crate::plugin::renderer_registry::RendererRegistry;
+use crate::plugin::renderer_registry::{RendererDef, RendererRegistry};
 use crate::wallpaper_type::WallpaperType;
 
 // ---------------------------------------------------------------------------
@@ -165,11 +165,21 @@ impl RendererManager {
         }
     }
 
-    /// Create a manager with a default registry built from env vars and
-    /// XDG dirs. Convenience for tests and simple setups.
+    /// Test-only convenience: construct a manager whose registry has a
+    /// single "scene" renderer pointed at `$WAYWALLEN_RENDERER_BIN`. If
+    /// that env var is unset the registry is empty and any spawn call
+    /// will fail with "no renderer registered for type 'scene'".
     pub fn new_default() -> Self {
-        let registry = crate::plugin::renderer_registry::build_default_registry()
-            .unwrap_or_else(|_| RendererRegistry::new());
+        let mut registry = RendererRegistry::new();
+        if let Some(bin) = std::env::var_os("WAYWALLEN_RENDERER_BIN") {
+            registry.register(RendererDef {
+                name: "test-scene".to_string(),
+                bin: PathBuf::from(bin),
+                types: vec!["scene".to_string()],
+                extra_args: vec![],
+                priority: 100,
+            });
+        }
         Self::new(registry)
     }
 

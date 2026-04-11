@@ -363,32 +363,15 @@ async fn main() -> std::io::Result<()> {
     let registry = plugin::renderer_registry::build_default_registry()
         .expect("failed to build renderer registry");
 
-    // Source management: load Lua plugins from $WAYWALLEN_SOURCE_DIR or
-    // $XDG_DATA_HOME/waywallen/sources/, falling back to the bundled
-    // sources/ dir next to the binary.
+    // Source management: load Lua plugins from the canonical paths
+    // (bundled `<exec>/../share/waywallen/sources/` first, then user-local
+    // `$XDG_DATA_HOME/waywallen/sources/` — user plugins can shadow bundled
+    // ones by name).
     let mut source_mgr = plugin::source_manager::SourceManager::new(std::collections::HashMap::new())
         .expect("failed to create source manager");
-    let source_dir = std::env::var_os("WAYWALLEN_SOURCE_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| {
-            let base = std::env::var_os("XDG_DATA_HOME")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| {
-                    let home = std::env::var_os("HOME").unwrap_or_default();
-                    std::path::PathBuf::from(home).join(".local/share")
-                });
-            base.join("waywallen/sources")
-        });
-    if source_dir.is_dir() {
-        let _ = source_mgr.load_all(&source_dir);
-    }
-    // Also try bundled sources/ next to the executable.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let bundled = parent.join("sources");
-            if bundled.is_dir() {
-                let _ = source_mgr.load_all(&bundled);
-            }
+    for dir in plugin::renderer_registry::standard_plugin_dirs("sources") {
+        if dir.is_dir() {
+            let _ = source_mgr.load_all(&dir);
         }
     }
     // Initial scan.
