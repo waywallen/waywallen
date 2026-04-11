@@ -31,6 +31,13 @@ fn main() {
         &manifest_dir.join("protocol/waywallen_ipc_v1.xml"),
         &out_dir.join("ipc_generated.rs"),
     );
+
+    // Control plane protobufs (prost).
+    let proto_path = manifest_dir.join("proto/control.proto");
+    println!("cargo:rerun-if-changed={}", proto_path.display());
+    prost_build::Config::new()
+        .compile_protos(&[proto_path], &[manifest_dir.join("proto")])
+        .expect("prost-build failed on proto/control.proto");
 }
 
 fn gen_rust(xml_path: &Path, out_file: &Path) {

@@ -1,0 +1,168 @@
+syntax = "proto3";
+
+package waywallen.control.v1;
+
+// ---------------------------------------------------------------------------
+// Envelope
+// ---------------------------------------------------------------------------
+
+message Request {
+  uint64 request_id = 1;
+  oneof payload {
+    HealthRequest             health = 10;
+    RendererSpawnRequest      renderer_spawn = 11;
+    RendererListRequest       renderer_list = 12;
+    RendererPlayRequest       renderer_play = 13;
+    RendererPauseRequest      renderer_pause = 14;
+    RendererMouseRequest      renderer_mouse = 15;
+    RendererFpsRequest        renderer_fps = 16;
+    RendererKillRequest       renderer_kill = 17;
+    RendererPluginListRequest renderer_plugin_list = 18;
+    WallpaperListRequest      wallpaper_list = 19;
+    WallpaperScanRequest      wallpaper_scan = 20;
+    SourceListRequest         source_list = 21;
+    WallpaperApplyRequest     wallpaper_apply = 22;
+  }
+}
+
+message Response {
+  uint64 request_id = 1;
+  Status status = 2;
+  string message = 3;
+  oneof payload {
+    HealthResponse             health = 10;
+    RendererSpawnResponse      renderer_spawn = 11;
+    RendererListResponse       renderer_list = 12;
+    Empty                      renderer_play = 13;
+    Empty                      renderer_pause = 14;
+    Empty                      renderer_mouse = 15;
+    Empty                      renderer_fps = 16;
+    Empty                      renderer_kill = 17;
+    RendererPluginListResponse renderer_plugin_list = 18;
+    WallpaperListResponse      wallpaper_list = 19;
+    WallpaperScanResponse      wallpaper_scan = 20;
+    SourceListResponse         source_list = 21;
+    WallpaperApplyResponse     wallpaper_apply = 22;
+  }
+}
+
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  OK = 1;
+  INVALID_ARGUMENT = 2;
+  NOT_FOUND = 3;
+  INTERNAL = 4;
+}
+
+message Empty {}
+
+// ---------------------------------------------------------------------------
+// Health
+// ---------------------------------------------------------------------------
+
+message HealthRequest {}
+message HealthResponse {
+  string service = 1;
+  string state = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Renderer lifecycle
+// ---------------------------------------------------------------------------
+
+message RendererSpawnRequest {
+  string wp_type = 1;
+  map<string, string> metadata = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  uint32 fps = 5;
+}
+message RendererSpawnResponse {
+  string renderer_id = 1;
+}
+
+message RendererListRequest {}
+message RendererListResponse {
+  repeated string renderers = 1;
+}
+
+message RendererPlayRequest  { string renderer_id = 1; }
+message RendererPauseRequest { string renderer_id = 1; }
+
+message RendererMouseRequest {
+  string renderer_id = 1;
+  double x = 2;
+  double y = 3;
+}
+
+message RendererFpsRequest {
+  string renderer_id = 1;
+  uint32 fps = 2;
+}
+
+message RendererKillRequest { string renderer_id = 1; }
+
+// ---------------------------------------------------------------------------
+// Renderer plugin registry
+// ---------------------------------------------------------------------------
+
+message RendererPluginListRequest {}
+message RendererPluginListResponse {
+  repeated RendererPluginInfo renderers = 1;
+  repeated string supported_types = 2;
+}
+message RendererPluginInfo {
+  string name = 1;
+  string bin = 2;
+  repeated string types = 3;
+  uint32 priority = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Wallpapers / sources
+// ---------------------------------------------------------------------------
+
+message WallpaperEntry {
+  string id = 1;
+  string name = 2;
+  string wp_type = 3;
+  string resource = 4;
+  string preview = 5;
+  map<string, string> metadata = 6;
+}
+
+message WallpaperListRequest {
+  string wp_type = 1; // empty = all
+}
+message WallpaperListResponse {
+  repeated WallpaperEntry wallpapers = 1;
+  uint32 count = 2;
+}
+
+message WallpaperScanRequest {}
+message WallpaperScanResponse {
+  uint32 count = 1;
+}
+
+message SourceListRequest {}
+message SourceListResponse {
+  repeated SourcePluginInfo sources = 1;
+}
+message SourcePluginInfo {
+  string name = 1;
+  repeated string types = 2;
+  string version = 3;
+}
+
+message WallpaperApplyRequest {
+  string wallpaper_id = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  uint32 fps = 4;
+}
+message WallpaperApplyResponse {
+  string renderer_id = 1;
+  string wallpaper_id = 2;
+  string wp_type = 3;
+  string name = 4;
+}

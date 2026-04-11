@@ -9,9 +9,23 @@ set(APP_AUTHOR "hypengw")
 project(waywallen-ui LANGUAGES CXX)
 
 #include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
-find_package(Qt6 REQUIRED COMPONENTS Quick ProtobufQuick ProtobufWellKnownTypes) 
+find_package(Qt6 REQUIRED COMPONENTS Quick Protobuf ProtobufQuick ProtobufWellKnownTypes)
 
 qt_standard_project_setup()
+
+# ---------------------------------------------------------------------------
+# Control-plane protobuf (shared schema with the Rust backend).
+# Generates C++/QML types from ../proto/control.proto via qt_add_protobuf.
+# ---------------------------------------------------------------------------
+set(WAYWALLEN_PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../proto")
+qt_add_protobuf(waywallen.control.proto
+    QML
+    QML_URI waywallen.control
+    PROTO_FILES
+        "${WAYWALLEN_PROTO_DIR}/control.proto"
+    PROTO_INCLUDES
+        "${WAYWALLEN_PROTO_DIR}"
+)
 
 set(SOURCES
 )
@@ -91,6 +105,13 @@ target_include_directories(
   PRIVATE . # src/
 )
 target_compile_features(waywallen.ui.qml PUBLIC cxx_std_20)
+target_link_libraries(waywallen.ui.qml
+  PUBLIC
+    Qt6::Protobuf
+    Qt6::ProtobufQuick
+    Qt6::ProtobufWellKnownTypes
+    waywallen.control.proto
+)
 
 qt_add_executable(${PROJECT_NAME} MANUAL_FINALIZATION src/main.cpp)
 set_target_properties(${PROJECT_NAME} PROPERTIES CXX_SCAN_FOR_MODULES ON
