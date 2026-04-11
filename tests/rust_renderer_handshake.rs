@@ -1,5 +1,5 @@
-//! Iteration 5 smoke test: spawn the Rust `waywallen_renderer` binary
-//! against a listening Unix-domain socket, expect
+//! Rust waywallen_renderer handshake: spawn the Rust `waywallen_renderer`
+//! binary against a listening Unix-domain socket, expect
 //!
 //!   1. `EventMsg::Ready`,
 //!   2. `EventMsg::BindBuffers` carrying 3 DMA-BUF FDs with the
@@ -36,7 +36,7 @@ fn waywallen_renderer_bind_handshake() {
     assert!(bin.exists(), "renderer binary missing: {}", bin.display());
 
     let sock_path = std::env::temp_dir().join(format!(
-        "waywallen-iter5-{}-{}.sock",
+        "waywallen-rust-renderer-handshake-{}-{}.sock",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

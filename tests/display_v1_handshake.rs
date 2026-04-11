@@ -5,9 +5,7 @@
 //! the protocol up through `display_accepted`. Bind/SetConfig/FrameReady
 //! are NOT exercised here because a real `BindSnapshot` requires a
 //! `waywallen-renderer` subprocess — that pipeline is covered by the
-//! legacy iter tests (gated behind `legacy_proto_tests`) and will get
-//! a fresh new-protocol e2e suite once producer-side sync_fd export
-//! lands.
+//! `phase3b_*` and `rust_renderer_handshake` tests.
 //!
 //! What this test verifies:
 //!

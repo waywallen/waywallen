@@ -1,4 +1,4 @@
-//! Iteration 2 smoke test: spawn the `waywallen-renderer` host binary
+//! C++ host handshake: spawn the `waywallen-renderer` host binary
 //! against a listening Unix-domain socket and verify the handshake.
 //!
 //! This is an *integration* test from the Rust daemon's perspective:
@@ -43,7 +43,7 @@ fn renderer_bin() -> Option<PathBuf> {
 fn hello_handshake() {
     let Some(bin) = renderer_bin() else {
         eprintln!(
-            "skipping iter2_host_handshake: set WAYWALLEN_RENDERER_BIN to the path \
+            "skipping cpp_host_handshake: set WAYWALLEN_RENDERER_BIN to the path \
              of the compiled waywallen-renderer binary to run this test"
         );
         return;
@@ -58,7 +58,7 @@ fn hello_handshake() {
     // we need the path removed *before* we bind — a leftover file would
     // make bind() fail with EADDRINUSE.
     let sock_path = std::env::temp_dir().join(format!(
-        "waywallen-iter2-{}-{}.sock",
+        "waywallen-cpp-host-handshake-{}-{}.sock",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -150,7 +150,7 @@ fn binding_and_frames_smoke() {
     };
 
     let sock_path = std::env::temp_dir().join(format!(
-        "waywallen-iter2b-{}-{}.sock",
+        "waywallen-cpp-host-test-pattern-{}-{}.sock",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

@@ -1,7 +1,7 @@
-//! Iteration 3 integration test: RendererManager spawn → control → kill.
+//! RendererManager lifecycle: spawn → control → kill.
 //!
 //! Skipped (not failed) when `WAYWALLEN_RENDERER_BIN` is unset, mirroring
-//! the iter2 test's contract.
+//! the cpp_host_handshake test's contract.
 
 use waywallen::ipc::proto::ControlMsg;
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
@@ -10,7 +10,7 @@ use std::time::Duration;
 fn skip_if_no_bin() -> bool {
     if std::env::var_os("WAYWALLEN_RENDERER_BIN").is_none() {
         eprintln!(
-            "skipping iter3_renderer_manager: set WAYWALLEN_RENDERER_BIN to the path \
+            "skipping renderer_manager_lifecycle: set WAYWALLEN_RENDERER_BIN to the path \
              of the compiled waywallen-renderer binary to run this test"
         );
         return true;
