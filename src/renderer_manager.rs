@@ -19,7 +19,7 @@ use tokio::sync::{broadcast, Mutex as TokioMutex};
 use uuid::Uuid;
 
 use crate::ipc::proto::{ControlMsg, EventMsg};
-use crate::ipc::uds::{recv_msg, send_msg};
+use crate::ipc::uds::{recv_event, send_control};
 use crate::plugin::renderer_registry::{RendererDef, RendererRegistry};
 use crate::wallpaper_type::WallpaperType;
 
@@ -265,7 +265,7 @@ impl RendererManager {
             .try_clone()
             .context("try_clone for Ready poll")?;
         let ready: (EventMsg, Vec<OwnedFd>) = tokio::task::spawn_blocking(move || {
-            recv_msg::<EventMsg>(&ready_stream)
+            recv_event(&ready_stream).map_err(|e| anyhow!("recv Ready: {e}"))
         })
         .await
         .context("ready poll join")??;
@@ -340,7 +340,7 @@ impl RendererManager {
             let guard = sock
                 .lock()
                 .map_err(|e| anyhow!("sock mutex poisoned: {e}"))?;
-            send_msg(&*guard, &msg, &[])
+            send_control(&*guard, &msg, &[]).map_err(|e| anyhow!("send_control: {e}"))
         })
         .await
         .context("send_control join")?
@@ -359,7 +359,7 @@ impl RendererManager {
         let sock = handle.sock.clone();
         let _ = tokio::task::spawn_blocking(move || {
             if let Ok(guard) = sock.lock() {
-                let _ = send_msg(&*guard, &ControlMsg::Shutdown, &[]);
+                let _ = send_control(&*guard, &ControlMsg::Shutdown, &[]);
             }
         })
         .await;
@@ -408,7 +408,7 @@ fn run_reader(
     };
 
     loop {
-        let received = match recv_msg::<EventMsg>(&read_stream) {
+        let received = match recv_event(&read_stream) {
             Ok(ok) => ok,
             Err(e) => {
                 log::info!("renderer {id}: reader exit: {e}");
@@ -454,36 +454,16 @@ fn run_reader(
                     guard.clear();
                 }
             }
-        } else if let EventMsg::FrameReady {
-            seq,
-            has_sync_fd,
-            ..
-        } = msg
-        {
-            // A real sync_fd arrived with this frame: stash it by seq
-            // for the display endpoint to pick up. Drop the oldest
-            // entry if we're over the retention budget.
-            if has_sync_fd && !fds.is_empty() {
-                let mut taken = fds;
-                let fd = taken.remove(0);
-                for extra in taken {
-                    log::warn!(
-                        "renderer {id}: FrameReady carried {} extra fds; dropping",
-                        1
-                    );
-                    drop(extra);
+        } else if let EventMsg::FrameReady { seq, .. } = msg {
+            // frame_ready always carries exactly one sync_fd: the codec
+            // enforced expected_fds() == 1 before handing us `fds`.
+            let mut taken = fds;
+            let fd = taken.remove(0);
+            if let Ok(mut guard) = sync_fds.lock() {
+                while guard.len() >= SYNC_FD_RETENTION {
+                    guard.pop_front();
                 }
-                if let Ok(mut guard) = sync_fds.lock() {
-                    while guard.len() >= SYNC_FD_RETENTION {
-                        guard.pop_front();
-                    }
-                    guard.push_back((seq, fd));
-                }
-            } else if !fds.is_empty() {
-                log::warn!(
-                    "renderer {id}: FrameReady has_sync_fd=false but {} fds attached",
-                    fds.len()
-                );
+                guard.push_back((seq, fd));
             }
         } else if !fds.is_empty() {
             log::warn!(

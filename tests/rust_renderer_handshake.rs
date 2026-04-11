@@ -14,7 +14,7 @@
 //! per-frame rendering (M1.4) is out of scope here.
 
 use waywallen::ipc::proto::{ControlMsg, EventMsg};
-use waywallen::ipc::uds::{recv_msg, send_msg};
+use waywallen::ipc::uds::{recv_event, send_control};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -85,12 +85,12 @@ fn waywallen_renderer_bind_handshake() {
     };
 
     // 1. Ready, no fds.
-    let (msg, fds) = recv_msg::<EventMsg>(&stream).expect("recv Ready");
+    let (msg, fds) = recv_event(&stream).expect("recv Ready");
     assert!(fds.is_empty(), "Ready must not carry fds");
     assert_eq!(msg, EventMsg::Ready);
 
     // 2. BindBuffers with 3 fds.
-    let (msg, fds) = recv_msg::<EventMsg>(&stream).expect("recv BindBuffers");
+    let (msg, fds) = recv_event(&stream).expect("recv BindBuffers");
     assert_eq!(fds.len(), 3, "expected 3 DMA-BUF fds");
     match msg {
         EventMsg::BindBuffers {
@@ -127,8 +127,8 @@ fn waywallen_renderer_bind_handshake() {
     let mut observed_slots = Vec::<u32>::new();
     let mut last_seq: i64 = -1;
     for _ in 0..6 {
-        let (ev, fds) = recv_msg::<EventMsg>(&stream).expect("recv FrameReady");
-        assert!(fds.is_empty(), "FrameReady must not carry fds");
+        let (ev, fds) = recv_event(&stream).expect("recv FrameReady");
+        assert_eq!(fds.len(), 1, "FrameReady must carry exactly one sync_fd");
         match ev {
             EventMsg::FrameReady {
                 image_index,
@@ -153,7 +153,7 @@ fn waywallen_renderer_bind_handshake() {
     // issuing a copy — that happens in the M2 display milestone.
 
     // 4. Send Shutdown and wait for the child to exit.
-    send_msg(&stream, &ControlMsg::Shutdown, &[]).expect("send Shutdown");
+    send_control(&stream, &ControlMsg::Shutdown, &[]).expect("send Shutdown");
     let (tx, rx) = std::sync::mpsc::channel();
     // Move child out of guard so we can wait() without dropping twice.
     std::thread::spawn(move || {

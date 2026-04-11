@@ -9,7 +9,7 @@ use anyhow::{anyhow, Context, Result};
 use ash::{vk, Entry, Instance};
 
 use waywallen::ipc::proto::{ControlMsg, EventMsg};
-use waywallen::ipc::uds::{recv_msg, send_msg};
+use waywallen::ipc::uds::{recv_control, send_event};
 
 const SLOT_COUNT: usize = 3;
 const RENDER_FORMAT: vk::Format = vk::Format::R8G8B8A8_UNORM;
@@ -111,20 +111,21 @@ fn run(instance: &Instance, args: &Args) -> Result<()> {
 
     let ipc_path = args.ipc.as_ref().ok_or_else(|| anyhow!("--ipc required"))?;
     let stream = UnixStream::connect(ipc_path)?;
-    send_msg(&stream, &EventMsg::Ready, &[])?;
+    send_event(&stream, &EventMsg::Ready, &[]).map_err(|e| anyhow!("send Ready: {e}"))?;
     
     let bind = EventMsg::BindBuffers {
         count: SLOT_COUNT as u32, fourcc: 0x34324241, width: args.width, height: args.height,
         stride: exports[0].2 as u32, modifier: exports[0].1, plane_offset: 0,
         sizes: vec![exports[0].2 * args.height as u64; SLOT_COUNT],
     };
-    send_msg(&stream, &bind, &exports.iter().map(|e| e.0).collect::<Vec<_>>())?;
+    send_event(&stream, &bind, &exports.iter().map(|e| e.0).collect::<Vec<_>>())
+        .map_err(|e| anyhow!("send BindBuffers: {e}"))?;
 
     let shutdown = Arc::new(AtomicBool::new(false));
     let s2 = shutdown.clone();
     let rs = stream.try_clone()?;
     thread::spawn(move || {
-        while let Ok((ControlMsg::Shutdown, _)) = recv_msg::<ControlMsg>(&rs) {
+        while let Ok((ControlMsg::Shutdown, _)) = recv_control(&rs) {
             s2.store(true, Ordering::SeqCst);
             break;
         }
@@ -194,13 +195,12 @@ fn run(instance: &Instance, args: &Args) -> Result<()> {
                     .handle_type(vk::ExternalSemaphoreHandleTypeFlags::SYNC_FD),
             )?
         };
-        let send_result = send_msg(
+        let send_result = send_event(
             &stream,
             &EventMsg::FrameReady {
                 image_index: slot as u32,
                 seq,
                 ts_ns: 0,
-                has_sync_fd: true,
             },
             &[sync_fd],
         );

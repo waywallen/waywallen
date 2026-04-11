@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  waywallen-ipc-v1
+
+  Wire protocol between the waywallen daemon ("manager") and a renderer
+  subprocess ("host"). Spoken over a SOCK_STREAM Unix-domain socket the
+  daemon bind()s before spawning the subprocess and passes via `--ipc`.
+
+  Role model:
+    server  = daemon (waywallen: control plane, lifecycle)
+    client  = renderer subprocess (e.g. waywallen-renderer, open-wallpaper-engine
+              host). Produces DMA-BUF frames and emits events back.
+
+  Wire format: identical framing to waywallen-display-v1 (Wayland-style
+  binary):
+
+    header: 4 bytes
+      u16 opcode
+      u16 total_length_in_bytes  (including the 4-byte header)
+
+    body: positional args, 4-byte aligned
+
+      u32/i32/f32 = 4 bytes LE
+      u64/i64/f64 = 8 bytes LE
+      string      = [u32 len_including_NUL] [utf8...] [NUL] [pad to 4]
+      array<T>    = [u32 count] [count * sizeof(T)] [pad to 4]
+
+    fds: passed out-of-band via SCM_RIGHTS ancillary data. Order defined
+         per-message.
+
+  Invariants:
+
+    - The first Event from the subprocess MUST be `ready`.
+    - The subprocess MUST emit exactly one `bind_buffers` over the
+      lifetime of a renderer; daemon caches the fds for late display
+      subscribers.
+    - Every `frame_ready` MUST carry exactly one acquire sync_fd
+      (dma_fence sync_file). v1 does not support sync-less producers.
+    - `seq` on `frame_ready` is monotonically increasing.
+
+  Version: 1
+-->
+<protocol name="waywallen_ipc" version="1">
+
+  <!-- ==================================================================
+       REQUESTS  (daemon -> subprocess, control plane)
+       ================================================================== -->
+
+  <!--
+    Opening handshake. In v1 this is not required on every connection
+    (the daemon currently spawns the subprocess and expects a `ready`
+    event without a preceding `hello`), but reserved for future
+    reconnect flows.
+  -->
+  <request name="hello" opcode="1">
+    <arg name="client" type="string"/>
+    <arg name="version" type="u32"/>
+  </request>
+
+  <!--
+    Ask the subprocess to load a specific scene. Currently unused by
+    the Rust daemon (scene/assets are passed via CLI args at spawn
+    time) but the C++ host understands this message.
+  -->
+  <request name="load_scene" opcode="2">
+    <arg name="pkg" type="string"/>
+    <arg name="assets" type="string"/>
+    <arg name="fps" type="u32"/>
+    <arg name="width" type="u32"/>
+    <arg name="height" type="u32"/>
+  </request>
+
+  <request name="play" opcode="3"/>
+  <request name="pause" opcode="4"/>
+
+  <request name="mouse" opcode="5">
+    <arg name="x" type="f64"/>
+    <arg name="y" type="f64"/>
+  </request>
+
+  <request name="set_fps" opcode="6">
+    <arg name="fps" type="u32"/>
+  </request>
+
+  <!--
+    Request clean shutdown. The subprocess is expected to finish the
+    current frame, tear down its Vulkan state, and exit. The daemon
+    will SIGKILL if the process does not exit quickly.
+  -->
+  <request name="shutdown" opcode="7"/>
+
+
+  <!-- ==================================================================
+       EVENTS  (subprocess -> daemon)
+       ================================================================== -->
+
+  <!--
+    Emitted once the subprocess has finished initializing Vulkan and is
+    ready to receive control messages. No fds.
+  -->
+  <event name="ready" opcode="1"/>
+
+  <!--
+    Sent exactly once, after the first successful render, carrying the
+    full set of swapchain image fds as SCM_RIGHTS ancillary data. fds
+    live for the lifetime of the subprocess.
+
+    `count` fds are attached.
+  -->
+  <event name="bind_buffers" opcode="2">
+    <arg name="count" type="u32"/>
+    <arg name="fourcc" type="u32"/>
+    <arg name="width" type="u32"/>
+    <arg name="height" type="u32"/>
+    <arg name="stride" type="u32"/>
+    <arg name="modifier" type="u64"/>
+    <arg name="plane_offset" type="u64"/>
+    <arg name="sizes" type="array" element="u64"/>
+    <fds count_expr="count"/>
+  </event>
+
+  <!--
+    A frame was produced. `image_index` indexes into the fd array
+    delivered by the preceding `bind_buffers`. Always carries exactly
+    one sync_fd (dma_fence sync_file) as SCM_RIGHTS.
+  -->
+  <event name="frame_ready" opcode="3">
+    <arg name="image_index" type="u32"/>
+    <arg name="seq" type="u64"/>
+    <arg name="ts_ns" type="u64"/>
+    <fds count="1"/>
+  </event>
+
+  <event name="error" opcode="4">
+    <arg name="msg" type="string"/>
+  </event>
+
+</protocol>

@@ -18,7 +18,7 @@
 //! C++ host.
 
 use waywallen::ipc::proto::EventMsg;
-use waywallen::ipc::uds::recv_msg;
+use waywallen::ipc::uds::recv_event;
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
@@ -118,7 +118,7 @@ fn hello_handshake() {
     };
 
     let (msg, fds): (EventMsg, _) =
-        recv_msg(&stream).expect("recv first frame from host");
+        recv_event(&stream).expect("recv first frame from host");
     assert!(fds.is_empty(), "ready must not carry fds");
     match msg {
         EventMsg::Ready => { /* ok */ }
@@ -205,7 +205,7 @@ fn binding_and_frames_smoke() {
     let mut frames = 0usize;
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     while std::time::Instant::now() < deadline {
-        let (msg, fds): (EventMsg, _) = match recv_msg(&stream) {
+        let (msg, fds): (EventMsg, _) = match recv_event(&stream) {
             Ok(x) => x,
             Err(e) => {
                 eprintln!("recv error (expected if hung): {e}");

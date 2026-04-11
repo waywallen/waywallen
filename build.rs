@@ -1,21 +1,21 @@
 //! Build script for waywallen.
 //!
-//! Generates `display_proto_generated.rs` from the
-//! `waywallen-display-v1` XML description into `$OUT_DIR`, where
-//! `src/display_proto/mod.rs` pulls it in via `include!`.
+//! Generates Rust bindings for both wire protocols from XML into
+//! `$OUT_DIR`:
+//!   - `display_proto_generated.rs`  (src/display_proto/mod.rs includes it)
+//!   - `ipc_generated.rs`            (src/ipc/mod.rs includes it)
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    let xml_path = manifest_dir.join("protocol/waywallen_display_v1.xml");
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    // Rerun triggers: the XML itself and the codegen tool sources.
-    println!("cargo:rerun-if-changed={}", xml_path.display());
+    // Rerun triggers: the codegen tool sources (XMLs are added per file).
     let tool_src = manifest_dir.join("tools/wayproto-gen/src");
-    for name in ["lib.rs", "parser.rs", "codegen_rust.rs", "main.rs"] {
+    for name in ["lib.rs", "parser.rs", "codegen_rust.rs", "codegen_c.rs", "main.rs"] {
         println!("cargo:rerun-if-changed={}", tool_src.join(name).display());
     }
     println!(
@@ -23,13 +23,22 @@ fn main() {
         manifest_dir.join("tools/wayproto-gen/Cargo.toml").display()
     );
 
-    let xml = fs::read_to_string(&xml_path)
+    gen_rust(
+        &manifest_dir.join("protocol/waywallen_display_v1.xml"),
+        &out_dir.join("display_proto_generated.rs"),
+    );
+    gen_rust(
+        &manifest_dir.join("protocol/waywallen_ipc_v1.xml"),
+        &out_dir.join("ipc_generated.rs"),
+    );
+}
+
+fn gen_rust(xml_path: &Path, out_file: &Path) {
+    println!("cargo:rerun-if-changed={}", xml_path.display());
+    let xml = fs::read_to_string(xml_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", xml_path.display()));
     let code = wayproto_gen::emit_rust_from_xml(&xml)
-        .unwrap_or_else(|e| panic!("wayproto-gen failed: {e}"));
-
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-    let out_file = out_dir.join("display_proto_generated.rs");
-    fs::write(&out_file, code)
+        .unwrap_or_else(|e| panic!("wayproto-gen failed on {}: {e}", xml_path.display()));
+    fs::write(out_file, code)
         .unwrap_or_else(|e| panic!("write {}: {e}", out_file.display()));
 }
