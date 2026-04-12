@@ -1,0 +1,89 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 23, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "_clang-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_LINKER": "lld",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "clang-debug",
+      "displayName": "Clang · Debug (sanitizers)",
+      "description": "Debug build with ASan/-ggdb wired in src/CMakeLists.txt",
+      "inherits": "_clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "clang-release",
+      "displayName": "Clang · Release",
+      "inherits": "_clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "clang-relwithdebinfo",
+      "displayName": "Clang · RelWithDebInfo",
+      "inherits": "_clang-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "clang-release-qml",
+      "displayName": "Clang · Release + Qt6 QML viewer",
+      "inherits": "clang-release",
+      "cacheVariables": {
+        "BUILD_QML": "ON"
+      }
+    },
+    {
+      "name": "clang-release-renderdoc",
+      "displayName": "Clang · Release + RenderDoc hooks",
+      "inherits": "clang-release",
+      "cacheVariables": {
+        "ENABLE_RENDERDOC": "ON"
+      }
+    },
+    {
+      "name": "clang-release-no-host",
+      "displayName": "Clang · Release without waywallen-renderer host",
+      "inherits": "clang-release",
+      "cacheVariables": {
+        "BUILD_WAYWALLEN_HOST": "OFF"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "clang-debug",            "configurePreset": "clang-debug" },
+    { "name": "clang-release",          "configurePreset": "clang-release" },
+    { "name": "clang-relwithdebinfo",   "configurePreset": "clang-relwithdebinfo" },
+    { "name": "clang-release-qml",      "configurePreset": "clang-release-qml" },
+    { "name": "clang-release-renderdoc","configurePreset": "clang-release-renderdoc" },
+    { "name": "clang-release-no-host",  "configurePreset": "clang-release-no-host" }
+  ],
+  "testPresets": [
+    {
+      "name": "clang-debug",
+      "configurePreset": "clang-debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    },
+    {
+      "name": "clang-release",
+      "configurePreset": "clang-release",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "stopOnFailure": false }
+    }
+  ]
+}

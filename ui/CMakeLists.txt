@@ -8,11 +8,76 @@ set(APP_AUTHOR "hypengw")
 
 project(waywallen-ui LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+include(FetchContent)
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/rstd")
+  add_subdirectory(rstd)
+else()
+  FetchContent_Declare(
+    rstd
+    GIT_REPOSITORY https://github.com/hypengw/rstd.git
+    GIT_TAG 2528b1cdb76624df9e01c97a7ab23dbd905afe3a
+    GIT_SHALLOW 0
+    GIT_PROGRESS 1
+    EXCLUDE_FROM_ALL)
+  FetchContent_MakeAvailable(rstd)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ncrequest")
+  add_subdirectory(ncrequest)
+else()
+  FetchContent_Declare(
+    ncrequest
+    GIT_REPOSITORY https://github.com/hypengw/ncrequest.git
+    GIT_TAG 609e63b801a9f96d1d7a5f9b71d34158640bbfa1
+    GIT_SHALLOW 0
+    GIT_PROGRESS 1
+    EXCLUDE_FROM_ALL)
+  FetchContent_MakeAvailable(ncrequest)
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/kstore")
+  add_subdirectory(kstore)
+else()
+  FetchContent_Declare(
+    kstore
+    GIT_REPOSITORY https://github.com/hypengw/kstore.git
+    GIT_TAG 4a706464da0459762e709f2c3f233d3ba3c5818b
+    GIT_SHALLOW 1
+    GIT_PROGRESS 1)
+  FetchContent_MakeAvailable(kstore)
+endif()
+
+
+FetchContent_Declare(
+  qml_material
+  GIT_REPOSITORY https://github.com/hypengw/QmlMaterial.git
+  GIT_TAG f8e53dfc6e340b817edccc7b7c56d7b1544052ba
+  GIT_SHALLOW 0
+  GIT_PROGRESS 1
+  FIND_PACKAGE_ARGS GLOBAL)
+FetchContent_MakeAvailable(qml_material)
+
+#if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/qextra")
+#  add_subdirectory(qextra)
+#else()
+#  FetchContent_Declare(
+#    qextra
+#    GIT_REPOSITORY https://github.com/hypengw/QExtra.git
+#    GIT_TAG 3577fe189ad642239f536f8b8f179590437027c6
+#    GIT_SHALLOW 0
+#    GIT_PROGRESS 1
+#    FIND_PACKAGE_ARGS GLOBAL)
+#  FetchContent_MakeAvailable(qextra)
+#endif()
+
 #include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
 find_package(Qt6 REQUIRED COMPONENTS Quick Protobuf ProtobufQuick ProtobufWellKnownTypes)
-
 qt_standard_project_setup()
-
 # ---------------------------------------------------------------------------
 # Control-plane protobuf (shared schema with the Rust backend).
 # Generates C++/QML types from ../proto/control.proto via qt_add_protobuf.
@@ -37,6 +102,7 @@ set(MODULES
 )
 
 set(QML_FILES
+  qml/Window.qml
 )
 set(RESOURCES)
 
@@ -58,6 +124,7 @@ qt_add_qml_module(
   DEPENDENCIES
   QtCore
   QtQuick
+  Qcm.Material
   RESOURCE_PREFIX
   /
   VERSION
@@ -111,6 +178,7 @@ target_link_libraries(waywallen.ui.qml
     Qt6::ProtobufQuick
     Qt6::ProtobufWellKnownTypes
     waywallen.control.proto
+    qml_material
 )
 
 qt_add_executable(${PROJECT_NAME} MANUAL_FINALIZATION src/main.cpp)
