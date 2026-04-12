@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 mod control_proto;
@@ -17,9 +18,64 @@ pub struct AppState {
     pub source_manager: Arc<tokio::sync::Mutex<plugin::source_manager::SourceManager>>,
 }
 
+struct Args {
+    ws_port: u16,
+    ui_path: Option<PathBuf>,
+    no_ui: bool,
+}
+
+fn parse_args() -> Args {
+    let mut args = Args {
+        ws_port: 0,
+        ui_path: None,
+        no_ui: false,
+    };
+
+    let mut it = std::env::args().skip(1);
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--ws-port" => {
+                let val = it.next().expect("--ws-port requires a value");
+                args.ws_port = val.parse().expect("--ws-port must be a valid port number");
+            }
+            "--ui" => {
+                let val = it.next().expect("--ui requires a path");
+                args.ui_path = Some(PathBuf::from(val));
+            }
+            "--no-ui" => {
+                args.no_ui = true;
+            }
+            other => {
+                eprintln!("unknown argument: {other}");
+                eprintln!("usage: waywallen [--ws-port PORT] [--ui PATH] [--no-ui]");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    args
+}
+
+/// Resolve the UI executable path.  Order:
+/// 1. Explicit `--ui PATH`
+/// 2. `waywallen-ui` next to the current executable
+fn resolve_ui_path(explicit: Option<PathBuf>) -> Option<PathBuf> {
+    if let Some(p) = explicit {
+        return Some(p);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let sibling = exe.parent()?.join("waywallen-ui");
+        if sibling.exists() {
+            return Some(sibling);
+        }
+    }
+    None
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
+    let cli = parse_args();
 
     let registry = plugin::renderer_registry::build_default_registry()
         .expect("failed to build renderer registry");
@@ -55,6 +111,29 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    ws_server::serve(state, "0.0.0.0:8080").await?;
+    // Bind the WS control plane (port 0 = OS picks an available port).
+    let bind_addr = format!("0.0.0.0:{}", cli.ws_port);
+    let (local_addr, ws_fut) = ws_server::bind(state, &bind_addr).await?;
+    let ws_port = local_addr.port();
+    log::info!("ws port: {ws_port}");
+
+    // Spawn the UI subprocess.
+    if !cli.no_ui {
+        if let Some(ui_bin) = resolve_ui_path(cli.ui_path) {
+            log::info!("launching ui: {} --ws-port {ws_port}", ui_bin.display());
+            match std::process::Command::new(&ui_bin)
+                .arg("--ws-port")
+                .arg(ws_port.to_string())
+                .spawn()
+            {
+                Ok(child) => log::info!("ui pid: {}", child.id()),
+                Err(e) => log::warn!("failed to launch ui {}: {e}", ui_bin.display()),
+            }
+        } else {
+            log::info!("waywallen-ui not found, running headless");
+        }
+    }
+
+    ws_fut.await?;
     Ok(())
 }

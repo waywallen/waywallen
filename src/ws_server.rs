@@ -17,9 +17,23 @@ use crate::ipc::proto::ControlMsg;
 use crate::renderer_manager;
 use crate::AppState;
 
-pub async fn serve(state: Arc<AppState>, addr: &str) -> Result<()> {
+/// Bind the WebSocket control plane and return the actual local address
+/// (useful when binding to port 0 for OS-assigned ports).  The returned
+/// future runs the accept loop and never returns under normal operation.
+pub async fn bind(state: Arc<AppState>, addr: &str) -> Result<(std::net::SocketAddr, impl std::future::Future<Output = Result<()>>)> {
     let listener = TcpListener::bind(addr).await?;
-    log::info!("ws control plane listening on {addr}");
+    let local_addr = listener.local_addr()?;
+    log::info!("ws control plane listening on {local_addr}");
+    let fut = accept_loop(state, listener);
+    Ok((local_addr, fut))
+}
+
+pub async fn serve(state: Arc<AppState>, addr: &str) -> Result<()> {
+    let (_, fut) = bind(state, addr).await?;
+    fut.await
+}
+
+async fn accept_loop(state: Arc<AppState>, listener: TcpListener) -> Result<()> {
     loop {
         let (stream, peer) = listener.accept().await?;
         let state = state.clone();

@@ -62,18 +62,18 @@ FetchContent_Declare(
   FIND_PACKAGE_ARGS GLOBAL)
 FetchContent_MakeAvailable(qml_material)
 
-#if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/qextra")
-#  add_subdirectory(qextra)
-#else()
-#  FetchContent_Declare(
-#    qextra
-#    GIT_REPOSITORY https://github.com/hypengw/QExtra.git
-#    GIT_TAG 3577fe189ad642239f536f8b8f179590437027c6
-#    GIT_SHALLOW 0
-#    GIT_PROGRESS 1
-#    FIND_PACKAGE_ARGS GLOBAL)
-#  FetchContent_MakeAvailable(qextra)
-#endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/QExtra")
+  add_subdirectory(QExtra)
+else()
+  FetchContent_Declare(
+    qextra
+    GIT_REPOSITORY https://github.com/hypengw/QExtra.git
+    GIT_TAG 3577fe189ad642239f536f8b8f179590437027c6
+    GIT_SHALLOW 0
+    GIT_PROGRESS 1
+    FIND_PACKAGE_ARGS GLOBAL)
+  FetchContent_MakeAvailable(qextra)
+endif()
 
 #include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
 find_package(Qt6 REQUIRED COMPONENTS Quick Protobuf ProtobufQuick ProtobufWellKnownTypes)
@@ -83,7 +83,7 @@ qt_standard_project_setup()
 # Generates C++/QML types from ../proto/control.proto via qt_add_protobuf.
 # ---------------------------------------------------------------------------
 set(WAYWALLEN_PROTO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../proto")
-qt_add_protobuf(waywallen.control.proto
+qt_add_protobuf(waywallen-control
     QML
     QML_URI waywallen.control
     PROTO_FILES
@@ -115,16 +115,17 @@ set(APP_INFO_MACROS
     APP_NAME="${APP_NAME}" APP_SUMMARY="${APP_SUMMARY}")
 
 qt_add_qml_module(
-  waywallen.ui.qml
+  waywallen-qml
   URI
   waywallen.ui
   STATIC
   PLUGIN_TARGET
-  waywallen.ui.qml
+  waywallen-qml
   DEPENDENCIES
   QtCore
   QtQuick
   Qcm.Material
+  waywallen.control
   RESOURCE_PREFIX
   /
   VERSION
@@ -133,22 +134,19 @@ qt_add_qml_module(
   ${QML_FILES}
   SOURCES
   ${SOURCES}
-  RESOURCES
-  ${RESOURCES}
+  #RESOURCES
+  #${RESOURCES}
   NO_PLUGIN_OPTIONAL)
 
-target_sources(waywallen.ui.qml PUBLIC FILE_SET CXX_MODULES FILES ${MODULES} ${MOC_SOURCE_FILES})
+target_sources(waywallen-qml PUBLIC FILE_SET CXX_MODULES FILES ${MODULES} ${MOC_SOURCE_FILES})
 
 #set_source_files_properties(
 #  "${CMAKE_CURRENT_BINARY_DIR}/waywallen.ui.qml_qmltyperegistrations.cpp" TARGET_DIRECTORY
-#  waywallen.ui.qml PROPERTIES INCLUDE_DIRECTORIES "${QML_REG_INCLUDE_DIRS}")
-
-set_source_files_properties(${SOURCES2} PROPERTIES SKIP_AUTOMOC ON)
-
+#  waywallen.ui PROPERTIES INCLUDE_DIRECTORIES "${QML_REG_INCLUDE_DIRS}")
+#set_source_files_properties(${SOURCES2} PROPERTIES SKIP_AUTOMOC ON)
 #set_source_files_properties( PROPERTIES COMPILE_DEFINITIONS "${APP_INFO_MACROS}")
 
-# QT_QMLCACHEGEN_ARGUMENTS "--only-bytecode"
-set_target_properties(waywallen.ui.qml PROPERTIES CXX_SCAN_FOR_MODULES ON)
+set_target_properties(waywallen-qml PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
 #split_moc_files(
 #  TARGET
@@ -161,30 +159,32 @@ set_target_properties(waywallen.ui.qml PROPERTIES CXX_SCAN_FOR_MODULES ON)
 #  ${MOC_SOURCE_FILES})
 
 #target_compile_definitions(
-#  waywallen.ui.qml
+#  waywallen.ui
 #  PUBLIC APP_ID="${APP_ID}" APP_VERSION="${APP_VERSION}"
 #         APP_AUTHOR="${APP_AUTHOR}" APP_NAME="${APP_NAME}"
 #         APP_SUMMARY="${APP_SUMMARY}")
 
 target_include_directories(
-  waywallen.ui.qml
+  waywallen-qml
   PUBLIC include
   PRIVATE . # src/
 )
-target_compile_features(waywallen.ui.qml PUBLIC cxx_std_20)
-target_link_libraries(waywallen.ui.qml
+target_compile_features(waywallen-qml PUBLIC cxx_std_20)
+target_link_libraries(waywallen-qml
   PUBLIC
+    Qt6::Core
     Qt6::Protobuf
     Qt6::ProtobufQuick
     Qt6::ProtobufWellKnownTypes
-    waywallen.control.proto
+    waywallen-control
     qml_material
+    ncrequest
 )
 
 qt_add_executable(${PROJECT_NAME} MANUAL_FINALIZATION src/main.cpp)
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_SCAN_FOR_MODULES ON
-                                                 WIN32_EXECUTABLE FALSE)
+set_target_properties(${PROJECT_NAME} PROPERTIES CXX_SCAN_FOR_MODULES ON)
 target_compile_definitions(${PROJECT_NAME} PRIVATE "${APP_INFO_MACROS}")
+target_link_libraries(${PROJECT_NAME} PRIVATE waywallen-qml)
 
 #set(APP_DESKTOP assets/waywallen-ui.desktop)
 #set(APP_METAINFO assets/waywallen-ui.metainfo.xml)
