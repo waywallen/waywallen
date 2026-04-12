@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+
 include(FetchContent)
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/rstd")
@@ -75,8 +76,9 @@ else()
   FetchContent_MakeAvailable(qextra)
 endif()
 
-#include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
 find_package(Qt6 REQUIRED COMPONENTS Quick Protobuf ProtobufQuick ProtobufWellKnownTypes)
+include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
+
 qt_standard_project_setup()
 # ---------------------------------------------------------------------------
 # Control-plane protobuf (shared schema with the Rust backend).
@@ -92,10 +94,18 @@ qt_add_protobuf(waywallen-control
         "${WAYWALLEN_PROTO_DIR}"
 )
 
+set(SOURCES_NO_MOC
+  src/backend.cpp
+  src/app.cpp
+)
+
 set(SOURCES
+  src/qml_register.cpp
 )
 
 set(MOC_SOURCE_FILES
+  src/app.cppm
+  src/backend.cppm
 )
 set(MODULES
     src/mod.cppm
@@ -108,7 +118,9 @@ set(RESOURCES)
 
 #set_source_files_properties(qml/Global.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
-set(QML_REG_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include/Qcm/qml")
+set(QML_REG_INCLUDE_DIRS 
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/waywallen/register"
+)
 
 set(APP_INFO_MACROS
     APP_ID="${APP_ID}" APP_VERSION="${APP_VERSION}" APP_AUTHOR="${APP_AUTHOR}"
@@ -139,24 +151,25 @@ qt_add_qml_module(
   NO_PLUGIN_OPTIONAL)
 
 target_sources(waywallen-qml PUBLIC FILE_SET CXX_MODULES FILES ${MODULES} ${MOC_SOURCE_FILES})
+target_sources(waywallen-qml PRIVATE ${SOURCES_NO_MOC})
 
-#set_source_files_properties(
-#  "${CMAKE_CURRENT_BINARY_DIR}/waywallen.ui.qml_qmltyperegistrations.cpp" TARGET_DIRECTORY
-#  waywallen.ui PROPERTIES INCLUDE_DIRECTORIES "${QML_REG_INCLUDE_DIRS}")
-#set_source_files_properties(${SOURCES2} PROPERTIES SKIP_AUTOMOC ON)
+set_source_files_properties(
+  "${CMAKE_CURRENT_BINARY_DIR}/waywallen-qml_qmltyperegistrations.cpp" TARGET_DIRECTORY
+  waywallen-qml PROPERTIES INCLUDE_DIRECTORIES "${QML_REG_INCLUDE_DIRS}")
+set_source_files_properties(${SOURCES_NO_MOC} PROPERTIES SKIP_AUTOMOC ON)
 #set_source_files_properties( PROPERTIES COMPILE_DEFINITIONS "${APP_INFO_MACROS}")
 
 set_target_properties(waywallen-qml PROPERTIES CXX_SCAN_FOR_MODULES ON)
 
-#split_moc_files(
-#  TARGET
-#  waywallen
-#  BASE_DIR
-#  src
-#  PREFIX
-#  waywallen
-#  MOC_SOURCE_FILES
-#  ${MOC_SOURCE_FILES})
+split_moc_files(
+  TARGET
+  waywallen-qml
+  BASE_DIR
+  src
+  PREFIX
+  waywallen
+  MOC_SOURCE_FILES
+  ${MOC_SOURCE_FILES})
 
 #target_compile_definitions(
 #  waywallen.ui
@@ -172,13 +185,13 @@ target_include_directories(
 target_compile_features(waywallen-qml PUBLIC cxx_std_20)
 target_link_libraries(waywallen-qml
   PUBLIC
-    Qt6::Core
     Qt6::Protobuf
     Qt6::ProtobufQuick
     Qt6::ProtobufWellKnownTypes
     waywallen-control
     qml_material
     ncrequest
+    qextra
 )
 
 qt_add_executable(${PROJECT_NAME} MANUAL_FINALIZATION src/main.cpp)
