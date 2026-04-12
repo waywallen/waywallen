@@ -19,10 +19,7 @@ export class App : public QObject {
     QML_SINGLETON
 
 public:
-    using pool_executor_t = asio::thread_pool::executor_type;
-    using qt_executor_t   = QtExecutor;
-
-    App(qint16 port, rstd::empty);
+    App(quint16 port, rstd::empty);
     virtual ~App();
     static App* create(QQmlEngine* qmlEngine, QJSEngine* jsEngine);
 
@@ -39,6 +36,7 @@ public:
     Q_SLOT void save_settings();
 
 private:
+    QScopedPointer<AppPrivate> d_ptr;
     Q_DECLARE_PRIVATE(App);
 };
 } // namespace waywallen

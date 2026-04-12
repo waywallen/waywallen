@@ -18,11 +18,15 @@ auto app_instance(waywallen::App* in = nullptr) -> waywallen::App* {
 
 class AppPrivate {
 public:
-    AppPrivate(App* self)
-        : m_p(self), m_main_win(nullptr), m_qml_engine(Box<QQmlApplicationEngine>::make()) {}
+    AppPrivate(App* self, quint16 port)
+        : m_p(self),
+          m_main_win(nullptr),
+          m_qml_engine(Box<QQmlApplicationEngine>::make()),
+          m_backend(Box<Backend>::make(port)),
+          m_pool(4),
+          m_port(port) {}
     ~AppPrivate() {
         m_qml_engine.reset();
-
         save_settings();
     }
 
@@ -31,6 +35,9 @@ public:
     App*                       m_p;
     QPointer<QQuickWindow>     m_main_win;
     Box<QQmlApplicationEngine> m_qml_engine;
+    Box<Backend>               m_backend;
+    asio::thread_pool          m_pool;
+    quint16                    m_port;
 };
 
 namespace waywallen
@@ -45,17 +52,53 @@ App* App::create(QQmlEngine*, QJSEngine*) {
 
 App* App::instance() { return app_instance(); }
 
-App::App(qint16 port, rstd::empty): QObject(nullptr) {}
+App::App(quint16 port, rstd::empty)
+    : QObject(nullptr), d_ptr(new AppPrivate(this, port)) {
+    app_instance(this);
+}
 
 App::~App() {}
 
-void App::init() {}
+void App::init() {
+    Q_D(App);
+    auto engine = this->engine();
 
-void App::load_settings() {
+    // Initialize async executors.
+    {
+        auto qex = QtExecutor(d->m_backend->m_context.get());
+        QAsyncResult::initEx(qex, d->m_pool.get_executor(), [](QStringView error) {
+            qWarning("async error: %s", qPrintable(error.toString()));
+        });
+    }
+
+    connect(engine, &QQmlApplicationEngine::quit, QGuiApplication::instance(), &QGuiApplication::quit);
+
+    // Connect to the daemon's WebSocket.
+    d->m_backend->connectTo();
+
+    // Load the main window from the QML module.
+    engine->loadFromModule("waywallen.ui", "Window");
+
+    for (auto el : engine->rootObjects()) {
+        if (auto win = qobject_cast<QQuickWindow*>(el)) {
+            d->m_main_win = win;
+        }
+    }
 }
 
-void App::save_settings() {
+auto App::engine() const -> QQmlApplicationEngine* {
+    Q_D(const App);
+    return d->m_qml_engine.as_mut_ptr();
 }
+
+auto App::backend() const -> Backend* {
+    Q_D(const App);
+    return d->m_backend.as_mut_ptr();
+}
+
+void App::load_settings() {}
+
+void App::save_settings() {}
 
 } // namespace waywallen
 

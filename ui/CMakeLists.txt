@@ -8,11 +8,12 @@ set(APP_AUTHOR "hypengw")
 
 project(waywallen-ui LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-
+find_package(Qt6 REQUIRED COMPONENTS Quick Protobuf ProtobufQuick ProtobufWellKnownTypes)
+include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
 include(FetchContent)
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/rstd")
@@ -53,7 +54,9 @@ else()
   FetchContent_MakeAvailable(kstore)
 endif()
 
-
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/qml_material")
+  add_subdirectory(qml_material)
+else()
 FetchContent_Declare(
   qml_material
   GIT_REPOSITORY https://github.com/hypengw/QmlMaterial.git
@@ -62,6 +65,7 @@ FetchContent_Declare(
   GIT_PROGRESS 1
   FIND_PACKAGE_ARGS GLOBAL)
 FetchContent_MakeAvailable(qml_material)
+endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/QExtra")
   add_subdirectory(QExtra)
@@ -76,8 +80,7 @@ else()
   FetchContent_MakeAvailable(qextra)
 endif()
 
-find_package(Qt6 REQUIRED COMPONENTS Quick Protobuf ProtobufQuick ProtobufWellKnownTypes)
-include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
+
 
 qt_standard_project_setup()
 # ---------------------------------------------------------------------------
@@ -97,6 +100,11 @@ qt_add_protobuf(waywallen-control
 set(SOURCES_NO_MOC
   src/backend.cpp
   src/app.cpp
+  src/query/query.cpp
+  src/query/wallpaper_query.cpp
+  src/query/renderer_query.cpp
+  src/query/source_query.cpp
+  src/query/health_query.cpp
 )
 
 set(SOURCES
@@ -106,9 +114,16 @@ set(SOURCES
 set(MOC_SOURCE_FILES
   src/app.cppm
   src/backend.cppm
+  src/query/query.cppm
+  src/query/wallpaper_query.cppm
+  src/query/renderer_query.cppm
+  src/query/source_query.cppm
+  src/query/health_query.cppm
 )
 set(MODULES
     src/mod.cppm
+    src/proto.cppm
+    src/query/mod.cppm
 )
 
 set(QML_FILES
@@ -118,8 +133,9 @@ set(RESOURCES)
 
 #set_source_files_properties(qml/Global.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
-set(QML_REG_INCLUDE_DIRS 
+set(QML_REG_INCLUDE_DIRS
     "${CMAKE_CURRENT_SOURCE_DIR}/include/waywallen/register"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/waywallen/query"
 )
 
 set(APP_INFO_MACROS

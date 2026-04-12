@@ -4,6 +4,7 @@
 Q_IMPORT_QML_PLUGIN(waywallen_uiPlugin)
 
 import ncrequest;
+import waywallen;
 
 int main(int argc, char** argv) {
     ncrequest::global_init();
@@ -26,4 +27,9 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+
+    waywallen::App app(ws_port, {});
+    app.init();
+
+    return gui_app.exec();
 }
