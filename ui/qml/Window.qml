@@ -37,160 +37,138 @@ MD.ApplicationWindow {
 
     property int currentPage: 0
 
+    readonly property bool isCompact: MD.MProp.size.isCompact
+
     readonly property var pageModel: [
-        { icon: MD.Token.icon.wallpaper, label: "Wallpapers" },
-        { icon: MD.Token.icon.tune, label: "Renderers" },
-        { icon: MD.Token.icon.info, label: "Info" }
+        { icon: MD.Token.icon.wallpaper, name: "Wallpapers" },
+        { icon: MD.Token.icon.tune, name: "Renderers" },
+        { icon: MD.Token.icon.info, name: "Info" }
     ]
 
-    // --- Expanded layout: left rail + content ---
-    RowLayout {
-        id: m_large_layout
-        anchors.fill: parent
-        visible: false
-        spacing: 0
+    readonly property var pageComponents: [
+        "qrc:/waywallen/ui/qml/page/WallpaperPage.qml",
+        "qrc:/waywallen/ui/qml/page/RenderersPage.qml",
+        "qrc:/waywallen/ui/qml/page/InfoPage.qml"
+    ]
 
-        ColumnLayout {
-            Layout.fillHeight: true
-            Layout.preferredWidth: 72
-            Layout.topMargin: 8
-            spacing: 0
-
-            Repeater {
-                model: win.pageModel
-
-                MD.RailItem {
-                    required property var modelData
-                    required property int index
-
-                    Layout.alignment: Qt.AlignHCenter
-                    icon.name: modelData.icon
-                    text: modelData.label
-                    checked: win.currentPage === index
-                    onClicked: win.currentPage = index
-                }
-            }
-
-            Item { Layout.fillHeight: true }
-
-            StatusDot {
-                Layout.alignment: Qt.AlignHCenter
-                Layout.bottomMargin: 16
-                statusColor: {
-                    if (healthQuery.status === 3)
-                        return MD.Token.color.primary;
-                    if (healthQuery.querying)
-                        return MD.Token.color.secondary;
-                    return MD.Token.color.error;
-                }
-                statusText: {
-                    if (healthQuery.status === 3) return "OK";
-                    if (healthQuery.querying) return "…";
-                    return "!";
-                }
-            }
-        }
-
-        MD.Divider {}
-
-        LayoutItemProxy {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            target: m_content
-        }
+    onCurrentPageChanged: {
+        m_content.replace(m_content.currentItem, pageComponents[currentPage], {});
     }
 
-    // --- Compact layout: content + bottom nav ---
+    Component.onCompleted: {
+        currentPageChanged();
+    }
+
     ColumnLayout {
-        id: m_small_layout
         anchors.fill: parent
-        visible: false
         spacing: 0
 
-        LayoutItemProxy {
+        RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            target: m_content
-        }
+            spacing: 0
 
-        MD.Pane {
-            Layout.fillWidth: true
-            padding: 0
-            backgroundColor: MD.MProp.color.surface_container
-            elevation: MD.Token.elevation.level2
+            // --- Sidebar drawer (expanded mode) ---
+            Loader {
+                id: m_drawer_loader
+                Layout.fillHeight: true
+                active: !win.isCompact
+                visible: active
 
-            RowLayout {
-                anchors.fill: parent
-
-                Repeater {
+                sourceComponent: MD.StandardDrawer {
                     model: win.pageModel
+                    currentIndex: win.currentPage
+                    showDivider: false
 
-                    Item {
-                        Layout.fillWidth: true
-                        implicitHeight: 12 + children[0].implicitHeight + 16
-                        required property var modelData
-                        required property int index
+                    Behavior on implicitWidth {
+                        NumberAnimation {
+                            duration: MD.Token.duration.short4
+                        }
+                    }
 
-                        MD.BarItem {
-                            anchors.fill: parent
-                            anchors.topMargin: 12
-                            anchors.bottomMargin: 16
-                            icon.name: parent.modelData.icon
-                            text: parent.modelData.label
-                            checked: win.currentPage === parent.index
-                            onClicked: win.currentPage = parent.index
+                    onClicked: function (model) {
+                        win.currentPage = model.index;
+                    }
+
+                    drawerContent: ColumnLayout {
+                        spacing: 0
+
+                        Item { Layout.fillHeight: true }
+
+                        StatusDot {
+                            Layout.alignment: Qt.AlignHCenter
+                            Layout.bottomMargin: 16
+                            statusColor: {
+                                if (healthQuery.status === 3)
+                                    return MD.Token.color.primary;
+                                if (healthQuery.querying)
+                                    return MD.Token.color.secondary;
+                                return MD.Token.color.error;
+                            }
+                            statusText: {
+                                if (healthQuery.status === 3) return "OK";
+                                if (healthQuery.querying) return "…";
+                                return "!";
+                            }
                         }
                     }
                 }
             }
-        }
-    }
 
-    // --- Shared content (owned off-screen, proxied into active layout) ---
-    Item {
-        visible: false
+            // --- Page content ---
+            MD.StackView {
+                id: m_content
+                Layout.fillHeight: true
+                Layout.fillWidth: true
+                clip: true
+                initialItem: Item {}
 
-        QC.StackView {
-            id: m_content
-            implicitWidth: 800
-            implicitHeight: 600
-            clip: true
+                MD.MProp.page: m_page_ctx
 
-            initialItem: m_wallpaperPage
-
-            Connections {
-                target: win
-                function onCurrentPageChanged() {
-                    const pages = [m_wallpaperPage, m_renderersPage, m_infoPage];
-                    const page = pages[win.currentPage];
-                    if (m_content.currentItem !== page) {
-                        m_content.replace(page, QC.StackView.CrossFade);
-                    }
+                MD.PageContext {
+                    id: m_page_ctx
+                    showHeader: false
+                    backgroundRadius: win.isCompact ? 0 : 12
+                    showBackground: !win.isCompact
                 }
             }
         }
 
-        WallpaperPage {
-            id: m_wallpaperPage
-        }
-        RenderersPage {
-            id: m_renderersPage
-        }
-        InfoPage {
-            id: m_infoPage
-        }
-    }
+        // --- Bottom navigation bar (compact mode) ---
+        Loader {
+            id: m_bar_loader
+            Layout.fillWidth: true
+            active: win.isCompact
+            visible: active
 
-    // --- Layout switch on window class change ---
-    Connections {
-        target: win.MD.MProp.size
-        function onWindowClassChanged() {
-            const isCompact = win.MD.MProp.size.isCompact;
-            m_small_layout.visible = isCompact;
-            m_large_layout.visible = !isCompact;
-        }
-        Component.onCompleted: {
-            this.onWindowClassChanged();
+            sourceComponent: MD.Pane {
+                padding: 0
+                backgroundColor: MD.MProp.color.surface_container
+                elevation: MD.Token.elevation.level2
+
+                contentItem: RowLayout {
+                    Repeater {
+                        model: win.pageModel
+
+                        Item {
+                            Layout.fillWidth: true
+                            implicitHeight: 12 + children[0].implicitHeight + 16
+                            required property var modelData
+                            required property int index
+
+                            MD.BarItem {
+                                anchors.fill: parent
+                                anchors.topMargin: 12
+                                anchors.bottomMargin: 16
+                                icon.name: parent.modelData.icon
+                                text: parent.modelData.name
+                                checked: win.currentPage === parent.index
+                                onClicked: win.currentPage = parent.index
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
