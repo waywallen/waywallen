@@ -57,7 +57,9 @@ App::App(quint16 port, rstd::empty)
     app_instance(this);
 }
 
-App::~App() {}
+App::~App() {
+    QAsyncResult::dropEx();
+}
 
 void App::init() {
     Q_D(App);

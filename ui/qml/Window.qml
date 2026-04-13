@@ -120,6 +120,7 @@ MD.ApplicationWindow {
                 id: m_content
                 Layout.fillHeight: true
                 Layout.fillWidth: true
+                Layout.margins: win.isCompact ? 0 : 8
                 clip: true
                 initialItem: Item {}
 
