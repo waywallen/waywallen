@@ -64,7 +64,13 @@ impl RendererRegistry {
             };
             match std::fs::read_to_string(&path) {
                 Ok(contents) => match toml::from_str::<RendererManifest>(&contents) {
-                    Ok(manifest) => {
+                    Ok(mut manifest) => {
+                        // Resolve relative bin paths against the manifest's directory.
+                        if manifest.renderer.bin.is_relative() {
+                            if let Some(manifest_dir) = path.parent() {
+                                manifest.renderer.bin = manifest_dir.join(&manifest.renderer.bin);
+                            }
+                        }
                         log::info!(
                             "loaded renderer manifest: {} (types: {:?})",
                             manifest.renderer.name,

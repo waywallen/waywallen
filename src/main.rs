@@ -22,6 +22,7 @@ struct Args {
     ws_port: u16,
     ui_path: Option<PathBuf>,
     no_ui: bool,
+    plugin_dirs: Vec<PathBuf>,
 }
 
 fn parse_args() -> Args {
@@ -29,6 +30,7 @@ fn parse_args() -> Args {
         ws_port: 0,
         ui_path: None,
         no_ui: false,
+        plugin_dirs: Vec::new(),
     };
 
     let mut it = std::env::args().skip(1);
@@ -45,9 +47,13 @@ fn parse_args() -> Args {
             "--no-ui" => {
                 args.no_ui = true;
             }
+            "--plugin" => {
+                let val = it.next().expect("--plugin requires a path");
+                args.plugin_dirs.push(PathBuf::from(val));
+            }
             other => {
                 eprintln!("unknown argument: {other}");
-                eprintln!("usage: waywallen [--ws-port PORT] [--ui PATH] [--no-ui]");
+                eprintln!("usage: waywallen [--ws-port PORT] [--ui PATH] [--no-ui] [--plugin PATH]...");
                 std::process::exit(1);
             }
         }
@@ -77,8 +83,23 @@ async fn main() -> anyhow::Result<()> {
     env_logger::init();
     let cli = parse_args();
 
-    let registry = plugin::renderer_registry::build_default_registry()
+    let mut registry = plugin::renderer_registry::build_default_registry()
         .expect("failed to build renderer registry");
+
+    // Scan extra --plugin directories for renderer manifests.
+    for plugin_dir in &cli.plugin_dirs {
+        let renderers_dir = plugin_dir.join("renderers");
+        if renderers_dir.is_dir() {
+            match plugin::renderer_registry::RendererRegistry::scan(&renderers_dir) {
+                Ok(scanned) => {
+                    for def in scanned.all_renderers() {
+                        registry.register(def.clone());
+                    }
+                }
+                Err(e) => log::warn!("scan {}: {e}", renderers_dir.display()),
+            }
+        }
+    }
 
     // Source management: load Lua plugins from the canonical paths
     // (bundled `<exec>/../share/waywallen/sources/` first, then user-local
@@ -90,6 +111,13 @@ async fn main() -> anyhow::Result<()> {
     for dir in plugin::renderer_registry::standard_plugin_dirs("sources") {
         if dir.is_dir() {
             let _ = source_mgr.load_all(&dir);
+        }
+    }
+    // Scan extra --plugin directories for source plugins.
+    for plugin_dir in &cli.plugin_dirs {
+        let sources_dir = plugin_dir.join("sources");
+        if sources_dir.is_dir() {
+            let _ = source_mgr.load_all(&sources_dir);
         }
     }
     let _ = source_mgr.scan_all();

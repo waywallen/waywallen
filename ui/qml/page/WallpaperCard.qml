@@ -10,30 +10,25 @@ MD.Card {
     required property var wallpaper
     property bool expanded: false
 
-    implicitHeight: expanded ? expandedCol.implicitHeight : 100
+    type: MD.Enum.CardFilled
+    implicitHeight: expandedCol.implicitHeight + 32
+    clip: true
 
     Behavior on implicitHeight {
-        NumberAnimation { duration: 200; easing.type: Easing.OutCubic }
+        NumberAnimation { duration: MD.Token.duration.medium2; easing.type: Easing.OutCubic }
     }
 
     WallpaperApplyQuery {
         id: applyQuery
     }
 
-    MouseArea {
-        anchors.fill: parent
-        onClicked: root.expanded = !root.expanded
-    }
+    onClicked: root.expanded = !root.expanded
 
-    ColumnLayout {
+    contentItem: ColumnLayout {
         id: expandedCol
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.margins: 16
         spacing: 8
 
-        // Preview thumbnail (if available)
+        // Preview thumbnail
         Image {
             Layout.fillWidth: true
             Layout.preferredHeight: visible ? 120 : 0
@@ -67,15 +62,15 @@ MD.Card {
                 }
             }
 
-            MD.Text {
+            MD.Icon {
                 visible: applyQuery.status === 3
-                text: "✓"
-                typescale: MD.Token.typescale.title_medium
+                name: MD.Token.icon.check
+                size: 20
                 color: MD.Token.color.primary
             }
         }
 
-        // Expanded: resource path + apply controls
+        // Expanded controls
         ColumnLayout {
             Layout.fillWidth: true
             visible: root.expanded
@@ -89,7 +84,6 @@ MD.Card {
                 wrapMode: Text.WrapAnywhere
             }
 
-            // Apply controls
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 8
@@ -153,8 +147,6 @@ MD.Card {
                     }
                 }
             }
-
-            Item { height: 8 }
         }
     }
 }

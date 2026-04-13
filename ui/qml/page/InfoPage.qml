@@ -54,9 +54,9 @@ MD.Page {
             ColumnLayout {
                 id: contentCol
                 width: parent.width
-                spacing: 16
+                spacing: 12
 
-                // Daemon status
+                // Daemon status card
                 MD.Text {
                     Layout.leftMargin: 16
                     text: "Daemon"
@@ -64,20 +64,15 @@ MD.Page {
                     color: MD.Token.color.on_surface
                 }
 
-                Rectangle {
+                MD.Card {
                     Layout.fillWidth: true
                     Layout.leftMargin: 16
                     Layout.rightMargin: 16
-                    Layout.preferredHeight: daemonCol.implicitHeight + 24
-                    radius: 12
-                    color: MD.Token.color.surface_container_high
+                    type: MD.Enum.CardFilled
+                    implicitHeight: daemonContent.implicitHeight + 32
 
-                    ColumnLayout {
-                        id: daemonCol
-                        anchors.left: parent.left
-                        anchors.right: parent.right
-                        anchors.top: parent.top
-                        anchors.margins: 16
+                    contentItem: ColumnLayout {
+                        id: daemonContent
                         spacing: 8
 
                         RowLayout {
@@ -121,9 +116,14 @@ MD.Page {
                 }
 
                 // Sources section
+                MD.Divider {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
+                }
+
                 MD.Text {
                     Layout.leftMargin: 16
-                    Layout.topMargin: 8
                     text: "Source Plugins"
                     typescale: MD.Token.typescale.title_medium
                     color: MD.Token.color.on_surface
@@ -137,50 +137,29 @@ MD.Page {
                     color: MD.Token.color.on_surface_variant
                 }
 
-                Repeater {
+                ListView {
+                    Layout.fillWidth: true
+                    implicitHeight: contentHeight
+                    interactive: false
+
                     model: sourceQuery.sources
 
-                    Rectangle {
+                    delegate: MD.ListItem {
                         required property var modelData
+                        required property int index
 
-                        Layout.fillWidth: true
-                        Layout.leftMargin: 16
-                        Layout.rightMargin: 16
-                        Layout.preferredHeight: srcCol.implicitHeight + 24
-                        radius: 12
-                        color: MD.Token.color.surface_container_high
-
-                        ColumnLayout {
-                            id: srcCol
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.margins: 16
-                            spacing: 4
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                MD.Text {
-                                    text: modelData.name || ""
-                                    typescale: MD.Token.typescale.body_medium
-                                    color: MD.Token.color.on_surface
-                                    Layout.fillWidth: true
-                                }
-
-                                MD.Text {
-                                    text: "v" + (modelData.version || "?")
-                                    typescale: MD.Token.typescale.label_small
-                                    color: MD.Token.color.on_surface_variant
-                                }
-                            }
-
-                            MD.Text {
-                                text: "Types: " + (modelData.types ? modelData.types.join(", ") : "—")
-                                typescale: MD.Token.typescale.label_small
-                                color: MD.Token.color.on_surface_variant
-                            }
+                        width: ListView.view.width
+                        text: modelData.name || ""
+                        supportText: "Types: " + (modelData.types ? modelData.types.join(", ") : "—")
+                        leader: MD.Icon {
+                            name: MD.Token.icon.source
+                            size: 24
+                            color: MD.Token.color.on_surface_variant
+                        }
+                        trailing: MD.Text {
+                            text: "v" + (modelData.version || "?")
+                            typescale: MD.Token.typescale.label_small
+                            color: MD.Token.color.on_surface_variant
                         }
                     }
                 }

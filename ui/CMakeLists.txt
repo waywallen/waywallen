@@ -133,10 +133,11 @@ set(MODULES
 
 set(QML_FILES
   qml/Window.qml
-  qml/WallpaperPage.qml
-  qml/WallpaperCard.qml
-  qml/RenderersPage.qml
-  qml/InfoPage.qml
+  qml/component/StatusDot.qml
+  qml/page/WallpaperPage.qml
+  qml/page/WallpaperCard.qml
+  qml/page/RenderersPage.qml
+  qml/page/InfoPage.qml
 )
 set(RESOURCES)
 

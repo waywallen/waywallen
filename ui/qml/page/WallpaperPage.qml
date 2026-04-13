@@ -7,7 +7,6 @@ import waywallen.ui
 MD.Page {
     id: root
 
-    // --- Queries ---
     WallpaperListQuery {
         id: wallpaperQuery
         Component.onCompleted: reload()
@@ -25,7 +24,6 @@ MD.Page {
         return all.filter(wp => wp.wpType === typeFilter);
     }
 
-    // Collect unique types from wallpapers
     property var availableTypes: {
         const all = wallpaperQuery.wallpapers;
         if (!all) return [];
@@ -39,7 +37,7 @@ MD.Page {
         anchors.fill: parent
         spacing: 0
 
-        // Toolbar: filter + scan
+        // Toolbar
         RowLayout {
             Layout.fillWidth: true
             Layout.leftMargin: 16
@@ -56,7 +54,6 @@ MD.Page {
 
             Item { Layout.fillWidth: true }
 
-            // Type filter chips
             Repeater {
                 model: root.availableTypes
 
