@@ -146,7 +146,8 @@ async fn main() -> anyhow::Result<()> {
     log::info!("ws port: {ws_port}");
 
     // Spawn the UI subprocess.
-    if !cli.no_ui {
+    // Keep the Child handle alive so the process is killed when the daemon exits.
+    let _ui_child = if !cli.no_ui {
         if let Some(ui_bin) = resolve_ui_path(cli.ui_path) {
             log::info!("launching ui: {} --ws-port {ws_port}", ui_bin.display());
             match std::process::Command::new(&ui_bin)
@@ -154,13 +155,22 @@ async fn main() -> anyhow::Result<()> {
                 .arg(ws_port.to_string())
                 .spawn()
             {
-                Ok(child) => log::info!("ui pid: {}", child.id()),
-                Err(e) => log::warn!("failed to launch ui {}: {e}", ui_bin.display()),
+                Ok(child) => {
+                    log::info!("ui pid: {}", child.id());
+                    Some(child)
+                }
+                Err(e) => {
+                    log::warn!("failed to launch ui {}: {e}", ui_bin.display());
+                    None
+                }
             }
         } else {
             log::info!("waywallen-ui not found, running headless");
+            None
         }
-    }
+    } else {
+        None
+    };
 
     ws_fut.await?;
     Ok(())
