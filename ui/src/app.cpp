@@ -76,6 +76,7 @@ void App::init() {
     // Connect to the daemon's WebSocket.
     d->m_backend->connectTo();
 
+    engine->addImportPath(u"qrc:/"_s);
     // Load the main window from the QML module.
     engine->loadFromModule("waywallen.ui", "Window");
 

@@ -83,6 +83,11 @@ endif()
 
 
 qt_standard_project_setup()
+
+set(QML_IMPORT_PATH
+    "${CMAKE_CURRENT_BINARY_DIR}/qml_modules"
+    CACHE STRING "QML import paths for IDE and tooling" FORCE
+)
 # ---------------------------------------------------------------------------
 # Control-plane protobuf (shared schema with the Rust backend).
 # Generates C++/QML types from ../proto/control.proto via qt_add_protobuf.
@@ -128,6 +133,10 @@ set(MODULES
 
 set(QML_FILES
   qml/Window.qml
+  qml/WallpaperPage.qml
+  qml/WallpaperCard.qml
+  qml/RenderersPage.qml
+  qml/InfoPage.qml
 )
 set(RESOURCES)
 
