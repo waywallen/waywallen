@@ -56,7 +56,7 @@ void WallpaperListQuery::reload() {
         QVariantList items;
         for (const auto& wp : list_rsp.wallpapers()) {
             QVariantMap m;
-            // m[u"id"_s]       = wp.id();
+            m[u"id"_s]       = wp.id_proto();
             m[u"name"_s]     = wp.name();
             m[u"wpType"_s]   = wp.wpType();
             m[u"resource"_s] = wp.resource();
