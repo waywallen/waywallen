@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 mod control_proto;
+mod dbus_iface;
 mod display_endpoint;
 mod display_proto;
 mod dummy_fence;
@@ -128,9 +129,10 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // Display endpoint on UDS (waywallen-display-v1 protocol).
+    let display_sock_path = display_endpoint::default_socket_path();
     {
         let mgr = state.renderer_manager.clone();
-        let sock_path = display_endpoint::default_socket_path();
+        let sock_path = display_sock_path.clone();
         let sched = Arc::new(std::sync::Mutex::new(scheduler::Scheduler::new()));
         tokio::spawn(async move {
             if let Err(e) = display_endpoint::serve(&sock_path, mgr, sched).await {
@@ -172,6 +174,43 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
-    ws_fut.await?;
+    // Session-bus presence: publish org.waywallen.Daemon so consumers can
+    // detect daemon (re)start via NameOwnerChanged / Ready and reconnect
+    // immediately instead of waiting for their local backoff. Optional —
+    // if the session bus is absent (e.g. TTY, embedded) we keep running.
+    let dbus_conn = match dbus_iface::connect(display_sock_path.to_string_lossy().into_owned())
+        .await
+    {
+        Ok(conn) => {
+            log::info!("DBus name acquired: {}", dbus_iface::BUS_NAME);
+            if let Err(e) = dbus_iface::emit_ready(&conn).await {
+                log::warn!("DBus Ready emit failed: {e}");
+            }
+            Some(conn)
+        }
+        Err(e) => {
+            log::warn!("DBus session bus unavailable: {e} (continuing headless)");
+            None
+        }
+    };
+
+    tokio::select! {
+        res = ws_fut => {
+            if let Err(e) = res {
+                log::error!("ws server exited with error: {e}");
+            }
+        }
+        _ = tokio::signal::ctrl_c() => {
+            log::info!("SIGINT received, shutting down");
+        }
+    }
+
+    if let Some(conn) = dbus_conn.as_ref() {
+        if let Err(e) = dbus_iface::emit_shutting_down(conn).await {
+            log::warn!("DBus ShuttingDown emit failed: {e}");
+        }
+    }
+    drop(dbus_conn);
+
     Ok(())
 }
