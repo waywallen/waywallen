@@ -1,37 +1,34 @@
 //! Shared wallpaper control logic.
 //!
 //! The same operations (apply, next, previous, pause, resume, rescan) are
-//! driven from three surfaces — the WebSocket control plane (`ws_server`),
-//! the session-bus `Daemon1` interface (`dbus_iface`), and the tray menu
-//! (`tray`). This module owns the canonical implementation so all three
-//! paths converge on identical semantics.
+//! driven from two surfaces — the WebSocket control plane (`ws_server`)
+//! and the session-bus `Daemon1` interface (`dbus_iface`) plus the tray.
+//! This module owns the canonical implementation so both paths converge
+//! on identical semantics (spawn-before-kill, router relink, playlist
+//! cursor tracking).
 
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
-use tokio::sync::Mutex;
 
 use crate::ipc::proto::ControlMsg;
 use crate::renderer_manager;
 use crate::wallpaper_type::WallpaperEntry;
 use crate::AppState;
 
-/// Playlist cursor over the flat wallpaper list emitted by the source
-/// manager. Refreshed on every successful `list_snapshot`; `cursor` clamps
-/// to the new length.
 #[derive(Default)]
 pub struct PlaylistState {
     pub ids: Vec<String>,
     pub cursor: usize,
-    /// Id of the wallpaper currently applied by the daemon, regardless of
-    /// whether it came from Next/Previous or WS `WallpaperApply`.
     pub current: Option<String>,
 }
 
 impl PlaylistState {
     pub fn refresh(&mut self, ids: Vec<String>) {
         self.ids = ids;
-        if self.cursor >= self.ids.len() {
+        if self.ids.is_empty() {
+            self.cursor = 0;
+        } else if self.cursor >= self.ids.len() {
             self.cursor = 0;
         }
     }
@@ -48,9 +45,6 @@ pub struct ApplyResult {
     pub entry: WallpaperEntry,
 }
 
-/// Apply the wallpaper identified by `id`. Spawn-before-kill: the new
-/// renderer is brought up first so any active display frame loop can
-/// rebind before the old broadcast closes.
 pub async fn apply_wallpaper_by_id(
     app: &Arc<AppState>,
     id: &str,
@@ -87,8 +81,13 @@ pub async fn apply_wallpaper_by_id(
         test_pattern: false,
     };
     let renderer_id = app.renderer_manager.spawn(spawn_req).await?;
+    if let Some(handle) = app.renderer_manager.get(&renderer_id).await {
+        app.router.register_renderer(handle).await;
+    }
+    app.router.relink_all_displays_to(&renderer_id).await;
     for old_id in pre_existing {
         if old_id != renderer_id {
+            app.router.unregister_renderer(&old_id).await;
             let _ = app.renderer_manager.kill(&old_id).await;
         }
     }
@@ -102,14 +101,11 @@ pub async fn apply_wallpaper_by_id(
     Ok(ApplyResult { renderer_id, entry })
 }
 
-/// Refresh the playlist cursor from the current source manager listing and
-/// advance by `delta` (±1). Returns the newly-applied wallpaper id.
+/// Advance the playlist cursor by `delta` and apply the result.
 pub async fn step(app: &Arc<AppState>, delta: i32) -> Result<String> {
-    let (ids, current) = {
+    let ids: Vec<String> = {
         let mgr = app.source_manager.lock().await;
-        let ids: Vec<String> = mgr.list().iter().map(|e| e.id.clone()).collect();
-        let current = app.playlist.lock().await.current.clone();
-        (ids, current)
+        mgr.list().iter().map(|e| e.id.clone()).collect()
     };
 
     if ids.is_empty() {
@@ -118,13 +114,13 @@ pub async fn step(app: &Arc<AppState>, delta: i32) -> Result<String> {
 
     let next_id = {
         let mut playlist = app.playlist.lock().await;
-        playlist.refresh(ids.clone());
+        let current = playlist.current.clone();
+        playlist.refresh(ids);
         if let Some(cur) = current.as_deref() {
             playlist.locate(cur);
         }
         let len = playlist.ids.len() as i32;
-        let cursor = playlist.cursor as i32;
-        let mut next = (cursor + delta) % len;
+        let mut next = (playlist.cursor as i32 + delta) % len;
         if next < 0 {
             next += len;
         }
@@ -155,22 +151,12 @@ async fn send_all(app: &Arc<AppState>, msg: ControlMsg) -> Result<()> {
 }
 
 pub async fn rescan(app: &Arc<AppState>) -> Result<usize> {
-    let mut mgr = app.source_manager.lock().await;
-    mgr.scan_all()?;
-    let count = mgr.list().len();
-    let ids: Vec<String> = mgr.list().iter().map(|e| e.id.clone()).collect();
-    drop(mgr);
+    let (count, ids) = {
+        let mut mgr = app.source_manager.lock().await;
+        mgr.scan_all()?;
+        let ids: Vec<String> = mgr.list().iter().map(|e| e.id.clone()).collect();
+        (mgr.list().len(), ids)
+    };
     app.playlist.lock().await.refresh(ids);
     Ok(count)
 }
-
-/// Helper for refreshing the playlist snapshot (e.g. after WallpaperList).
-pub async fn refresh_playlist(app: &Arc<AppState>) {
-    let ids: Vec<String> = {
-        let mgr = app.source_manager.lock().await;
-        mgr.list().iter().map(|e| e.id.clone()).collect()
-    };
-    app.playlist.lock().await.refresh(ids);
-}
-
-pub struct PlaylistHandle(pub Arc<Mutex<PlaylistState>>);

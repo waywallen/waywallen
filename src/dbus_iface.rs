@@ -1,4 +1,4 @@
-//! Session-bus presence for the daemon.
+//! Session-bus presence + control surface for the daemon.
 //!
 //! Consumers (e.g. the KDE wallpaper plugin wrapping
 //! `waywallen-display`) watch `org.freedesktop.DBus.NameOwnerChanged` for
@@ -7,14 +7,22 @@
 //!
 //! The bus is **optional** — if `Connection::session()` fails we log a
 //! warning and continue. Nothing in the daemon's data path depends on it.
+//!
+//! Methods here are thin wrappers around `crate::control`; the tray menu
+//! hits those functions directly without bouncing through D-Bus.
+
 use std::sync::Arc;
 
 use zbus::{interface, Connection, SignalContext};
+
+use crate::control;
+use crate::AppState;
 
 pub const BUS_NAME: &str = "org.waywallen.Daemon";
 pub const OBJECT_PATH: &str = "/org/waywallen/Daemon";
 
 pub struct Daemon1 {
+    app: Arc<AppState>,
     display_socket_path: String,
 }
 
@@ -23,6 +31,82 @@ impl Daemon1 {
     #[zbus(property)]
     fn display_socket_path(&self) -> &str {
         &self.display_socket_path
+    }
+
+    #[zbus(property)]
+    fn ws_port(&self) -> u16 {
+        self.app
+            .ws_port
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    #[zbus(property)]
+    async fn current_wallpaper_id(&self) -> String {
+        self.app
+            .playlist
+            .lock()
+            .await
+            .current
+            .clone()
+            .unwrap_or_default()
+    }
+
+    async fn open_ui(&self) -> zbus::fdo::Result<()> {
+        let has_alive = {
+            let mut guard = self.app.ui_child.lock().unwrap();
+            match guard.as_mut() {
+                Some(child) => matches!(child.try_wait(), Ok(None)),
+                None => false,
+            }
+        };
+        if !has_alive && !crate::spawn_ui(&self.app) {
+            return Err(zbus::fdo::Error::Failed(
+                "waywallen-ui not available".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn next(&self) -> zbus::fdo::Result<String> {
+        control::step(&self.app, 1)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn previous(&self) -> zbus::fdo::Result<String> {
+        control::step(&self.app, -1)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn pause(&self) -> zbus::fdo::Result<()> {
+        control::pause_all(&self.app)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn resume(&self) -> zbus::fdo::Result<()> {
+        control::resume_all(&self.app)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn rescan(&self) -> zbus::fdo::Result<u32> {
+        control::rescan(&self.app)
+            .await
+            .map(|n| n as u32)
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+
+    async fn apply_by_id(&self, id: String) -> zbus::fdo::Result<String> {
+        control::apply_wallpaper_by_id(&self.app, &id, 0, 0, 0)
+            .await
+            .map(|r| r.renderer_id)
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+
+    fn quit(&self) {
+        self.app.shutdown.notify_waiters();
     }
 
     #[zbus(signal)]
@@ -38,8 +122,12 @@ impl Daemon1 {
 ///
 /// On any failure (no session bus, name already owned, …) returns `Err`;
 /// the caller should log and continue headless.
-pub async fn connect(display_socket_path: String) -> zbus::Result<Arc<Connection>> {
+pub async fn connect(
+    app: Arc<AppState>,
+    display_socket_path: String,
+) -> zbus::Result<Arc<Connection>> {
     let iface = Daemon1 {
+        app,
         display_socket_path,
     };
     let conn = zbus::connection::Builder::session()?

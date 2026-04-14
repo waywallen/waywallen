@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+mod control;
 mod control_proto;
 mod dbus_iface;
 mod display_endpoint;
@@ -11,6 +12,7 @@ mod plugin;
 mod renderer_manager;
 mod routing;
 mod scheduler;
+mod tray;
 mod wallpaper_type;
 mod ws_server;
 
@@ -19,12 +21,18 @@ pub struct AppState {
     pub renderer_manager: Arc<renderer_manager::RendererManager>,
     pub source_manager: Arc<tokio::sync::Mutex<plugin::source_manager::SourceManager>>,
     pub router: Arc<routing::Router>,
+    pub playlist: tokio::sync::Mutex<control::PlaylistState>,
+    pub ws_port: std::sync::atomic::AtomicU16,
+    pub ui_path: std::sync::Mutex<Option<PathBuf>>,
+    pub ui_child: std::sync::Mutex<Option<std::process::Child>>,
+    pub shutdown: tokio::sync::Notify,
 }
 
 struct Args {
     ws_port: u16,
     ui_path: Option<PathBuf>,
     no_ui: bool,
+    no_tray: bool,
     plugin_dirs: Vec<PathBuf>,
 }
 
@@ -33,6 +41,7 @@ fn parse_args() -> Args {
         ws_port: 0,
         ui_path: None,
         no_ui: false,
+        no_tray: false,
         plugin_dirs: Vec::new(),
     };
 
@@ -50,19 +59,48 @@ fn parse_args() -> Args {
             "--no-ui" => {
                 args.no_ui = true;
             }
+            "--no-tray" => {
+                args.no_tray = true;
+            }
             "--plugin" => {
                 let val = it.next().expect("--plugin requires a path");
                 args.plugin_dirs.push(PathBuf::from(val));
             }
             other => {
                 eprintln!("unknown argument: {other}");
-                eprintln!("usage: waywallen [--ws-port PORT] [--ui PATH] [--no-ui] [--plugin PATH]...");
+                eprintln!("usage: waywallen [--ws-port PORT] [--ui PATH] [--no-ui] [--no-tray] [--plugin PATH]...");
                 std::process::exit(1);
             }
         }
     }
 
     args
+}
+
+/// Spawn the `waywallen-ui` subprocess and stash the `Child` in AppState.
+/// Returns `true` iff a process was started.
+pub fn spawn_ui(state: &AppState) -> bool {
+    let ui_bin = match state.ui_path.lock().unwrap().clone() {
+        Some(p) => p,
+        None => return false,
+    };
+    let port = state.ws_port.load(std::sync::atomic::Ordering::SeqCst);
+    log::info!("launching ui: {} --ws-port {port}", ui_bin.display());
+    match std::process::Command::new(&ui_bin)
+        .arg("--ws-port")
+        .arg(port.to_string())
+        .spawn()
+    {
+        Ok(child) => {
+            log::info!("ui pid: {}", child.id());
+            *state.ui_child.lock().unwrap() = Some(child);
+            true
+        }
+        Err(e) => {
+            log::warn!("failed to launch ui {}: {e}", ui_bin.display());
+            false
+        }
+    }
 }
 
 /// Resolve the UI executable path.  Order:
@@ -130,7 +168,24 @@ async fn main() -> anyhow::Result<()> {
         renderer_manager: Arc::new(renderer_manager::RendererManager::new(registry)),
         source_manager: Arc::new(tokio::sync::Mutex::new(source_mgr)),
         router: router.clone(),
+        playlist: tokio::sync::Mutex::new(control::PlaylistState::default()),
+        ws_port: std::sync::atomic::AtomicU16::new(0),
+        ui_path: std::sync::Mutex::new(None),
+        ui_child: std::sync::Mutex::new(None),
+        shutdown: tokio::sync::Notify::new(),
     });
+    // Seed the playlist from the initial source scan.
+    {
+        let ids: Vec<String> = state
+            .source_manager
+            .lock()
+            .await
+            .list()
+            .iter()
+            .map(|e| e.id.clone())
+            .collect();
+        state.playlist.lock().await.refresh(ids);
+    }
 
     // Display endpoint on UDS (waywallen-display-v1 protocol).
     let display_sock_path = display_endpoint::default_socket_path();
@@ -146,43 +201,32 @@ async fn main() -> anyhow::Result<()> {
 
     // Bind the WS control plane (port 0 = OS picks an available port).
     let bind_addr = format!("0.0.0.0:{}", cli.ws_port);
-    let (local_addr, ws_fut) = ws_server::bind(state, &bind_addr).await?;
+    let (local_addr, ws_fut) = ws_server::bind(state.clone(), &bind_addr).await?;
     let ws_port = local_addr.port();
+    state
+        .ws_port
+        .store(ws_port, std::sync::atomic::Ordering::SeqCst);
     log::info!("ws port: {ws_port}");
 
-    // Spawn the UI subprocess.
-    // Keep the Child handle alive so the process is killed when the daemon exits.
-    let _ui_child = if !cli.no_ui {
+    // Resolve + stash the UI path, and launch once at startup (unless --no-ui).
+    if !cli.no_ui {
         if let Some(ui_bin) = resolve_ui_path(cli.ui_path) {
-            log::info!("launching ui: {} --ws-port {ws_port}", ui_bin.display());
-            match std::process::Command::new(&ui_bin)
-                .arg("--ws-port")
-                .arg(ws_port.to_string())
-                .spawn()
-            {
-                Ok(child) => {
-                    log::info!("ui pid: {}", child.id());
-                    Some(child)
-                }
-                Err(e) => {
-                    log::warn!("failed to launch ui {}: {e}", ui_bin.display());
-                    None
-                }
-            }
+            *state.ui_path.lock().unwrap() = Some(ui_bin);
+            spawn_ui(&state);
         } else {
             log::info!("waywallen-ui not found, running headless");
-            None
         }
-    } else {
-        None
-    };
+    }
 
     // Session-bus presence: publish org.waywallen.Daemon so consumers can
     // detect daemon (re)start via NameOwnerChanged / Ready and reconnect
     // immediately instead of waiting for their local backoff. Optional —
     // if the session bus is absent (e.g. TTY, embedded) we keep running.
-    let dbus_conn = match dbus_iface::connect(display_sock_path.to_string_lossy().into_owned())
-        .await
+    let dbus_conn = match dbus_iface::connect(
+        state.clone(),
+        display_sock_path.to_string_lossy().into_owned(),
+    )
+    .await
     {
         Ok(conn) => {
             log::info!("DBus name acquired: {}", dbus_iface::BUS_NAME);
@@ -197,6 +241,20 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
+    // Tray icon (StatusNotifierItem) — best-effort. Requires a session bus
+    // and a StatusNotifierWatcher (Plasma, AppIndicator extension, waybar
+    // tray, ...). No host ⇒ warn & keep running headless.
+    if !cli.no_tray {
+        if let Some(conn) = dbus_conn.clone() {
+            let state_t = state.clone();
+            tokio::spawn(async move {
+                if let Err(e) = tray::spawn(conn, state_t).await {
+                    log::warn!("tray: {e} (continuing without tray)");
+                }
+            });
+        }
+    }
+
     tokio::select! {
         res = ws_fut => {
             if let Err(e) = res {
@@ -206,6 +264,9 @@ async fn main() -> anyhow::Result<()> {
         _ = tokio::signal::ctrl_c() => {
             log::info!("SIGINT received, shutting down");
         }
+        _ = state.shutdown.notified() => {
+            log::info!("shutdown requested via D-Bus");
+        }
     }
 
     if let Some(conn) = dbus_conn.as_ref() {
@@ -214,6 +275,13 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     drop(dbus_conn);
+
+    // Kill the UI subprocess explicitly (the Child wrapper in AppState is
+    // kept on a plain Mutex so we don't rely on Drop ordering).
+    if let Some(mut child) = state.ui_child.lock().unwrap().take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 
     Ok(())
 }
