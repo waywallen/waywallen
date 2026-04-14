@@ -113,7 +113,12 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
                 test_pattern: false,
             };
             match state.renderer_manager.spawn(spawn_req).await {
-                Ok(id) => ok(rid, Res::RendererSpawn(pb::RendererSpawnResponse { renderer_id: id })),
+                Ok(id) => {
+                    if let Some(handle) = state.renderer_manager.get(&id).await {
+                        state.router.register_renderer(handle).await;
+                    }
+                    ok(rid, Res::RendererSpawn(pb::RendererSpawnResponse { renderer_id: id }))
+                }
                 Err(e) => error_response(rid, pb::Status::Internal, format!("spawn failed: {e}")),
             }
         }
@@ -159,10 +164,13 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
             Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
         },
 
-        Req::RendererKill(r) => match state.renderer_manager.kill(&r.renderer_id).await {
-            Ok(()) => ok(rid, Res::RendererKill(pb::Empty {})),
-            Err(e) => error_response(rid, pb::Status::NotFound, e.to_string()),
-        },
+        Req::RendererKill(r) => {
+            state.router.unregister_renderer(&r.renderer_id).await;
+            match state.renderer_manager.kill(&r.renderer_id).await {
+                Ok(()) => ok(rid, Res::RendererKill(pb::Empty {})),
+                Err(e) => error_response(rid, pb::Status::NotFound, e.to_string()),
+            }
+        }
 
         Req::RendererPluginList(_) => {
             let registry = state.renderer_manager.registry();
@@ -263,10 +271,10 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
                     format!("no renderer for wallpaper type '{}'", entry.wp_type),
                 );
             }
-            // Single-wallpaper mode: kill any existing renderers first.
-            for id in state.renderer_manager.list().await {
-                let _ = state.renderer_manager.kill(&id).await;
-            }
+            // Single-wallpaper mode, spawn-before-kill: bring the new
+            // renderer up first so any active display frame loop has a
+            // replacement to rebind to before the old broadcast closes.
+            let pre_existing: Vec<String> = state.renderer_manager.list().await;
             let width = if r.width == 0 { 1920 } else { r.width };
             let height = if r.height == 0 { 1080 } else { r.height };
             let fps = if r.fps == 0 { 30 } else { r.fps };
@@ -279,15 +287,27 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
                 test_pattern: false,
             };
             match state.renderer_manager.spawn(spawn_req).await {
-                Ok(renderer_id) => ok(
-                    rid,
-                    Res::WallpaperApply(pb::WallpaperApplyResponse {
-                        renderer_id,
-                        wallpaper_id: entry.id,
-                        wp_type: entry.wp_type,
-                        name: entry.name,
-                    }),
-                ),
+                Ok(renderer_id) => {
+                    if let Some(handle) = state.renderer_manager.get(&renderer_id).await {
+                        state.router.register_renderer(handle).await;
+                    }
+                    state.router.relink_all_displays_to(&renderer_id).await;
+                    for old_id in pre_existing {
+                        if old_id != renderer_id {
+                            state.router.unregister_renderer(&old_id).await;
+                            let _ = state.renderer_manager.kill(&old_id).await;
+                        }
+                    }
+                    ok(
+                        rid,
+                        Res::WallpaperApply(pb::WallpaperApplyResponse {
+                            renderer_id,
+                            wallpaper_id: entry.id,
+                            wp_type: entry.wp_type,
+                            name: entry.name,
+                        }),
+                    )
+                }
                 Err(e) => error_response(rid, pb::Status::Internal, format!("spawn failed: {e}")),
             }
         }

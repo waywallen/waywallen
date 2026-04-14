@@ -52,6 +52,10 @@ pub struct SpawnRequest {
 /// the host attached to it. Owned by the manager; display endpoints will
 /// `dup(2)` individual fds out of it when a new subscriber connects.
 pub struct BindSnapshot {
+    /// Monotonically increasing per-renderer pool generation. Starts at
+    /// 1 for the first `BindBuffers` and increments on every rebind.
+    /// Propagated as `buffer_generation` on the display wire.
+    pub generation: u64,
     pub count: u32,
     pub fourcc: u32,
     pub width: u32,
@@ -432,7 +436,13 @@ fn run_reader(
             if fds.is_empty() {
                 log::warn!("renderer {id}: BindBuffers arrived without fds");
             } else {
+                let prev_gen = bind_snapshot
+                    .lock()
+                    .ok()
+                    .and_then(|g| g.as_ref().map(|s| s.generation));
+                let generation = prev_gen.map_or(1, |g| g + 1);
                 let snap = BindSnapshot {
+                    generation,
                     count,
                     fourcc,
                     width,
@@ -445,7 +455,7 @@ fn run_reader(
                 };
                 if let Ok(mut guard) = bind_snapshot.lock() {
                     *guard = Some(snap);
-                    log::info!("renderer {id}: BindBuffers cached");
+                    log::info!("renderer {id}: BindBuffers cached (gen={generation})");
                 }
                 // A rebind retires any pending acquire fences — they
                 // belong to the previous buffer_generation and cannot

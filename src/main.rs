@@ -9,6 +9,7 @@ mod dummy_fence;
 mod ipc;
 mod plugin;
 mod renderer_manager;
+mod routing;
 mod scheduler;
 mod wallpaper_type;
 mod ws_server;
@@ -17,6 +18,7 @@ mod ws_server;
 pub struct AppState {
     pub renderer_manager: Arc<renderer_manager::RendererManager>,
     pub source_manager: Arc<tokio::sync::Mutex<plugin::source_manager::SourceManager>>,
+    pub router: Arc<routing::Router>,
 }
 
 struct Args {
@@ -123,19 +125,20 @@ async fn main() -> anyhow::Result<()> {
     }
     let _ = source_mgr.scan_all();
 
+    let router = routing::Router::new();
     let state = Arc::new(AppState {
         renderer_manager: Arc::new(renderer_manager::RendererManager::new(registry)),
         source_manager: Arc::new(tokio::sync::Mutex::new(source_mgr)),
+        router: router.clone(),
     });
 
     // Display endpoint on UDS (waywallen-display-v1 protocol).
     let display_sock_path = display_endpoint::default_socket_path();
     {
-        let mgr = state.renderer_manager.clone();
+        let router = router.clone();
         let sock_path = display_sock_path.clone();
-        let sched = Arc::new(std::sync::Mutex::new(scheduler::Scheduler::new()));
         tokio::spawn(async move {
-            if let Err(e) = display_endpoint::serve(&sock_path, mgr, sched).await {
+            if let Err(e) = display_endpoint::serve(&sock_path, router).await {
                 log::error!("display endpoint exited: {e}");
             }
         });
