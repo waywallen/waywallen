@@ -118,9 +118,29 @@ Backend::~Backend() {
 }
 
 void Backend::connectTo() {
+    if (m_port == 0) {
+        qDebug("backend: port is 0, skipping connect (waiting for daemon)");
+        return;
+    }
     m_reconnect_delay = 1000;
     qDebug("connecting to ws://127.0.0.1:%d", (int)m_port);
     m_client->connect(std::format("ws://127.0.0.1:{}", m_port));
+}
+
+void Backend::setPort(quint16 port) {
+    if (m_port == port) return;
+    m_port = port;
+    if (m_reconnect_timer) {
+        m_reconnect_timer->stop();
+    }
+}
+
+void Backend::disconnect() {
+    if (m_reconnect_timer) {
+        m_reconnect_timer->stop();
+    }
+    // Dropping port signals "no daemon"; the ws client will surface an error
+    // on its own when the TCP connection drops.
 }
 
 void Backend::on_connected() {

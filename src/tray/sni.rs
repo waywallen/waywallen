@@ -151,16 +151,6 @@ impl StatusNotifierItem {
 }
 
 async fn open_ui(app: &Arc<AppState>) -> anyhow::Result<()> {
-    let alive = {
-        let mut guard = app.ui_child.lock().unwrap();
-        match guard.as_mut() {
-            Some(child) => matches!(child.try_wait(), Ok(None)),
-            None => false,
-        }
-    };
-    if alive {
-        return Ok(());
-    }
     if !crate::spawn_ui(app) {
         anyhow::bail!("waywallen-ui not available");
     }

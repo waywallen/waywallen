@@ -59,6 +59,38 @@ MD.ApplicationWindow {
         currentPageChanged();
     }
 
+    // Disconnected overlay — shows when daemon is not reachable via DBus.
+    Rectangle {
+        id: m_disconnect_overlay
+        anchors.fill: parent
+        z: 1000
+        visible: !DaemonDBusClient.daemonAvailable
+        color: Qt.rgba(0, 0, 0, 0.6)
+
+        MouseArea {
+            anchors.fill: parent
+            // Eat clicks so the UI behind is non-interactive.
+        }
+
+        ColumnLayout {
+            anchors.centerIn: parent
+            spacing: 16
+
+            QC.Label {
+                Layout.alignment: Qt.AlignHCenter
+                text: "waywallen daemon 未运行"
+                color: MD.Token.color.on_surface
+                font.pixelSize: 18
+            }
+
+            QC.Button {
+                Layout.alignment: Qt.AlignHCenter
+                text: "启动 daemon"
+                onClicked: DaemonDBusClient.launchDaemon()
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0

@@ -24,7 +24,6 @@ pub struct AppState {
     pub playlist: tokio::sync::Mutex<control::PlaylistState>,
     pub ws_port: std::sync::atomic::AtomicU16,
     pub ui_path: std::sync::Mutex<Option<PathBuf>>,
-    pub ui_child: std::sync::Mutex<Option<std::process::Child>>,
     pub shutdown: tokio::sync::Notify,
 }
 
@@ -77,23 +76,18 @@ fn parse_args() -> Args {
     args
 }
 
-/// Spawn the `waywallen-ui` subprocess and stash the `Child` in AppState.
-/// Returns `true` iff a process was started.
+/// Spawn the `waywallen-ui` subprocess fire-and-forget. UI reads the WS
+/// port from the `org.waywallen.Daemon1` DBus interface; its lifecycle is
+/// independent of the daemon.
 pub fn spawn_ui(state: &AppState) -> bool {
     let ui_bin = match state.ui_path.lock().unwrap().clone() {
         Some(p) => p,
         None => return false,
     };
-    let port = state.ws_port.load(std::sync::atomic::Ordering::SeqCst);
-    log::info!("launching ui: {} --ws-port {port}", ui_bin.display());
-    match std::process::Command::new(&ui_bin)
-        .arg("--ws-port")
-        .arg(port.to_string())
-        .spawn()
-    {
+    log::info!("launching ui: {}", ui_bin.display());
+    match std::process::Command::new(&ui_bin).spawn() {
         Ok(child) => {
             log::info!("ui pid: {}", child.id());
-            *state.ui_child.lock().unwrap() = Some(child);
             true
         }
         Err(e) => {
@@ -172,7 +166,6 @@ async fn main() -> anyhow::Result<()> {
         playlist: tokio::sync::Mutex::new(control::PlaylistState::default()),
         ws_port: std::sync::atomic::AtomicU16::new(0),
         ui_path: std::sync::Mutex::new(None),
-        ui_child: std::sync::Mutex::new(None),
         shutdown: tokio::sync::Notify::new(),
     });
     // Seed the playlist from the initial source scan.
@@ -276,13 +269,6 @@ async fn main() -> anyhow::Result<()> {
         }
     }
     drop(dbus_conn);
-
-    // Kill the UI subprocess explicitly (the Child wrapper in AppState is
-    // kept on a plain Mutex so we don't rely on Drop ordering).
-    if let Some(mut child) = state.ui_child.lock().unwrap().take() {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
 
     Ok(())
 }

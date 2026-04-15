@@ -106,14 +106,7 @@ impl DBusMenu {
         let app = self.app.clone();
         match id {
             ID_OPEN_UI => {
-                let alive = {
-                    let mut g = app.ui_child.lock().unwrap();
-                    match g.as_mut() {
-                        Some(c) => matches!(c.try_wait(), Ok(None)),
-                        None => false,
-                    }
-                };
-                if !alive && !crate::spawn_ui(&app) {
+                if !crate::spawn_ui(&app) {
                     log::warn!("tray: open_ui failed");
                 }
             }
@@ -283,16 +276,7 @@ fn item_to_value(item: ItemStruct) -> OwnedValue {
 async fn dispatch_click(app: &Arc<AppState>, id: i32) -> zbus::fdo::Result<()> {
     match id {
         ID_OPEN_UI => {
-            let alive = {
-                let mut g = app.ui_child.lock().unwrap();
-                match g.as_mut() {
-                    Some(c) => matches!(c.try_wait(), Ok(None)),
-                    None => false,
-                }
-            };
-            if !alive {
-                let _ = crate::spawn_ui(app);
-            }
+            let _ = crate::spawn_ui(app);
         }
         ID_NEXT => {
             let _ = control::step(app, 1).await;

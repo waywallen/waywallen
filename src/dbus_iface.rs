@@ -52,14 +52,7 @@ impl Daemon1 {
     }
 
     async fn open_ui(&self) -> zbus::fdo::Result<()> {
-        let has_alive = {
-            let mut guard = self.app.ui_child.lock().unwrap();
-            match guard.as_mut() {
-                Some(child) => matches!(child.try_wait(), Ok(None)),
-                None => false,
-            }
-        };
-        if !has_alive && !crate::spawn_ui(&self.app) {
+        if !crate::spawn_ui(&self.app) {
             return Err(zbus::fdo::Error::Failed(
                 "waywallen-ui not available".into(),
             ));

@@ -1,15 +1,12 @@
 #include <QGuiApplication>
 #include <QCommandLineParser>
 #include <QtQml/QQmlExtensionPlugin>
-#include <signal.h>
-#include <sys/prctl.h>
 Q_IMPORT_QML_PLUGIN(waywallen_uiPlugin)
 
 import ncrequest;
 import waywallen;
 
 int main(int argc, char** argv) {
-    prctl(PR_SET_PDEATHSIG, SIGTERM);
     ncrequest::global_init();
     QGuiApplication gui_app(argc, argv);
     QCoreApplication::setApplicationName(APP_NAME);
@@ -18,7 +15,9 @@ int main(int argc, char** argv) {
     QCommandLineParser parser;
     parser.addHelpOption();
     parser.addVersionOption();
-    parser.addOption({"ws-port", "WebSocket port of the waywallen daemon.", "port"});
+    parser.addOption({"ws-port",
+                      "Override the WebSocket port (normally discovered via DBus).",
+                      "port"});
     parser.process(gui_app);
 
     quint16 ws_port = 0;

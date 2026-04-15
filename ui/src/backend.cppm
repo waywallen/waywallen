@@ -37,6 +37,9 @@ public:
     ~Backend();
 
     void connectTo();
+    void setPort(quint16 port);
+    quint16 port() const { return m_port; }
+    void disconnect();
 
     auto send(proto::Request&& req) -> task<Result<proto::Response, QString>>;
 

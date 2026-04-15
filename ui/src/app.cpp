@@ -75,7 +75,35 @@ void App::init() {
 
     connect(engine, &QQmlApplicationEngine::quit, QGuiApplication::instance(), &QGuiApplication::quit);
 
-    // Connect to the daemon's WebSocket.
+    // Resolve ws port. Priority: explicit --ws-port override > DBus-discovered.
+    auto* dbus = DaemonDBusClient::instance();
+    if (d->m_port == 0) {
+        quint16 p = dbus->wsPort();
+        if (p != 0) {
+            d->m_backend->setPort(p);
+        }
+    }
+
+    // React to daemon availability / port changes.
+    connect(dbus, &DaemonDBusClient::wsPortChanged, this, [this, d](quint16 port) {
+        if (d->m_port != 0) {
+            // Explicit override from CLI; ignore DBus-driven port changes.
+            return;
+        }
+        if (port == 0) {
+            d->m_backend->disconnect();
+            return;
+        }
+        d->m_backend->setPort(port);
+        d->m_backend->connectTo();
+    });
+    connect(dbus, &DaemonDBusClient::daemonAvailabilityChanged, this, [d](bool available) {
+        if (! available) {
+            d->m_backend->disconnect();
+        }
+    });
+
+    // Connect to the daemon's WebSocket (no-op if port is still 0).
     d->m_backend->connectTo();
 
     engine->addImportPath(u"qrc:/"_s);

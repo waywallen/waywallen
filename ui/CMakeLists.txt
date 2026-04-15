@@ -17,7 +17,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick Protobuf ProtobufQuick ProtobufWellKnownTypes)
+find_package(Qt6 REQUIRED COMPONENTS Quick DBus Protobuf ProtobufQuick ProtobufWellKnownTypes)
 include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
 
 fetchdeps(${CMAKE_CURRENT_SOURCE_DIR}/deps.json
@@ -48,6 +48,7 @@ qt_add_protobuf(waywallen-control
 set(SOURCES_NO_MOC
   src/backend.cpp
   src/app.cpp
+  src/daemon_dbus.cpp
   src/query/query.cpp
   src/query/wallpaper_query.cpp
   src/query/renderer_query.cpp
@@ -62,6 +63,7 @@ set(SOURCES
 set(MOC_SOURCE_FILES
   src/app.cppm
   src/backend.cppm
+  src/daemon_dbus.cppm
   src/query/query.cppm
   src/query/wallpaper_query.cppm
   src/query/renderer_query.cppm
@@ -154,6 +156,7 @@ target_include_directories(
 target_compile_features(waywallen-qml PUBLIC cxx_std_20)
 target_link_libraries(waywallen-qml
   PUBLIC
+    Qt6::DBus
     Qt6::Protobuf
     Qt6::ProtobufQuick
     Qt6::ProtobufWellKnownTypes
