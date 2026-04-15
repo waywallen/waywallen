@@ -1,46 +1,76 @@
 [
   {
+    "dest": "build/_flatpak_deps/asio-src",
+    "disable-shallow-clone": false,
+    "name": "asio",
+    "tag": "asio-1-30-2",
+    "type": "git",
+    "url": "https://github.com/chriskohlhoff/asio.git",
+    "x-cmake": {
+      "exclude_from_all": true
+    }
+  },
+  {
+    "dest": "build/_flatpak_deps/pegtl-src",
+    "disable-shallow-clone": false,
+    "name": "pegtl",
+    "tag": "3.2.8",
+    "type": "git",
+    "url": "https://github.com/taocpp/PEGTL.git",
+    "x-cmake": {
+      "exclude_from_all": true
+    }
+  },
+  {
+    "commit": "2528b1cdb76624df9e01c97a7ab23dbd905afe3a",
+    "dest": "build/_flatpak_deps/rstd-src",
+    "disable-shallow-clone": true,
     "name": "rstd",
     "type": "git",
     "url": "https://github.com/hypengw/rstd.git",
-    "commit": "2528b1cdb76624df9e01c97a7ab23dbd905afe3a",
-    "disable-shallow-clone": true,
-    "dest": "build/_flatpak_deps/rstd-src",
-    "x-cmake": { "exclude_from_all": true }
+    "x-cmake": {
+      "exclude_from_all": true
+    }
   },
   {
+    "commit": "609e63b801a9f96d1d7a5f9b71d34158640bbfa1",
+    "dest": "build/_flatpak_deps/ncrequest-src",
+    "disable-shallow-clone": true,
     "name": "ncrequest",
     "type": "git",
     "url": "https://github.com/hypengw/ncrequest.git",
-    "commit": "609e63b801a9f96d1d7a5f9b71d34158640bbfa1",
-    "disable-shallow-clone": true,
-    "dest": "build/_flatpak_deps/ncrequest-src",
-    "x-cmake": { "exclude_from_all": true }
+    "x-cmake": {
+      "exclude_from_all": true
+    }
   },
   {
+    "commit": "4a706464da0459762e709f2c3f233d3ba3c5818b",
+    "dest": "build/_flatpak_deps/kstore-src",
+    "disable-shallow-clone": false,
     "name": "kstore",
     "type": "git",
-    "url": "https://github.com/hypengw/kstore.git",
-    "commit": "4a706464da0459762e709f2c3f233d3ba3c5818b",
-    "disable-shallow-clone": false,
-    "dest": "build/_flatpak_deps/kstore-src"
+    "url": "https://github.com/hypengw/kstore.git"
   },
   {
+    "commit": "d224b05a54842d89591d75b4e931228588021cdc",
+    "dest": "build/_flatpak_deps/qml_material-src",
+    "disable-shallow-clone": true,
     "name": "qml_material",
     "type": "git",
     "url": "https://github.com/hypengw/QmlMaterial.git",
-    "commit": "d224b05a54842d89591d75b4e931228588021cdc",
-    "disable-shallow-clone": true,
-    "dest": "build/_flatpak_deps/qml_material-src",
-    "x-cmake": { "find_package_args": "GLOBAL" }
+    "x-cmake": {
+      "find_package_args": "GLOBAL"
+    }
   },
   {
+    "commit": "3577fe189ad642239f536f8b8f179590437027c6",
+    "dest": "build/_flatpak_deps/QExtra-src",
+    "disable-shallow-clone": true,
     "name": "QExtra",
     "type": "git",
     "url": "https://github.com/hypengw/QExtra.git",
-    "commit": "3577fe189ad642239f536f8b8f179590437027c6",
-    "disable-shallow-clone": true,
-    "dest": "build/_flatpak_deps/QExtra-src",
-    "x-cmake": { "find_package_args": "GLOBAL" }
+    "x-cmake": {
+      "find_package_args": "GLOBAL"
+    }
   }
 ]
