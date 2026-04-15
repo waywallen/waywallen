@@ -6,6 +6,11 @@ set(APP_VERSION "0.1.0")
 set(APP_SUMMARY "Wallpaper manager for Wayland")
 set(APP_AUTHOR "hypengw")
 
+# Must be set BEFORE project() so the FetchContent dependency provider
+# (cmake_language(SET_DEPENDENCY_PROVIDER ...)) can register.
+list(APPEND CMAKE_PROJECT_TOP_LEVEL_INCLUDES
+  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchDeps.cmake)
+
 project(waywallen-ui LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -14,71 +19,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Qt6 REQUIRED COMPONENTS Quick Protobuf ProtobufQuick ProtobufWellKnownTypes)
 include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
-include(FetchContent)
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/rstd")
-  add_subdirectory(rstd)
-else()
-  FetchContent_Declare(
-    rstd
-    GIT_REPOSITORY https://github.com/hypengw/rstd.git
-    GIT_TAG 2528b1cdb76624df9e01c97a7ab23dbd905afe3a
-    GIT_SHALLOW 0
-    GIT_PROGRESS 1
-    EXCLUDE_FROM_ALL)
-  FetchContent_MakeAvailable(rstd)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/ncrequest")
-  add_subdirectory(ncrequest)
-else()
-  FetchContent_Declare(
-    ncrequest
-    GIT_REPOSITORY https://github.com/hypengw/ncrequest.git
-    GIT_TAG 609e63b801a9f96d1d7a5f9b71d34158640bbfa1
-    GIT_SHALLOW 0
-    GIT_PROGRESS 1
-    EXCLUDE_FROM_ALL)
-  FetchContent_MakeAvailable(ncrequest)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/kstore")
-  add_subdirectory(kstore)
-else()
-  FetchContent_Declare(
-    kstore
-    GIT_REPOSITORY https://github.com/hypengw/kstore.git
-    GIT_TAG 4a706464da0459762e709f2c3f233d3ba3c5818b
-    GIT_SHALLOW 1
-    GIT_PROGRESS 1)
-  FetchContent_MakeAvailable(kstore)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/qml_material")
-  add_subdirectory(qml_material)
-else()
-FetchContent_Declare(
-  qml_material
-  GIT_REPOSITORY https://github.com/hypengw/QmlMaterial.git
-  GIT_TAG f8e53dfc6e340b817edccc7b7c56d7b1544052ba
-  GIT_SHALLOW 0
-  GIT_PROGRESS 1
-  FIND_PACKAGE_ARGS GLOBAL)
-FetchContent_MakeAvailable(qml_material)
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/QExtra")
-  add_subdirectory(QExtra)
-else()
-  FetchContent_Declare(
-    qextra
-    GIT_REPOSITORY https://github.com/hypengw/QExtra.git
-    GIT_TAG 3577fe189ad642239f536f8b8f179590437027c6
-    GIT_SHALLOW 0
-    GIT_PROGRESS 1
-    FIND_PACKAGE_ARGS GLOBAL)
-  FetchContent_MakeAvailable(qextra)
-endif()
+fetchdeps(${CMAKE_CURRENT_SOURCE_DIR}/deps.json
+  FLATPAK_OUT ${CMAKE_BINARY_DIR}/flatpak_sources.json)
 
 
 
