@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.28)
 set(APP_ID io.github.waywallen)
 set(APP_NAME "waywallen-ui")
 set(APP_VERSION "0.1.0")
-set(APP_SUMMARY "")
+set(APP_SUMMARY "Wallpaper manager for Wayland")
 set(APP_AUTHOR "hypengw")
 
 project(waywallen-ui LANGUAGES CXX)
@@ -225,12 +225,12 @@ set_target_properties(${PROJECT_NAME} PROPERTIES CXX_SCAN_FOR_MODULES ON)
 target_compile_definitions(${PROJECT_NAME} PRIVATE "${APP_INFO_MACROS}")
 target_link_libraries(${PROJECT_NAME} PRIVATE waywallen-qml)
 
-#set(APP_DESKTOP assets/waywallen-ui.desktop)
-#set(APP_METAINFO assets/waywallen-ui.metainfo.xml)
-#set(APP_SVG assets/waywallen-ui.svg)
-#file(READ assets/waywallen-ui.releases.xml APP_RELEASES)
-#configure_file(${APP_DESKTOP}.in ${APP_DESKTOP} @ONLY)
-#configure_file(${APP_METAINFO}.in ${APP_METAINFO} @ONLY)
+set(APP_DESKTOP assets/waywallen-ui.desktop)
+set(APP_METAINFO assets/waywallen-ui.metainfo.xml)
+set(APP_SVG assets/waywallen-ui.svg)
+file(READ assets/waywallen-ui.releases.xml APP_RELEASES)
+configure_file(${APP_DESKTOP}.in ${APP_DESKTOP} @ONLY)
+configure_file(${APP_METAINFO}.in ${APP_METAINFO} @ONLY)
 
 install(
   TARGETS ${PROJECT_NAME}
@@ -238,17 +238,19 @@ install(
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-#  install(
-#    FILES "${CMAKE_CURRENT_BINARY_DIR}/${APP_DESKTOP}"
-#    RENAME ${APP_ID}.desktop
-#    DESTINATION share/applications)
-#  install(
-#    FILES "${CMAKE_CURRENT_BINARY_DIR}/${APP_METAINFO}"
-#    RENAME ${APP_ID}.metainfo.xml
-#    DESTINATION share/metainfo)
-#  install(
-#    FILES ${APP_SVG}
-#    RENAME ${APP_ID}.svg
-#    DESTINATION share/icons/hicolor/scalable/apps)
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/${APP_DESKTOP}"
+  RENAME ${APP_ID}.desktop
+  DESTINATION share/applications)
+install(
+  FILES "${CMAKE_CURRENT_BINARY_DIR}/${APP_METAINFO}"
+  RENAME ${APP_ID}.metainfo.xml
+  DESTINATION share/metainfo)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${APP_SVG}")
+  install(
+    FILES ${APP_SVG}
+    RENAME ${APP_ID}.svg
+    DESTINATION share/icons/hicolor/scalable/apps)
+endif()
 
 qt_finalize_target(${PROJECT_NAME})

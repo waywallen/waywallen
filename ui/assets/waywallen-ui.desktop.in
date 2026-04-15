@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=@APP_NAME@
+GenericName=Wallpaper Manager
+Comment=@APP_SUMMARY@
+Exec=waywallen-ui
+Icon=@APP_ID@
+Terminal=false
+Categories=Graphics;Qt;
+Keywords=wallpaper;pipewire;vulkan;
+StartupNotify=true
