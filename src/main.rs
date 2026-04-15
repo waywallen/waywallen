@@ -163,9 +163,10 @@ async fn main() -> anyhow::Result<()> {
     }
     let _ = source_mgr.scan_all();
 
-    let router = routing::Router::new();
+    let renderer_mgr = Arc::new(renderer_manager::RendererManager::new(registry));
+    let router = routing::Router::new(renderer_mgr.clone());
     let state = Arc::new(AppState {
-        renderer_manager: Arc::new(renderer_manager::RendererManager::new(registry)),
+        renderer_manager: renderer_mgr,
         source_manager: Arc::new(tokio::sync::Mutex::new(source_mgr)),
         router: router.clone(),
         playlist: tokio::sync::Mutex::new(control::PlaylistState::default()),

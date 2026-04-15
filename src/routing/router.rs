@@ -18,15 +18,23 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{broadcast::error::RecvError, mpsc, Mutex as TokioMutex};
 use tokio::task::JoinHandle;
 
-use crate::ipc::proto::EventMsg;
-use crate::renderer_manager::{RendererHandle, RendererId};
+/// Renderers that stay paused (ref_count == 0) longer than this are
+/// automatically killed to reclaim GPU/VRAM. Defeatable by touching
+/// the link again.
+const IDLE_KILL_TIMEOUT: Duration = Duration::from_secs(300);
+/// How often the reaper task wakes up to scan for idle renderers.
+const IDLE_SCAN_INTERVAL: Duration = Duration::from_secs(30);
+
+use crate::ipc::proto::{ControlMsg, EventMsg};
+use crate::renderer_manager::{RendererHandle, RendererId, RendererManager};
 use crate::scheduler::{DisplayId, DisplayInfo, ProjectedConfig};
 
-use super::table::RoutingTable;
+use super::table::{Link, LinkDstRect, LinkId, LinkSrcRect, RoutingTable};
 
 /// Wire-translated event streamed from router to a display endpoint.
 /// The endpoint owns translation to the on-the-wire `Event`.
@@ -82,25 +90,78 @@ struct Inner {
     table: RoutingTable,
     displays: HashMap<DisplayId, DisplayState>,
     renderer_tasks: HashMap<RendererId, JoinHandle<()>>,
+    /// Renderers we've already sent `Pause` to. Used to compute the
+    /// Play/Pause diff when ref_counts change so we never send the
+    /// same control twice.
+    paused_renderers: std::collections::HashSet<RendererId>,
+    /// Timestamp of the Pause transition for each paused renderer.
+    /// Consumed by the reaper task to enforce `IDLE_KILL_TIMEOUT`.
+    paused_since: HashMap<RendererId, Instant>,
     next_display_id: u64,
     next_config_generation: u64,
 }
 
 pub struct Router {
     inner: TokioMutex<Inner>,
+    /// For Pause/Play lifecycle control. Phase 2: a renderer with zero
+    /// enabled links is paused; the next link added resumes it.
+    mgr: Arc<RendererManager>,
 }
 
 impl Router {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
+    pub fn new(mgr: Arc<RendererManager>) -> Arc<Self> {
+        let router = Arc::new(Self {
             inner: TokioMutex::new(Inner {
                 table: RoutingTable::new(),
                 displays: HashMap::new(),
                 renderer_tasks: HashMap::new(),
+                paused_renderers: std::collections::HashSet::new(),
+                paused_since: HashMap::new(),
                 next_display_id: 0,
                 next_config_generation: 0,
             }),
-        })
+            mgr,
+        });
+        // Spawn the idle-renderer reaper.
+        {
+            let weak = Arc::downgrade(&router);
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(IDLE_SCAN_INTERVAL).await;
+                    let Some(this) = weak.upgrade() else { return };
+                    this.reap_idle_renderers().await;
+                }
+            });
+        }
+        router
+    }
+
+    /// Kill renderers that have been paused longer than
+    /// `IDLE_KILL_TIMEOUT`. Called periodically by the reaper task
+    /// spawned in `new()`.
+    async fn reap_idle_renderers(self: &Arc<Self>) {
+        let now = Instant::now();
+        let victims: Vec<RendererId> = {
+            let inner = self.inner.lock().await;
+            inner
+                .paused_since
+                .iter()
+                .filter_map(|(id, t)| {
+                    if now.duration_since(*t) >= IDLE_KILL_TIMEOUT {
+                        Some(id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        };
+        for id in victims {
+            log::info!("router: reaping idle renderer {id}");
+            self.unregister_renderer(&id).await;
+            if let Err(e) = self.mgr.kill(&id).await {
+                log::warn!("router: reaper kill {id}: {e}");
+            }
+        }
     }
 
     // ---------------------------------------------------------------
@@ -148,11 +209,14 @@ impl Router {
             if let Some(task) = inner.renderer_tasks.remove(id) {
                 task.abort();
             }
+            inner.paused_renderers.remove(id);
+            inner.paused_since.remove(id);
             removed.into_iter().map(|(_, did)| did).collect()
         };
         for did in affected {
             self.sync_display(did).await;
         }
+        self.reconcile_lifecycle().await;
     }
 
     // ---------------------------------------------------------------
@@ -193,13 +257,17 @@ impl Router {
             id
         };
         self.sync_display(display_id).await;
+        self.reconcile_lifecycle().await;
         DisplayHandle { id: display_id, rx }
     }
 
     pub async fn unregister_display(self: &Arc<Self>, display_id: DisplayId) {
-        let mut inner = self.inner.lock().await;
-        inner.displays.remove(&display_id);
-        inner.table.remove_display(display_id);
+        {
+            let mut inner = self.inner.lock().await;
+            inner.displays.remove(&display_id);
+            inner.table.remove_display(display_id);
+        }
+        self.reconcile_lifecycle().await;
     }
 
     pub async fn update_display_size(
@@ -241,6 +309,58 @@ impl Router {
         for did in display_ids {
             self.sync_display(did).await;
         }
+        self.reconcile_lifecycle().await;
+    }
+
+    /// Mutate a link's geometry/clear color and re-emit `SetConfig` to
+    /// the affected display. Sends only `SetConfig` (no Bind/Unbind):
+    /// the buffer pool is unchanged, only the composition geometry.
+    /// Returns `true` if the link existed and any field was updated.
+    pub async fn set_link_geometry(
+        self: &Arc<Self>,
+        link_id: LinkId,
+        src: Option<LinkSrcRect>,
+        dst: Option<LinkDstRect>,
+        transform: Option<u32>,
+        clear_rgba: Option<[f32; 4]>,
+        z_order: Option<i32>,
+    ) -> bool {
+        let payload: Option<(DisplayId, ProjectedConfig)> = {
+            let mut inner = self.inner.lock().await;
+            let changed = inner.table.update_link_geometry(
+                link_id, src, dst, transform, clear_rgba, z_order,
+            );
+            if !changed {
+                return false;
+            }
+            let Some(link) = inner.table.get_link(link_id).cloned() else {
+                return false;
+            };
+            let Some(renderer) = inner.table.get_renderer(&link.renderer_id) else {
+                return false;
+            };
+            let (info, bound_to_this) = match inner.displays.get(&link.display_id) {
+                Some(state) => (
+                    state.info.clone(),
+                    state.last_renderer.as_deref() == Some(link.renderer_id.as_str()),
+                ),
+                None => return false,
+            };
+            if !bound_to_this {
+                return true;
+            }
+            inner.next_config_generation += 1;
+            let cfg_gen = inner.next_config_generation;
+            let cfg = project_link(&link, &renderer, &info, cfg_gen);
+            Some((link.display_id, cfg))
+        };
+        if let Some((did, cfg)) = payload {
+            let inner = self.inner.lock().await;
+            if let Some(state) = inner.displays.get(&did) {
+                let _ = state.tx.send(DisplayOutEvent::SetConfig(cfg));
+            }
+        }
+        true
     }
 
     // ---------------------------------------------------------------
@@ -301,6 +421,46 @@ impl Router {
         }
     }
 
+    /// Compute the current Pause/Play diff and dispatch control
+    /// messages outside the inner lock. Call after any mutation that
+    /// can change a renderer's enabled-link count.
+    async fn reconcile_lifecycle(self: &Arc<Self>) {
+        let actions: Vec<(RendererId, ControlMsg)> = {
+            let mut inner = self.inner.lock().await;
+            let mut out = Vec::new();
+            for rid in inner.table.renderer_ids() {
+                let active = inner
+                    .table
+                    .links_for_renderer(&rid)
+                    .iter()
+                    .any(|l| l.enabled);
+                let was_paused = inner.paused_renderers.contains(&rid);
+                if active && was_paused {
+                    inner.paused_renderers.remove(&rid);
+                    inner.paused_since.remove(&rid);
+                    out.push((rid, ControlMsg::Play));
+                } else if !active && !was_paused {
+                    inner.paused_renderers.insert(rid.clone());
+                    inner.paused_since.insert(rid.clone(), Instant::now());
+                    out.push((rid, ControlMsg::Pause));
+                }
+            }
+            out
+        };
+        for (id, msg) in actions {
+            let label = match msg {
+                ControlMsg::Pause => "pause",
+                ControlMsg::Play => "play",
+                _ => "ctl",
+            };
+            if let Err(e) = self.mgr.send_control(&id, msg).await {
+                log::warn!("router: {label} {id}: {e}");
+            } else {
+                log::info!("router: {label} renderer {id} (ref_count diff)");
+            }
+        }
+    }
+
     /// Bring `display_id`'s sent state in line with its current link
     /// target (renderer + generation). Idempotent.
     async fn sync_display(self: &Arc<Self>, display_id: DisplayId) {
@@ -308,8 +468,8 @@ impl Router {
         if !inner.displays.contains_key(&display_id) {
             return;
         }
-        // Compute target (renderer + generation) under immutable borrows.
-        let target: Option<(RendererId, Arc<RendererHandle>, u64)> = inner
+        // Compute target (link + renderer + generation) under immutable borrows.
+        let target: Option<(Link, Arc<RendererHandle>, u64)> = inner
             .table
             .links_for_display(display_id)
             .into_iter()
@@ -321,7 +481,7 @@ impl Router {
                     .lock()
                     .ok()
                     .and_then(|g| g.as_ref().map(|s| s.generation))?;
-                Some((l.renderer_id.clone(), renderer, gen))
+                Some((l, renderer, gen))
             });
 
         // Snapshot what was last sent.
@@ -335,7 +495,7 @@ impl Router {
         };
 
         let needs_update = match (&last_renderer, last_gen, &target) {
-            (Some(or), Some(og), Some((nr, _, ng))) => or != nr || og != *ng,
+            (Some(or), Some(og), Some((link, _, ng))) => or != &link.renderer_id || og != *ng,
             (None, None, None) => false,
             _ => true,
         };
@@ -352,22 +512,11 @@ impl Router {
         }
 
         // Phase B: bind the new pool (if any).
-        if let Some((new_r, renderer, new_g)) = target {
+        if let Some((link, renderer, new_g)) = target {
             inner.next_config_generation += 1;
             let cfg_gen = inner.next_config_generation;
-            let cfg = ProjectedConfig {
-                config_generation: cfg_gen,
-                source_x: 0.0,
-                source_y: 0.0,
-                source_w: renderer.width as f32,
-                source_h: renderer.height as f32,
-                dest_x: 0.0,
-                dest_y: 0.0,
-                dest_w: info.width as f32,
-                dest_h: info.height as f32,
-                transform: 0,
-                clear_rgba: [0.0, 0.0, 0.0, 1.0],
-            };
+            let cfg = project_link(&link, &renderer, &info, cfg_gen);
+            let new_r = link.renderer_id.clone();
             let s = inner.displays.get_mut(&display_id).unwrap();
             let _ = s.tx.send(DisplayOutEvent::Bind {
                 renderer: renderer.clone(),
@@ -380,5 +529,41 @@ impl Router {
             s.last_renderer = None;
             s.last_buffer_generation = None;
         }
+    }
+}
+
+/// Resolve a `Link`'s geometry into a wire-ready `ProjectedConfig`,
+/// substituting the renderer's full texture / display's full surface
+/// for the `FULL_SRC` / `FULL_DST` sentinels.
+fn project_link(
+    link: &Link,
+    renderer: &Arc<RendererHandle>,
+    info: &DisplayInfo,
+    config_generation: u64,
+) -> ProjectedConfig {
+    let resolve_src = |r: LinkSrcRect| -> (f32, f32, f32, f32) {
+        let w = if r.w.is_infinite() { renderer.width as f32 } else { r.w };
+        let h = if r.h.is_infinite() { renderer.height as f32 } else { r.h };
+        (r.x, r.y, w, h)
+    };
+    let resolve_dst = |r: LinkDstRect| -> (f32, f32, f32, f32) {
+        let w = if r.w.is_infinite() { info.width as f32 } else { r.w };
+        let h = if r.h.is_infinite() { info.height as f32 } else { r.h };
+        (r.x, r.y, w, h)
+    };
+    let (sx, sy, sw, sh) = resolve_src(link.src_rect);
+    let (dx, dy, dw, dh) = resolve_dst(link.dst_rect);
+    ProjectedConfig {
+        config_generation,
+        source_x: sx,
+        source_y: sy,
+        source_w: sw,
+        source_h: sh,
+        dest_x: dx,
+        dest_y: dy,
+        dest_w: dw,
+        dest_h: dh,
+        transform: link.transform,
+        clear_rgba: link.clear_rgba,
     }
 }

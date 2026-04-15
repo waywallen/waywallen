@@ -12,15 +12,47 @@ use crate::scheduler::DisplayId;
 
 pub type LinkId = u64;
 
-/// A single (renderer → display) routing edge. Phase 1 only uses
-/// `enabled` and the identity fields; geometry/transform fields land
-/// in Phase 3 once `SetConfig` per-link composition is wired in.
+/// Source rectangle in renderer-texture pixel space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinkSrcRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// Destination rectangle in display pixel space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinkDstRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// Sentinel for "use the renderer's full texture / display's full
+/// surface". The router resolves this at sync_display time.
+pub const FULL_SRC: LinkSrcRect = LinkSrcRect { x: 0.0, y: 0.0, w: f32::INFINITY, h: f32::INFINITY };
+pub const FULL_DST: LinkDstRect = LinkDstRect { x: 0.0, y: 0.0, w: f32::INFINITY, h: f32::INFINITY };
+
+/// A single (renderer → display) routing edge. Phase 3 grows
+/// geometry; Phase 4 adds per-link multiplexing on the wire.
 #[derive(Debug, Clone)]
 pub struct Link {
     pub id: LinkId,
     pub renderer_id: RendererId,
     pub display_id: DisplayId,
     pub enabled: bool,
+    /// Source rect in renderer texture space (use `FULL_SRC` for identity).
+    pub src_rect: LinkSrcRect,
+    /// Destination rect in display surface space (use `FULL_DST` for identity).
+    pub dst_rect: LinkDstRect,
+    /// `wl_output.transform` value: 0=normal, 1=90, 2=180, 3=270, 4..=flipped.
+    pub transform: u32,
+    /// Background clear color (RGBA, 0..=1).
+    pub clear_rgba: [f32; 4],
+    /// Z-order (higher = on top). Phase 4 multi-link composition.
+    pub z_order: i32,
 }
 
 #[derive(Default)]
@@ -92,11 +124,68 @@ impl RoutingTable {
             renderer_id: renderer_id.clone(),
             display_id,
             enabled: true,
+            src_rect: FULL_SRC,
+            dst_rect: FULL_DST,
+            transform: 0,
+            clear_rgba: [0.0, 0.0, 0.0, 1.0],
+            z_order: 0,
         };
         self.links.insert(id, link);
         self.by_display.entry(display_id).or_default().push(id);
         self.by_renderer.entry(renderer_id).or_default().push(id);
         id
+    }
+
+    /// Mutate a link's geometry/clear color in place. Returns `true`
+    /// iff the link existed and any field changed.
+    pub fn update_link_geometry(
+        &mut self,
+        link_id: LinkId,
+        src: Option<LinkSrcRect>,
+        dst: Option<LinkDstRect>,
+        transform: Option<u32>,
+        clear_rgba: Option<[f32; 4]>,
+        z_order: Option<i32>,
+    ) -> bool {
+        let Some(link) = self.links.get_mut(&link_id) else {
+            return false;
+        };
+        let mut changed = false;
+        if let Some(v) = src {
+            if link.src_rect != v {
+                link.src_rect = v;
+                changed = true;
+            }
+        }
+        if let Some(v) = dst {
+            if link.dst_rect != v {
+                link.dst_rect = v;
+                changed = true;
+            }
+        }
+        if let Some(v) = transform {
+            if link.transform != v {
+                link.transform = v;
+                changed = true;
+            }
+        }
+        if let Some(v) = clear_rgba {
+            if link.clear_rgba != v {
+                link.clear_rgba = v;
+                changed = true;
+            }
+        }
+        if let Some(v) = z_order {
+            if link.z_order != v {
+                link.z_order = v;
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    pub fn get_link(&self, link_id: LinkId) -> Option<&Link> {
+        self.links.get(&link_id)
     }
 
     pub fn remove_link(&mut self, link_id: LinkId) -> Option<Link> {
