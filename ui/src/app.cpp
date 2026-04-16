@@ -115,6 +115,8 @@ void App::init() {
             d->m_main_win = win;
         }
     }
+
+    assert(d->m_main_win, "main window must exist");
 }
 
 auto App::engine() const -> QQmlApplicationEngine* {

@@ -40,16 +40,21 @@ MD.ApplicationWindow {
     readonly property bool isCompact: MD.MProp.size.isCompact
 
     readonly property var pageModel: [
-        { icon: MD.Token.icon.wallpaper, name: "Wallpapers" },
-        { icon: MD.Token.icon.tune, name: "Renderers" },
-        { icon: MD.Token.icon.info, name: "Info" }
+        {
+            icon: MD.Token.icon.wallpaper,
+            name: "Wallpapers"
+        },
+        {
+            icon: MD.Token.icon.tune,
+            name: "Renderers"
+        },
+        {
+            icon: MD.Token.icon.info,
+            name: "Info"
+        }
     ]
 
-    readonly property var pageComponents: [
-        "qrc:/waywallen/ui/qml/page/WallpaperPage.qml",
-        "qrc:/waywallen/ui/qml/page/RenderersPage.qml",
-        "qrc:/waywallen/ui/qml/page/InfoPage.qml"
-    ]
+    readonly property var pageComponents: ["qrc:/waywallen/ui/qml/page/WallpaperPage.qml", "qrc:/waywallen/ui/qml/page/RenderersPage.qml", "qrc:/waywallen/ui/qml/page/InfoPage.qml"]
 
     onCurrentPageChanged: {
         m_content.replace(m_content.currentItem, pageComponents[currentPage], {});
@@ -59,34 +64,26 @@ MD.ApplicationWindow {
         currentPageChanged();
     }
 
-    // Disconnected overlay — shows when daemon is not reachable via DBus.
-    Rectangle {
+    MD.Popup {
         id: m_disconnect_overlay
-        anchors.fill: parent
-        z: 1000
         visible: !DaemonDBusClient.daemonAvailable
-        color: Qt.rgba(0, 0, 0, 0.6)
-
-        MouseArea {
-            anchors.fill: parent
-            // Eat clicks so the UI behind is non-interactive.
-        }
-
-        ColumnLayout {
-            anchors.centerIn: parent
-            spacing: 16
-
-            QC.Label {
-                Layout.alignment: Qt.AlignHCenter
-                text: "waywallen daemon 未运行"
-                color: MD.Token.color.on_surface
-                font.pixelSize: 18
+        closePolicy: T.Popup.NoAutoClose
+        dim: true
+        modal: true
+        x: Math.round((parent.width - width) / 2)
+        y: Math.round((parent.height - height) / 2)
+        parent: T.Overlay.overlay
+        bottomPadding: 24
+        contentItem: Column {
+            spacing: 24
+            MD.DialogHeader {
+                // anchors.horizontalCenter: parent.horizontalCenter
+                title: "daemon not run"
             }
 
-            QC.Button {
-                Layout.alignment: Qt.AlignHCenter
-                text: "启动 daemon"
-                onClicked: DaemonDBusClient.launchDaemon()
+            MD.DialogButtonBox {
+                width: parent.width
+                standardButtons: T.DialogButtonBox.Retry
             }
         }
     }
@@ -125,7 +122,9 @@ MD.ApplicationWindow {
                     drawerContent: ColumnLayout {
                         spacing: 0
 
-                        Item { Layout.fillHeight: true }
+                        Item {
+                            Layout.fillHeight: true
+                        }
 
                         StatusDot {
                             Layout.alignment: Qt.AlignHCenter
@@ -138,8 +137,10 @@ MD.ApplicationWindow {
                                 return MD.Token.color.error;
                             }
                             statusText: {
-                                if (healthQuery.status === 3) return "OK";
-                                if (healthQuery.querying) return "…";
+                                if (healthQuery.status === 3)
+                                    return "OK";
+                                if (healthQuery.querying)
+                                    return "…";
                                 return "!";
                             }
                         }
