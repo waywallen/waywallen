@@ -127,12 +127,12 @@ quint16 DaemonDBusClient::refreshWsPort() {
                                                      QString::fromLatin1(kObjectPath),
                                                      QString::fromLatin1(kPropsIface),
                                                      QStringLiteral("Get"));
-    msg << QString::fromLatin1(kInterface) << QStringLiteral("ws_port");
+    msg << QString::fromLatin1(kInterface) << QStringLiteral("WsPort");
 
     // Short timeout; if daemon isn't there we want to fail fast.
     QDBusMessage reply = m_bus.call(msg, QDBus::Block, 2000);
     if (reply.type() != QDBusMessage::ReplyMessage) {
-        qDebug("DaemonDBusClient: ws_port read failed: %s",
+        qDebug("DaemonDBusClient: WsPort read failed: %s",
                qPrintable(reply.errorMessage()));
         update_availability(false);
         set_ws_port(0);
@@ -195,7 +195,7 @@ void DaemonDBusClient::on_properties_changed(const QString&     iface,
                                              const QVariantMap& changed,
                                              const QStringList& /*invalidated*/) {
     if (iface != QString::fromLatin1(kInterface)) return;
-    auto it = changed.find(QStringLiteral("ws_port"));
+    auto it = changed.find(QStringLiteral("WsPort"));
     if (it == changed.end()) return;
     QVariant v = it.value();
     if (v.canConvert<QDBusVariant>()) {

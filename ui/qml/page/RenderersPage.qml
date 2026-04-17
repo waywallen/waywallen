@@ -82,7 +82,6 @@ MD.Page {
 
                     delegate: MD.ListItem {
                         required property string modelData
-                        required property int index
 
                         width: ListView.view.width
                         text: modelData
@@ -144,7 +143,6 @@ MD.Page {
 
                     delegate: MD.ListItem {
                         required property var modelData
-                        required property int index
 
                         width: ListView.view.width
                         text: modelData.name || ""

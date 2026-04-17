@@ -23,6 +23,9 @@ public:
           m_main_win(nullptr),
           m_qml_engine(Box<QQmlApplicationEngine>::make()),
           m_backend(Box<Backend>::make(port)),
+          m_gui_context(Box<QtExecutionContext>::make(
+              QThread::currentThread(),
+              (QEvent::Type)QEvent::registerEventType())),
           m_pool(4),
           m_port(port) {}
     ~AppPrivate() {
@@ -36,6 +39,7 @@ public:
     QPointer<QQuickWindow>     m_main_win;
     Box<QQmlApplicationEngine> m_qml_engine;
     Box<Backend>               m_backend;
+    Box<QtExecutionContext>    m_gui_context;
     asio::thread_pool          m_pool;
     quint16                    m_port;
 };
@@ -67,7 +71,7 @@ void App::init() {
 
     // Initialize async executors.
     {
-        auto qex = QtExecutor(d->m_backend->m_context.get());
+        auto qex = QtExecutor(d->m_gui_context.get());
         QAsyncResult::initEx(qex, d->m_pool.get_executor(), [](QStringView error) {
             qWarning("async error: %s", qPrintable(error.toString()));
         });
