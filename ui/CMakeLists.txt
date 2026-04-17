@@ -6,11 +6,6 @@ set(APP_VERSION "0.1.0")
 set(APP_SUMMARY "Wallpaper manager for Wayland")
 set(APP_AUTHOR "hypengw")
 
-# Must be set BEFORE project() so the FetchContent dependency provider
-# (cmake_language(SET_DEPENDENCY_PROVIDER ...)) can register.
-list(APPEND CMAKE_PROJECT_TOP_LEVEL_INCLUDES
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchDeps.cmake)
-
 project(waywallen-ui LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -19,6 +14,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Qt6 REQUIRED COMPONENTS Quick DBus Protobuf ProtobufQuick ProtobufWellKnownTypes)
 include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
+
+# FetchContent driver. To enable the flatpak-aware dependency provider
+# (source redirect + transitive auto-record), pass on the cmake command line:
+#   -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=cmake/FetchDepsProvider.cmake
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchDeps.cmake)
 
 fetchdeps(${CMAKE_CURRENT_SOURCE_DIR}/deps.json
   FLATPAK_OUT ${CMAKE_BINARY_DIR}/flatpak_sources.json)
@@ -81,8 +81,7 @@ set(QML_FILES
   qml/component/StatusDot.qml
   qml/page/WallpaperPage.qml
   qml/page/WallpaperCard.qml
-  qml/page/RenderersPage.qml
-  qml/page/InfoPage.qml
+  qml/page/StatusPage.qml
 )
 set(RESOURCES)
 
