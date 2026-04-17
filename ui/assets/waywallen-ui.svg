@@ -1,0 +1,277 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 1024 1024"
+   width="1024"
+   height="1024"
+   role="img"
+   version="1.1"
+   id="svg_waywallen"
+   sodipodi:docname="waywallen-icon-coral.svg"
+   inkscape:version="1.4.3 (0d15f75042, 2025-12-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs21" />
+  <sodipodi:namedview
+     id="namedview21"
+     pagecolor="#ffffff"
+     bordercolor="#666666"
+     borderopacity="1.0"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="0.55864198"
+     inkscape:cx="247.92265"
+     inkscape:cy="643.52486"
+     inkscape:window-width="1920"
+     inkscape:window-height="1018"
+     inkscape:window-x="0"
+     inkscape:window-y="0"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg_waywallen" />
+  <title
+     id="waywallen">waywallen — Coral App Icon</title>
+  <desc
+     id="desc1">waywallen wallpaper manager app icon, coral color scheme</desc>
+  <!-- Background: standard iOS/macOS rounded corners ~22.5% -->
+  <rect
+     width="1024"
+     height="1024"
+     rx="230"
+     ry="230"
+     fill="#2A0E07"
+     id="back" />
+  <!--
+    Content scaled 10x, centered at (512,512).
+    Rects span ±410px → 820px wide = 80% of 1024. Good fill.
+
+    RECTS (centered at 0,0):
+      TL: x=-410, y=-410, w=460, h=300, rx=70   (wide short, top-left)
+      TR: x= 110, y=-410, w=300, h=460, rx=70   (narrow tall, top-right)
+      BL: x=-410, y= -50, w=300, h=460, rx=70   (narrow tall, bottom-left)
+      BR: x= -50, y= 110, w=460, h=300, rx=70   (wide short, bottom-right)
+          BR left = -50 = BL.right(-110) + gap(60) ✓
+          BR bottom = 110+300 = 410 = BL.bottom(-50+460=410) ✓
+
+    GEAR shadow (bg color, +40px uniform offset from theme gear):
+      body r=200, tooth: w=150, h=130, anchor_y=-260, rx=35
+    GEAR theme (coral light):
+      body r=160, tooth: w=70,  h=90,  anchor_y=-220, rx=20
+    RINGS:
+      bg    r=110
+      theme r=80
+      center r=40
+  -->
+  <g
+     transform="translate(512,512)"
+     id="g21">
+    <!-- RECTS -->
+    <g
+       id="rect">
+      <rect
+         x="-410"
+         y="-410"
+         width="460"
+         height="300"
+         rx="70"
+         fill="#D85A30"
+         id="rect2" />
+      <rect
+         x="110"
+         y="-410"
+         width="300"
+         height="460"
+         rx="70"
+         fill="#F0997B"
+         id="rect3" />
+      <rect
+         x="-410"
+         y="-50"
+         width="300"
+         height="460"
+         rx="70"
+         fill="#993C1D"
+         id="rect4" />
+      <rect
+         x="-50"
+         y="110"
+         width="460"
+         height="300"
+         rx="70"
+         fill="#993C1D"
+         opacity="0.85"
+         id="rect5" />
+    </g>
+    <!-- GEAR: shadow layer -->
+    <g
+       id="gear_back">
+      <circle
+         cx="0"
+         cy="0"
+         r="200"
+         fill="#2A0E07"
+         id="circle5" />
+      <rect
+         x="-75"
+         y="-260"
+         width="150"
+         height="130"
+         rx="35"
+         fill="#2A0E07"
+         id="rect6"
+         transform="rotate(0)" />
+      <rect
+         x="-75"
+         y="-260"
+         width="150"
+         height="130"
+         rx="35"
+         fill="#2A0E07"
+         transform="rotate(51.43)"
+         id="rect7" />
+      <rect
+         x="-75"
+         y="-260"
+         width="150"
+         height="130"
+         rx="35"
+         fill="#2A0E07"
+         transform="rotate(102.86)"
+         id="rect8" />
+      <rect
+         x="-75"
+         y="-260"
+         width="150"
+         height="130"
+         rx="35"
+         fill="#2A0E07"
+         transform="rotate(154.29)"
+         id="rect9" />
+      <rect
+         x="-75"
+         y="-260"
+         width="150"
+         height="130"
+         rx="35"
+         fill="#2A0E07"
+         transform="rotate(205.71)"
+         id="rect10" />
+      <rect
+         x="-75"
+         y="-260"
+         width="150"
+         height="130"
+         rx="35"
+         fill="#2A0E07"
+         transform="rotate(257.14)"
+         id="rect11" />
+      <rect
+         x="-75"
+         y="-260"
+         width="150"
+         height="130"
+         rx="35"
+         fill="#2A0E07"
+         transform="rotate(308.57)"
+         id="rect12" />
+    </g>
+    <!-- GEAR: theme color -->
+    <g
+       id="gear">
+      <circle
+         cx="0"
+         cy="0"
+         r="160"
+         fill="#F0997B"
+         id="circle12" />
+      <rect
+         x="-35"
+         y="-220"
+         width="70"
+         height="90"
+         rx="20"
+         fill="#F0997B"
+         transform="rotate(0)"
+         id="rect13" />
+      <rect
+         x="-35"
+         y="-220"
+         width="70"
+         height="90"
+         rx="20"
+         fill="#F0997B"
+         transform="rotate(51.43)"
+         id="rect14" />
+      <rect
+         x="-35"
+         y="-220"
+         width="70"
+         height="90"
+         rx="20"
+         fill="#F0997B"
+         transform="rotate(102.86)"
+         id="rect15" />
+      <rect
+         x="-35"
+         y="-220"
+         width="70"
+         height="90"
+         rx="20"
+         fill="#F0997B"
+         transform="rotate(154.29)"
+         id="rect16" />
+      <rect
+         x="-35"
+         y="-220"
+         width="70"
+         height="90"
+         rx="20"
+         fill="#F0997B"
+         transform="rotate(205.71)"
+         id="rect17" />
+      <rect
+         x="-35"
+         y="-220"
+         width="70"
+         height="90"
+         rx="20"
+         fill="#F0997B"
+         transform="rotate(257.14)"
+         id="rect18" />
+      <rect
+         x="-35"
+         y="-220"
+         width="70"
+         height="90"
+         rx="20"
+         fill="#F0997B"
+         transform="rotate(308.57)"
+         id="rect19" />
+    </g>
+    <!-- GEAR: rings -->
+    <g
+       id="rings">
+      <circle
+         cx="0"
+         cy="0"
+         r="110"
+         fill="#2A0E07"
+         id="circle19" />
+      <circle
+         cx="0"
+         cy="0"
+         r="80"
+         fill="#F0997B"
+         id="circle20" />
+      <circle
+         cx="0"
+         cy="0"
+         r="40"
+         fill="#2A0E07"
+         id="circle21" />
+    </g>
+  </g>
+</svg>
