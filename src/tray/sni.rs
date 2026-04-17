@@ -51,7 +51,7 @@ impl StatusNotifierItem {
 
     #[zbus(property)]
     fn icon_name(&self) -> &str {
-        "preferences-desktop-wallpaper"
+        "org.waywallen.waywallen"
     }
 
     #[zbus(property)]
