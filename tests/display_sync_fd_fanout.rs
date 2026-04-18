@@ -7,28 +7,16 @@
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use waywallen::display_endpoint;
 use waywallen::display_proto::{codec, Event, Request, PROTOCOL_NAME};
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
-use waywallen::scheduler::Scheduler;
+use waywallen::routing::Router;
 
-fn tmp_sock(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "waywallen-multi-{tag}-{}-{}.sock",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ))
-}
-
-fn have_vulkan() -> bool {
-    std::path::Path::new("/dev/dri").exists()
-}
+#[path = "common/mod.rs"]
+mod common;
 
 /// Drive a single display client through handshake + N frames.
 /// Returns the count of real `anon_inode:sync_file` fds received.
@@ -117,7 +105,7 @@ fn run_client(sock: &PathBuf, name: &str, n_frames: usize) -> anyhow::Result<usi
 
 #[tokio::test]
 async fn two_displays_both_get_real_sync_fds() {
-    if !have_vulkan() {
+    if !common::have_vulkan_device() {
         eprintln!("skip: no /dev/dri");
         return;
     }
@@ -126,22 +114,20 @@ async fn two_displays_both_get_real_sync_fds() {
     std::env::set_var("WAYWALLEN_RENDERER_BIN", renderer_bin);
 
     let mgr = Arc::new(RendererManager::new_default());
-    let sched = Arc::new(Mutex::new(Scheduler::new()));
-    let sock = tmp_sock("multi");
+    let router = Router::new(Arc::clone(&mgr));
+    let sock = common::tmp_sock("sync-fd-fanout");
     let _ = std::fs::remove_file(&sock);
 
     let sock2 = sock.clone();
-    let mgr2 = Arc::clone(&mgr);
-    let sched2 = Arc::clone(&sched);
+    let router2 = Arc::clone(&router);
     let server = tokio::spawn(async move {
-        let _ = display_endpoint::serve(&sock2, mgr2, sched2).await;
+        let _ = display_endpoint::serve(&sock2, router2).await;
     });
 
-    for _ in 0..100 {
-        if sock.exists() { break; }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(sock.exists());
+    assert!(
+        common::wait_for_sock_bind(&sock, Duration::from_secs(2)).await,
+        "display endpoint did not bind"
+    );
 
     let spawn_res = mgr
         .spawn(SpawnRequest {

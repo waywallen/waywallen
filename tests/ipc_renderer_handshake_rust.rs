@@ -17,42 +17,24 @@ use waywallen::ipc::proto::{ControlMsg, EventMsg};
 use waywallen::ipc::uds::{recv_event, send_control};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
-const DRM_FORMAT_ABGR8888: u32 = 0x34324241;
+#[path = "common/mod.rs"]
+mod common;
 
-struct ChildGuard(Child);
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
+const DRM_FORMAT_ABGR8888: u32 = 0x34324241;
 
 #[test]
 fn waywallen_renderer_bind_handshake() {
     let bin = PathBuf::from(env!("CARGO_BIN_EXE_waywallen_renderer"));
     assert!(bin.exists(), "renderer binary missing: {}", bin.display());
 
-    let sock_path = std::env::temp_dir().join(format!(
-        "waywallen-rust-renderer-handshake-{}-{}.sock",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ));
+    let sock_path = common::tmp_sock("rust-renderer-handshake");
     let _ = std::fs::remove_file(&sock_path);
 
     let listener = UnixListener::bind(&sock_path).expect("bind uds listener");
-    struct Cleanup(PathBuf);
-    impl Drop for Cleanup {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_file(&self.0);
-        }
-    }
-    let _cleanup = Cleanup(sock_path.clone());
+    let _cleanup = common::SockCleanup(sock_path.clone());
 
     let child = Command::new(&bin)
         .arg("--ipc")
@@ -65,22 +47,14 @@ fn waywallen_renderer_bind_handshake() {
         .stderr(Stdio::inherit())
         .spawn()
         .unwrap_or_else(|e| panic!("spawn {}: {e}", bin.display()));
-    let mut guard = ChildGuard(child);
+    let mut guard = common::ChildGuard(child);
 
-    // Bounded accept.
-    let (stream, _) = {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let lc = listener.try_clone().expect("clone listener");
-        std::thread::spawn(move || {
-            let _ = tx.send(lc.accept());
-        });
-        match rx.recv_timeout(Duration::from_secs(15)) {
-            Ok(Ok(x)) => x,
-            Ok(Err(e)) => panic!("accept: {e}"),
-            Err(_) => {
-                let _ = guard.0.kill();
-                panic!("timed out waiting for renderer connect");
-            }
+    let (stream, _) = match common::accept_with_timeout(&listener, Duration::from_secs(15)) {
+        Some(Ok(x)) => x,
+        Some(Err(e)) => panic!("accept: {e}"),
+        None => {
+            let _ = guard.0.kill();
+            panic!("timed out waiting for renderer connect");
         }
     };
 
@@ -152,15 +126,8 @@ fn waywallen_renderer_bind_handshake() {
     // readback path is importing into a local Vulkan instance and
     // issuing a copy — that happens in the M2 display milestone.
 
-    // 4. Send Shutdown and wait for the child to exit.
+    // 4. Send Shutdown and poll-wait up to 3s for the child to exit.
     send_control(&stream, &ControlMsg::Shutdown, &[]).expect("send Shutdown");
-    let (tx, rx) = std::sync::mpsc::channel();
-    // Move child out of guard so we can wait() without dropping twice.
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(2500));
-        let _ = tx.send(());
-    });
-    // Poll wait up to 3s.
     let start = std::time::Instant::now();
     loop {
         match guard.0.try_wait() {

@@ -5,7 +5,7 @@
 //! the protocol up through `display_accepted`. Bind/SetConfig/FrameReady
 //! are NOT exercised here because a real `BindSnapshot` requires a
 //! `waywallen-renderer` subprocess — that pipeline is covered by the
-//! `phase3b_*` and `rust_renderer_handshake` tests.
+//! `display_sync_fd_*` and `ipc_renderer_handshake_rust` tests.
 //!
 //! What this test verifies:
 //!
@@ -17,51 +17,36 @@
 //!   6. No renderer → the server emits a clean error (not a panic) when
 //!      the client waits for the next event, and the client sees EOF
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use waywallen::display_endpoint;
 use waywallen::display_proto::{codec, Event, Request, PROTOCOL_NAME};
 use waywallen::renderer_manager::RendererManager;
-use waywallen::scheduler::Scheduler;
+use waywallen::routing::Router;
 
-fn tmp_sock(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "waywallen-display-v1-{tag}-{}-{}.sock",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ))
-}
+#[path = "common/mod.rs"]
+mod common;
 
 #[tokio::test]
 async fn handshake_up_to_display_accepted() {
-    let sock = tmp_sock("handshake");
+    let sock = common::tmp_sock("display-handshake");
     let _ = std::fs::remove_file(&sock);
 
     let mgr = Arc::new(RendererManager::new_default());
-    let sched = Arc::new(Mutex::new(Scheduler::new()));
+    let router = Router::new(Arc::clone(&mgr));
 
     let sock_for_task = sock.clone();
-    let sched_for_task = Arc::clone(&sched);
-    let mgr_for_task = Arc::clone(&mgr);
+    let router_for_task = Arc::clone(&router);
     let server_task = tokio::spawn(async move {
-        let _ = display_endpoint::serve(&sock_for_task, mgr_for_task, sched_for_task).await;
+        let _ = display_endpoint::serve(&sock_for_task, router_for_task).await;
     });
 
-    // Wait up to 2 seconds for the endpoint to bind.
-    let mut bound = false;
-    for _ in 0..100 {
-        if sock.exists() {
-            bound = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(bound, "display endpoint did not bind {}", sock.display());
+    assert!(
+        common::wait_for_sock_bind(&sock, Duration::from_secs(2)).await,
+        "display endpoint did not bind {}",
+        sock.display()
+    );
 
     // Drive the client side in a blocking task.
     let sock_for_client = sock.clone();
@@ -140,27 +125,23 @@ async fn handshake_up_to_display_accepted() {
 
 #[tokio::test]
 async fn rejects_wrong_protocol_string() {
-    let sock = tmp_sock("bad-proto");
+    let sock = common::tmp_sock("display-bad-proto");
     let _ = std::fs::remove_file(&sock);
 
     let mgr = Arc::new(RendererManager::new_default());
-    let sched = Arc::new(Mutex::new(Scheduler::new()));
+    let router = Router::new(Arc::clone(&mgr));
     let sock_for_task = sock.clone();
     let server_task = tokio::spawn({
-        let mgr = Arc::clone(&mgr);
-        let sched = Arc::clone(&sched);
+        let router = Arc::clone(&router);
         async move {
-            let _ = display_endpoint::serve(&sock_for_task, mgr, sched).await;
+            let _ = display_endpoint::serve(&sock_for_task, router).await;
         }
     });
 
-    for _ in 0..100 {
-        if sock.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(sock.exists());
+    assert!(
+        common::wait_for_sock_bind(&sock, Duration::from_secs(2)).await,
+        "display endpoint did not bind"
+    );
 
     let sock_for_client = sock.clone();
     let got_error = tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {

@@ -1,26 +1,22 @@
 //! RendererManager lifecycle: spawn → control → kill.
 //!
 //! Skipped (not failed) when `WAYWALLEN_RENDERER_BIN` is unset, mirroring
-//! the cpp_host_handshake test's contract.
+//! the other `ipc_renderer_*` tests' contract.
 
 use waywallen::ipc::proto::ControlMsg;
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
 use std::time::Duration;
 
-fn skip_if_no_bin() -> bool {
-    if std::env::var_os("WAYWALLEN_RENDERER_BIN").is_none() {
-        eprintln!(
-            "skipping renderer_manager_lifecycle: set WAYWALLEN_RENDERER_BIN to the path \
-             of the compiled waywallen-renderer binary to run this test"
-        );
-        return true;
-    }
-    false
-}
+#[path = "common/mod.rs"]
+mod common;
 
 #[tokio::test]
 async fn spawn_control_kill_roundtrip() {
-    if skip_if_no_bin() {
+    if common::cpp_renderer_bin_from_env().is_none() {
+        eprintln!(
+            "skipping ipc_renderer_lifecycle: set WAYWALLEN_RENDERER_BIN to the path \
+             of the compiled waywallen-renderer binary to run this test"
+        );
         return;
     }
 

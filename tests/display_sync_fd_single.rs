@@ -1,48 +1,29 @@
-//! Phase 3b end-to-end smoke test: validate that a real Vulkan
-//! `waywallen_renderer` subprocess produces real `dma_fence` sync_fds
-//! on every `FrameReady`, those fds survive the
-//! `renderer_manager::run_reader` harvest, and `display_endpoint`
-//! forwards them to a connected client as the acquire fence fd on
-//! `Event::FrameReady`.
+//! End-to-end smoke test: a real Vulkan `waywallen_renderer` subprocess
+//! produces real `dma_fence` sync_fds on every `FrameReady`, those fds
+//! survive the `renderer_manager::run_reader` harvest, and
+//! `display_endpoint` forwards them to a connected client as the
+//! acquire fence fd on `Event::FrameReady`.
 //!
-//! The test uses the in-process RendererManager + Scheduler rig
-//! (no HTTP layer, no separate daemon process) so it can be run from
-//! `cargo test` without port contention. A real Vulkan device is
-//! required; the test skips itself (with a WARN) if no suitable
-//! device is found.
+//! Uses the in-process RendererManager + Router rig (no HTTP layer, no
+//! separate daemon process) so it can be run from `cargo test` without
+//! port contention. A real Vulkan device is required; the test skips
+//! itself (with a WARN) if no suitable device is found.
 
 use std::os::fd::AsRawFd;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use waywallen::display_endpoint;
 use waywallen::display_proto::{codec, Event, Request, PROTOCOL_NAME};
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
-use waywallen::scheduler::Scheduler;
+use waywallen::routing::Router;
 
-fn tmp_sock(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "waywallen-phase3b-{tag}-{}-{}.sock",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    ))
-}
-
-fn have_vulkan_device() -> bool {
-    // Cheap heuristic: the kernel DRM render node exists. If we can't
-    // see a DRI device the renderer subprocess will fail during
-    // vkCreateInstance anyway, and there's no point exercising the
-    // rest of the test.
-    std::path::Path::new("/dev/dri").exists()
-}
+#[path = "common/mod.rs"]
+mod common;
 
 #[tokio::test]
 async fn renderer_produces_real_sync_fds() {
-    if !have_vulkan_device() {
+    if !common::have_vulkan_device() {
         eprintln!("skip: no /dev/dri on this host");
         return;
     }
@@ -52,27 +33,22 @@ async fn renderer_produces_real_sync_fds() {
     let renderer_bin = env!("CARGO_BIN_EXE_waywallen_renderer");
     std::env::set_var("WAYWALLEN_RENDERER_BIN", renderer_bin);
 
-    // ---- Rig: manager + scheduler + display endpoint ----
+    // ---- Rig: manager + router + display endpoint ----
     let mgr = Arc::new(RendererManager::new_default());
-    let sched = Arc::new(Mutex::new(Scheduler::new()));
-    let sock = tmp_sock("e2e");
+    let router = Router::new(Arc::clone(&mgr));
+    let sock = common::tmp_sock("sync-fd-single");
     let _ = std::fs::remove_file(&sock);
 
     let sock_for_task = sock.clone();
-    let mgr_for_task = Arc::clone(&mgr);
-    let sched_for_task = Arc::clone(&sched);
+    let router_for_task = Arc::clone(&router);
     let server = tokio::spawn(async move {
-        let _ = display_endpoint::serve(&sock_for_task, mgr_for_task, sched_for_task).await;
+        let _ = display_endpoint::serve(&sock_for_task, router_for_task).await;
     });
 
-    // Wait for endpoint bind.
-    for _ in 0..100 {
-        if sock.exists() {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(sock.exists(), "display endpoint did not bind");
+    assert!(
+        common::wait_for_sock_bind(&sock, Duration::from_secs(2)).await,
+        "display endpoint did not bind"
+    );
 
     // ---- Spawn a real renderer ----
     let spawn_res = mgr
