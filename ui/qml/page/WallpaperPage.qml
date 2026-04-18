@@ -199,13 +199,16 @@ MD.Page {
                             color: MD.Token.color.on_surface_variant
                         }
 
-                        // Resource path
+                        // Resource path — single line, elide head so the
+                        // meaningful tail (workshop id / filename) stays visible.
                         MD.Text {
                             Layout.fillWidth: true
                             text: root.selectedWallpaper?.resource || ""
                             typescale: MD.Token.typescale.body_small
                             color: MD.Token.color.on_surface_variant
-                            wrapMode: Text.WrapAnywhere
+                            elide: Text.ElideLeft
+                            maximumLineCount: 1
+                            wrapMode: Text.NoWrap
                         }
 
                         MD.Divider {
