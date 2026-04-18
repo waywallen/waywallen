@@ -48,7 +48,26 @@ pub fn default_socket_path() -> PathBuf {
     dir.join("display.sock")
 }
 
+/// Back-compat 2-arg entry point used by integration tests that
+/// don't care about daemon-level shutdown. Internally forwards to
+/// [`serve_with_shutdown`] with a never-firing channel so the fast
+/// path in production (D-Bus `Quit` → kick every blocking `recvmsg`)
+/// goes through the same code.
 pub async fn serve(sock_path: &Path, router: Arc<Router>) -> Result<()> {
+    // Holding `_never_tx` in scope keeps `wait_for` parked on `Pending`
+    // — if we dropped it, every subscriber would see `RecvError::Closed`
+    // and the shutdown branch would fire immediately.
+    let (_never_tx, rx) = tokio::sync::watch::channel(false);
+    let res = serve_with_shutdown(sock_path, router, rx).await;
+    drop(_never_tx);
+    res
+}
+
+pub async fn serve_with_shutdown(
+    sock_path: &Path,
+    router: Arc<Router>,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+) -> Result<()> {
     let _ = std::fs::remove_file(sock_path);
     if let Some(parent) = sock_path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -58,7 +77,15 @@ pub async fn serve(sock_path: &Path, router: Arc<Router>) -> Result<()> {
     log::info!("display endpoint listening on {}", sock_path.display());
 
     loop {
-        let (stream, _addr) = match listener.accept().await {
+        let accepted = tokio::select! {
+            biased;
+            _ = wait_shutdown(&mut shutdown_rx) => {
+                log::info!("display endpoint: shutdown received, ceasing accept");
+                return Ok(());
+            }
+            res = listener.accept() => res,
+        };
+        let (stream, _addr) = match accepted {
             Ok(x) => x,
             Err(e) => {
                 log::warn!("display accept failed: {e}");
@@ -75,8 +102,9 @@ pub async fn serve(sock_path: &Path, router: Arc<Router>) -> Result<()> {
             }
         };
         let router = Arc::clone(&router);
+        let client_shutdown_rx = shutdown_rx.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(std_stream, router).await {
+            if let Err(e) = handle_client(std_stream, router, client_shutdown_rx).await {
                 log::info!("display client closed: {e}");
             }
         });
@@ -87,8 +115,12 @@ pub async fn serve(sock_path: &Path, router: Arc<Router>) -> Result<()> {
 // Per-client state machine
 // ---------------------------------------------------------------------------
 
-async fn handle_client(stream: StdUnixStream, router: Arc<Router>) -> Result<()> {
-    let registration = do_handshake(&stream).await?;
+async fn handle_client(
+    stream: StdUnixStream,
+    router: Arc<Router>,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
+) -> Result<()> {
+    let registration = do_handshake(&stream, &mut shutdown_rx).await?;
     let DisplayHandle { id: display_id, rx } = router.register_display(registration).await;
     log::info!("display {display_id} registered with router");
 
@@ -100,7 +132,7 @@ async fn handle_client(stream: StdUnixStream, router: Arc<Router>) -> Result<()>
     .context("accepted join")?
     .map_err(|e| anyhow!("send display_accepted: {e}"))?;
 
-    let result = run_frame_loop(stream, router.clone(), display_id, rx).await;
+    let result = run_frame_loop(stream, router.clone(), display_id, rx, shutdown_rx).await;
     router.unregister_display(display_id).await;
     result
 }
@@ -109,13 +141,13 @@ async fn handle_client(stream: StdUnixStream, router: Arc<Router>) -> Result<()>
 // Handshake
 // ---------------------------------------------------------------------------
 
-async fn do_handshake(stream: &StdUnixStream) -> Result<DisplayRegistration> {
-    let hello_stream = stream.try_clone().context("clone for hello")?;
-    let (hello, _fds): (Request, _) =
-        tokio::task::spawn_blocking(move || codec::recv_request(&hello_stream))
-            .await
-            .context("hello join")?
-            .map_err(|e| anyhow!("recv hello: {e}"))?;
+async fn do_handshake(
+    stream: &StdUnixStream,
+    shutdown_rx: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<DisplayRegistration> {
+    let (hello, _fds): (Request, _) = recv_request_cancellable(stream, shutdown_rx)
+        .await
+        .context("recv hello")?;
     let Request::Hello {
         protocol,
         client_name,
@@ -158,12 +190,9 @@ async fn do_handshake(stream: &StdUnixStream) -> Result<DisplayRegistration> {
     .context("welcome join")?
     .map_err(|e| anyhow!("send welcome: {e}"))?;
 
-    let reg_stream = stream.try_clone().context("clone for register")?;
-    let (reg, _fds): (Request, _) =
-        tokio::task::spawn_blocking(move || codec::recv_request(&reg_stream))
-            .await
-            .context("register join")?
-            .map_err(|e| anyhow!("recv register_display: {e}"))?;
+    let (reg, _fds): (Request, _) = recv_request_cancellable(stream, shutdown_rx)
+        .await
+        .context("recv register_display")?;
     let Request::RegisterDisplay {
         name,
         width,
@@ -195,6 +224,7 @@ async fn run_frame_loop(
     router: Arc<Router>,
     display_id: crate::scheduler::DisplayId,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<DisplayOutEvent>,
+    mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
     // Spawn the blocking reader half (client→server requests).
     let read_stream = stream.try_clone().context("clone for reader")?;
@@ -211,6 +241,10 @@ async fn run_frame_loop(
 
     let result = loop {
         tokio::select! {
+            _ = wait_shutdown(&mut shutdown_rx) => {
+                log::info!("display {display_id}: shutdown signalled");
+                break Ok(());
+            }
             evt = rx.recv() => match evt {
                 None => {
                     log::info!("display {display_id}: router rx closed");
@@ -273,8 +307,54 @@ async fn run_frame_loop(
             },
         }
     };
-    reader_handle.abort();
+    // Force the blocking reader out of its parked `recvmsg`. `shutdown`
+    // operates on the underlying socket object, so it propagates to
+    // every `try_clone`d fd — including the one the reader holds. The
+    // reader's next `recvmsg` returns 0 bytes → `CodecError::PeerClosed`
+    // → reader thread returns, and the blocking pool worker is
+    // reclaimable instead of hanging `BlockingPool::shutdown` during
+    // runtime teardown.
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    let _ = reader_handle.await;
     result
+}
+
+/// Run `codec::recv_request` on the blocking pool but tear down the
+/// wait if `shutdown_rx` flips to `true`. On shutdown we force
+/// `recvmsg` to return by calling `shutdown(SHUT_RDWR)` on a cloned
+/// fd referring to the same socket object, so the blocking task is
+/// always joined — never leaked.
+async fn recv_request_cancellable(
+    stream: &StdUnixStream,
+    shutdown_rx: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<(Request, Vec<OwnedFd>)> {
+    let blocking_stream = stream.try_clone().context("clone for recv")?;
+    let shutdown_stream = stream.try_clone().context("clone for shutdown-kick")?;
+    let mut handle =
+        tokio::task::spawn_blocking(move || codec::recv_request(&blocking_stream));
+    tokio::select! {
+        biased;
+        res = &mut handle => match res {
+            Ok(r) => r.map_err(|e| anyhow!("recv: {e}")),
+            Err(e) => Err(anyhow!("recv join: {e}")),
+        },
+        _ = wait_shutdown(shutdown_rx) => {
+            let _ = shutdown_stream.shutdown(std::net::Shutdown::Both);
+            let _ = handle.await;
+            Err(anyhow!("shutdown during recv"))
+        }
+    }
+}
+
+/// Resolve to `()` once the daemon flips the shutdown flag.
+///
+/// Wrapped in a helper because `watch::Receiver::wait_for` yields a
+/// `Ref<'_, T>` holding an internal `RwLockReadGuard`, which is `!Send`.
+/// Hiding the `Ref` inside a plain `async fn -> ()` keeps the
+/// surrounding `tokio::select!` futures `Send` so they can run on the
+/// multi-thread runtime.
+async fn wait_shutdown(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    let _ = rx.wait_for(|v| *v).await;
 }
 
 // ---------------------------------------------------------------------------

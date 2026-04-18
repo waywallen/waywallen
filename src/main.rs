@@ -136,9 +136,24 @@ fn resolve_ui_path(explicit: Option<PathBuf>) -> Option<PathBuf> {
     None
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     env_logger::init();
+
+    // Explicit runtime + `shutdown_timeout` safety net: if any
+    // `spawn_blocking` task is still parked in a syscall when the
+    // runtime is torn down (e.g. a display-client reader stuck in
+    // `recvmsg` because its client never sent anything and didn't
+    // drop the socket), we give it a bounded window to unwind and
+    // then drop the runtime anyway instead of hanging the process.
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    let result = rt.block_on(async_main());
+    rt.shutdown_timeout(std::time::Duration::from_secs(3));
+    result
+}
+
+async fn async_main() -> anyhow::Result<()> {
     let cli = parse_args();
 
     let mut registry = plugin::renderer_registry::build_default_registry()
@@ -213,8 +228,11 @@ async fn main() -> anyhow::Result<()> {
     {
         let router = router.clone();
         let sock_path = display_sock_path.clone();
+        let shutdown_rx = state.shutdown_subscribe();
         tokio::spawn(async move {
-            if let Err(e) = display_endpoint::serve(&sock_path, router).await {
+            if let Err(e) =
+                display_endpoint::serve_with_shutdown(&sock_path, router, shutdown_rx).await
+            {
                 log::error!("display endpoint exited: {e}");
             }
         });
@@ -292,6 +310,12 @@ async fn main() -> anyhow::Result<()> {
             log::info!("shutdown requested via D-Bus");
         }
     }
+
+    // Belt-and-suspenders: regardless of which arm woke us (ws exit,
+    // ctrl-c, D-Bus Quit) make sure every subscriber sees the shutdown
+    // flag. This is what lets the display endpoint's blocking reader
+    // threads be kicked out of `recvmsg`.
+    state.shutdown_now();
 
     if let Some(conn) = dbus_conn.as_ref() {
         if let Err(e) = dbus_iface::emit_shutting_down(conn).await {
