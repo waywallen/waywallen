@@ -76,6 +76,27 @@ pub struct DisplayHandle {
     pub rx: mpsc::UnboundedReceiver<DisplayOutEvent>,
 }
 
+/// Read-only view of a single (renderer → display) link for UI
+/// consumers. Subset of `table::Link` that hides table-internal ids.
+#[derive(Debug, Clone)]
+pub struct DisplayLinkSnapshot {
+    pub renderer_id: RendererId,
+    pub z_order: i32,
+}
+
+/// Read-only view of a registered display. Returned from
+/// `Router::snapshot_displays`; carries metadata from `DisplayInfo`
+/// plus the enabled links currently pointing at this display.
+#[derive(Debug, Clone)]
+pub struct DisplaySnapshot {
+    pub id: DisplayId,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
+    pub refresh_mhz: u32,
+    pub links: Vec<DisplayLinkSnapshot>,
+}
+
 struct DisplayState {
     info: DisplayInfo,
     tx: mpsc::UnboundedSender<DisplayOutEvent>,
@@ -283,6 +304,38 @@ impl Router {
         }
         // Phase 3 will re-emit SetConfig on resize. For Phase 1 we
         // mirror the legacy behavior: size update without re-config.
+    }
+
+    /// Snapshot of every registered display plus the enabled links
+    /// pointing at it, ordered by ascending id for UI stability.
+    /// Pure read — does not touch renderer state or emit events.
+    pub async fn snapshot_displays(self: &Arc<Self>) -> Vec<DisplaySnapshot> {
+        let inner = self.inner.lock().await;
+        let mut ids: Vec<DisplayId> = inner.displays.keys().copied().collect();
+        ids.sort_unstable();
+        ids.into_iter()
+            .filter_map(|id| {
+                let s = inner.displays.get(&id)?;
+                let links = inner
+                    .table
+                    .links_for_display(id)
+                    .into_iter()
+                    .filter(|l| l.enabled)
+                    .map(|l| DisplayLinkSnapshot {
+                        renderer_id: l.renderer_id,
+                        z_order: l.z_order,
+                    })
+                    .collect();
+                Some(DisplaySnapshot {
+                    id,
+                    name: s.info.name.clone(),
+                    width: s.info.width,
+                    height: s.info.height,
+                    refresh_mhz: s.info.refresh_mhz,
+                    links,
+                })
+            })
+            .collect()
     }
 
     // ---------------------------------------------------------------
@@ -565,5 +618,76 @@ fn project_link(
         dest_h: dh,
         transform: link.transform,
         clear_rgba: link.clear_rgba,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::renderer_manager::RendererManager;
+
+    fn reg(name: &str, w: u32, h: u32) -> DisplayRegistration {
+        DisplayRegistration {
+            name: name.into(),
+            width: w,
+            height: h,
+            refresh_mhz: 60_000,
+            properties: vec![],
+        }
+    }
+
+    #[tokio::test]
+    async fn snapshot_displays_empty() {
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr);
+        assert!(router.snapshot_displays().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn snapshot_displays_sorted_by_id_with_metadata() {
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr);
+
+        // register_display has no registered renderer, so no auto-link —
+        // each display shows up with an empty link vector.
+        let _h1 = router.register_display(reg("HDMI-A-1", 1920, 1080)).await;
+        let _h2 = router.register_display(reg("DP-1", 2560, 1440)).await;
+        let _h3 = router.register_display(reg("eDP-1", 1366, 768)).await;
+
+        let snap = router.snapshot_displays().await;
+        assert_eq!(snap.len(), 3);
+
+        // Stable ascending ordering by id — matches register order here.
+        let ids: Vec<u64> = snap.iter().map(|d| d.id).collect();
+        assert_eq!(ids, vec![1, 2, 3]);
+
+        // Metadata round-trips unchanged.
+        assert_eq!(snap[0].name, "HDMI-A-1");
+        assert_eq!((snap[0].width, snap[0].height), (1920, 1080));
+        assert_eq!(snap[1].name, "DP-1");
+        assert_eq!((snap[1].width, snap[1].height), (2560, 1440));
+        assert_eq!(snap[2].name, "eDP-1");
+        assert_eq!((snap[2].width, snap[2].height), (1366, 768));
+
+        // No renderers registered → every link vector is empty.
+        for d in &snap {
+            assert!(d.links.is_empty(), "display {} unexpectedly has links", d.id);
+        }
+    }
+
+    #[tokio::test]
+    async fn snapshot_reflects_display_unregister() {
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr);
+
+        let h1 = router.register_display(reg("HDMI-A-1", 1920, 1080)).await;
+        let h2 = router.register_display(reg("DP-1", 2560, 1440)).await;
+        assert_eq!(router.snapshot_displays().await.len(), 2);
+
+        router.unregister_display(h1.id).await;
+        let snap = router.snapshot_displays().await;
+        assert_eq!(snap.len(), 1);
+        assert_eq!(snap[0].id, h2.id);
+        assert_eq!(snap[0].name, "DP-1");
     }
 }

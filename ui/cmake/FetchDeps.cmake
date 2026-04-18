@@ -4,8 +4,14 @@
 # fetchdeps() to declare/resolve dependencies from a deps.json manifest.
 #
 #     include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchDeps.cmake)
-#     fetchdeps(${CMAKE_CURRENT_SOURCE_DIR}/deps.json
-#               [FLATPAK_OUT <path>])
+#     fetchdeps(${CMAKE_CURRENT_SOURCE_DIR}/deps.json)
+#
+# The deps.json format is a valid flatpak-builder sources array — the
+# `x-cmake` sidecar is an extension key (flatpak-builder ignores `x-*`
+# keys). Reference the same file from a flatpak manifest with:
+#
+#     sources:
+#       - path/to/deps.json
 #
 # For the flatpak-aware dependency provider (source-tree redirect inside
 # flatpak-builder + auto-record of transitive deps), load its companion
@@ -56,217 +62,183 @@ endfunction()
 
 # ---------------------------------------------------------------------------
 # Root-entry fetch
+#
+# Implemented as a macro (not a function) so that <name>_SOURCE_DIR and
+# <name>_BINARY_DIR populated by FetchContent_MakeAvailable remain visible
+# to the caller's scope — users rely on those to add_subdirectory or set
+# INTERFACE include paths post-fetch.
 # ---------------------------------------------------------------------------
 
-function(_fetchdeps_fetch_one entry source_root)
-  string(JSON name  GET "${entry}" "x-cmake" name)
-  string(JSON dtype GET "${entry}" type)
+macro(_fetchdeps_fetch_one _fd_entry _fd_source_root)
+  string(JSON _fd_name  GET "${_fd_entry}" "x-cmake" name)
+  string(JSON _fd_dtype GET "${_fd_entry}" type)
 
   # Mark before any work so even the local-override path counts as declared.
-  _fetchdeps_mark_declared("${name}")
+  _fetchdeps_mark_declared("${_fd_name}")
 
   # If a transitive FetchContent already populated this dep earlier in the
   # same configure (e.g. ncrequest's CMakeLists pulled pegtl before the root
   # loop reached the pegtl entry), don't re-declare it — FetchContent would
   # rerun find_package and collide with the existing binary dir.
-  FetchContent_GetProperties(${name})
-  if(${name}_POPULATED)
-    return()
-  endif()
-
-  # Workspace-local override.
-  if(EXISTS "${source_root}/${name}")
-    message(STATUS "fetchdeps: using local ${source_root}/${name}")
-    add_subdirectory("${source_root}/${name}" "${name}")
-    return()
-  endif()
-
-  # Stash dest + exclude-from-all so the provider can reach them.
-  _fetchdeps_json_get_opt(dest "${entry}" dest)
-  if(dest)
-    set(_FETCHDEPS_DEST_${name} "${dest}" CACHE INTERNAL "" FORCE)
-  endif()
-
-  set(declare_args "")
-  set(exclude_from_all FALSE)
-
-  if(dtype STREQUAL "git")
-    _fetchdeps_json_get_opt(url    "${entry}" url)
-    _fetchdeps_json_get_opt(commit "${entry}" commit)
-    _fetchdeps_json_get_opt(tag    "${entry}" tag)
-    _fetchdeps_json_get_opt(branch "${entry}" branch)
-    _fetchdeps_json_get_opt(dshallow "${entry}" "disable-shallow-clone")
-
-    if(NOT url)
-      message(FATAL_ERROR "fetchdeps: '${name}' type=git requires 'url'")
-    endif()
-    list(APPEND declare_args GIT_REPOSITORY "${url}")
-
-    if(commit)
-      list(APPEND declare_args GIT_TAG "${commit}")
-    elseif(tag)
-      list(APPEND declare_args GIT_TAG "${tag}")
-    elseif(branch)
-      list(APPEND declare_args GIT_TAG "${branch}")
-    else()
-      message(FATAL_ERROR
-        "fetchdeps: '${name}' type=git requires one of commit/tag/branch")
-    endif()
-
-    if(dshallow STREQUAL "true")
-      list(APPEND declare_args GIT_SHALLOW FALSE)
-    else()
-      list(APPEND declare_args GIT_SHALLOW TRUE)
-    endif()
-
-  elseif(dtype STREQUAL "archive" OR dtype STREQUAL "file")
-    _fetchdeps_json_get_opt(url           "${entry}" url)
-    _fetchdeps_json_get_opt(dest_filename "${entry}" "dest-filename")
-    if(NOT url)
-      message(FATAL_ERROR "fetchdeps: '${name}' type=${dtype} requires 'url'")
-    endif()
-    list(APPEND declare_args URL "${url}")
-    if(dest_filename)
-      list(APPEND declare_args DOWNLOAD_NAME "${dest_filename}")
-    endif()
-    if(dtype STREQUAL "file")
-      list(APPEND declare_args DOWNLOAD_NO_EXTRACT TRUE)
-    endif()
-
-    set(_hash "")
-    foreach(algo sha512 sha256 sha1 md5)
-      _fetchdeps_json_get_opt(_v "${entry}" "${algo}")
-      if(_v)
-        set(_hash "${algo}=${_v}")
-        break()
-      endif()
-    endforeach()
-    if(NOT _hash)
-      message(FATAL_ERROR
-        "fetchdeps: '${name}' type=${dtype} requires sha512/sha256/sha1/md5")
-    endif()
-    list(APPEND declare_args URL_HASH "${_hash}")
-
+  FetchContent_GetProperties(${_fd_name})
+  if(${_fd_name}_POPULATED)
+    # already populated — nothing to do
+  elseif(EXISTS "${_fd_source_root}/${_fd_name}")
+    # Workspace-local override.
+    message(STATUS "fetchdeps: using local ${_fd_source_root}/${_fd_name}")
+    add_subdirectory("${_fd_source_root}/${_fd_name}" "${_fd_name}")
   else()
-    message(FATAL_ERROR "fetchdeps: '${name}' unsupported type '${dtype}'")
-  endif()
-
-  # x-cmake sidecar.
-  _fetchdeps_json_has_key(has_xc "${entry}" "x-cmake")
-  if(has_xc)
-    string(JSON xc GET "${entry}" "x-cmake")
-
-    _fetchdeps_json_get_opt(v "${xc}" exclude_from_all)
-    if(v STREQUAL "true")
-      set(exclude_from_all TRUE)
-      list(APPEND declare_args EXCLUDE_FROM_ALL)
+    # Stash dest + exclude-from-all so the provider can reach them.
+    _fetchdeps_json_get_opt(_fd_dest "${_fd_entry}" dest)
+    if(_fd_dest)
+      set(_FETCHDEPS_DEST_${_fd_name} "${_fd_dest}" CACHE INTERNAL "" FORCE)
     endif()
 
-    _fetchdeps_json_get_opt(v "${xc}" find_package_args)
-    if(v)
-      separate_arguments(_fpa UNIX_COMMAND "${v}")
-      list(APPEND declare_args FIND_PACKAGE_ARGS ${_fpa})
+    set(_fd_declare_args "")
+    set(_fd_exclude_from_all FALSE)
+
+    if(_fd_dtype STREQUAL "git")
+      _fetchdeps_json_get_opt(_fd_url    "${_fd_entry}" url)
+      _fetchdeps_json_get_opt(_fd_commit "${_fd_entry}" commit)
+      _fetchdeps_json_get_opt(_fd_tag    "${_fd_entry}" tag)
+      _fetchdeps_json_get_opt(_fd_branch "${_fd_entry}" branch)
+      _fetchdeps_json_get_opt(_fd_dshallow "${_fd_entry}" "disable-shallow-clone")
+
+      if(NOT _fd_url)
+        message(FATAL_ERROR "fetchdeps: '${_fd_name}' type=git requires 'url'")
+      endif()
+      list(APPEND _fd_declare_args GIT_REPOSITORY "${_fd_url}")
+
+      if(_fd_commit)
+        list(APPEND _fd_declare_args GIT_TAG "${_fd_commit}")
+      elseif(_fd_tag)
+        list(APPEND _fd_declare_args GIT_TAG "${_fd_tag}")
+      elseif(_fd_branch)
+        list(APPEND _fd_declare_args GIT_TAG "${_fd_branch}")
+      else()
+        message(FATAL_ERROR
+          "fetchdeps: '${_fd_name}' type=git requires one of commit/tag/branch")
+      endif()
+
+      if(_fd_dshallow STREQUAL "true")
+        list(APPEND _fd_declare_args GIT_SHALLOW FALSE)
+      else()
+        list(APPEND _fd_declare_args GIT_SHALLOW TRUE)
+      endif()
+
+    elseif(_fd_dtype STREQUAL "archive" OR _fd_dtype STREQUAL "file")
+      _fetchdeps_json_get_opt(_fd_url           "${_fd_entry}" url)
+      _fetchdeps_json_get_opt(_fd_dest_filename "${_fd_entry}" "dest-filename")
+      if(NOT _fd_url)
+        message(FATAL_ERROR "fetchdeps: '${_fd_name}' type=${_fd_dtype} requires 'url'")
+      endif()
+      list(APPEND _fd_declare_args URL "${_fd_url}")
+      if(_fd_dest_filename)
+        list(APPEND _fd_declare_args DOWNLOAD_NAME "${_fd_dest_filename}")
+      endif()
+      if(_fd_dtype STREQUAL "file")
+        list(APPEND _fd_declare_args DOWNLOAD_NO_EXTRACT TRUE)
+      endif()
+
+      set(_fd_hash "")
+      foreach(_fd_algo sha512 sha256 sha1 md5)
+        _fetchdeps_json_get_opt(_fd_v "${_fd_entry}" "${_fd_algo}")
+        if(_fd_v)
+          set(_fd_hash "${_fd_algo}=${_fd_v}")
+          break()
+        endif()
+      endforeach()
+      if(NOT _fd_hash)
+        message(FATAL_ERROR
+          "fetchdeps: '${_fd_name}' type=${_fd_dtype} requires sha512/sha256/sha1/md5")
+      endif()
+      list(APPEND _fd_declare_args URL_HASH "${_fd_hash}")
+
+    else()
+      message(FATAL_ERROR "fetchdeps: '${_fd_name}' unsupported type '${_fd_dtype}'")
     endif()
 
-    _fetchdeps_json_get_opt(v "${xc}" source_subdir)
-    if(v)
-      list(APPEND declare_args SOURCE_SUBDIR "${v}")
-    endif()
+    # x-cmake sidecar.
+    _fetchdeps_json_has_key(_fd_has_xc "${_fd_entry}" "x-cmake")
+    if(_fd_has_xc)
+      string(JSON _fd_xc GET "${_fd_entry}" "x-cmake")
 
-    _fetchdeps_json_has_key(has_sub "${xc}" git_submodules)
-    if(has_sub)
-      string(JSON sub_len LENGTH "${xc}" git_submodules)
-      if(sub_len GREATER 0)
-        set(_subs "")
-        math(EXPR _last "${sub_len} - 1")
-        foreach(i RANGE 0 ${_last})
-          string(JSON _s GET "${xc}" git_submodules ${i})
-          list(APPEND _subs "${_s}")
-        endforeach()
-        list(APPEND declare_args GIT_SUBMODULES ${_subs})
+      _fetchdeps_json_get_opt(_fd_v "${_fd_xc}" exclude_from_all)
+      if(_fd_v STREQUAL "true")
+        set(_fd_exclude_from_all TRUE)
+        list(APPEND _fd_declare_args EXCLUDE_FROM_ALL)
+      endif()
+
+      _fetchdeps_json_get_opt(_fd_v "${_fd_xc}" find_package_args)
+      if(_fd_v)
+        separate_arguments(_fd_fpa UNIX_COMMAND "${_fd_v}")
+        list(APPEND _fd_declare_args FIND_PACKAGE_ARGS ${_fd_fpa})
+      endif()
+
+      _fetchdeps_json_get_opt(_fd_v "${_fd_xc}" source_subdir)
+      if(_fd_v)
+        list(APPEND _fd_declare_args SOURCE_SUBDIR "${_fd_v}")
+      endif()
+
+      _fetchdeps_json_has_key(_fd_has_sub "${_fd_xc}" git_submodules)
+      if(_fd_has_sub)
+        string(JSON _fd_sub_len LENGTH "${_fd_xc}" git_submodules)
+        if(_fd_sub_len GREATER 0)
+          set(_fd_subs "")
+          math(EXPR _fd_sub_last "${_fd_sub_len} - 1")
+          foreach(_fd_i RANGE 0 ${_fd_sub_last})
+            string(JSON _fd_s GET "${_fd_xc}" git_submodules ${_fd_i})
+            list(APPEND _fd_subs "${_fd_s}")
+          endforeach()
+          list(APPEND _fd_declare_args GIT_SUBMODULES ${_fd_subs})
+        endif()
       endif()
     endif()
+
+    set(_FETCHDEPS_EXCLUDE_${_fd_name} "${_fd_exclude_from_all}" CACHE INTERNAL "" FORCE)
+
+    FetchContent_Declare(${_fd_name} ${_fd_declare_args})
+    FetchContent_MakeAvailable(${_fd_name})
   endif()
-
-  set(_FETCHDEPS_EXCLUDE_${name} "${exclude_from_all}" CACHE INTERNAL "" FORCE)
-
-  FetchContent_Declare(${name} ${declare_args})
-  FetchContent_MakeAvailable(${name})
-endfunction()
-
-# ---------------------------------------------------------------------------
-# Flatpak manifest emit
-# ---------------------------------------------------------------------------
-
-function(_fetchdeps_emit_flatpak deps_json out_path)
-  string(JSON n LENGTH "${deps_json}")
-  if(n EQUAL 0)
-    file(WRITE "${out_path}" "[]\n")
-    return()
-  endif()
-  set(out "[]")
-  math(EXPR _last "${n} - 1")
-  foreach(i RANGE 0 ${_last})
-    string(JSON entry GET "${deps_json}" ${i})
-    _fetchdeps_json_has_key(has_xc "${entry}" "x-cmake")
-    if(has_xc)
-      string(JSON entry REMOVE "${entry}" "x-cmake")
-    endif()
-    string(JSON out SET "${out}" ${i} "${entry}")
-  endforeach()
-  file(WRITE "${out_path}" "${out}\n")
-endfunction()
+endmacro()
 
 # ---------------------------------------------------------------------------
 # Public entry point
+#
+# Macro (not function) so <dep>_SOURCE_DIR / <dep>_BINARY_DIR populated by
+# FetchContent_MakeAvailable inside the loop remain visible to the caller.
 # ---------------------------------------------------------------------------
 
-function(fetchdeps deps_path)
-  set(options "")
-  set(oneValueArgs FLATPAK_OUT)
-  set(multiValueArgs "")
-  cmake_parse_arguments(FD "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
-
-  if(NOT EXISTS "${deps_path}")
-    message(FATAL_ERROR "fetchdeps: ${deps_path} not found")
+macro(fetchdeps _fd_deps_path)
+  if(NOT EXISTS "${_fd_deps_path}")
+    message(FATAL_ERROR "fetchdeps: ${_fd_deps_path} not found")
   endif()
 
-  file(READ "${deps_path}" deps_json)
-  string(JSON n ERROR_VARIABLE _err LENGTH "${deps_json}")
-  if(_err)
-    message(FATAL_ERROR "fetchdeps: ${deps_path} is not valid JSON: ${_err}")
+  file(READ "${_fd_deps_path}" _fd_deps_json)
+  string(JSON _fd_n ERROR_VARIABLE _fd_err LENGTH "${_fd_deps_json}")
+  if(_fd_err)
+    message(FATAL_ERROR "fetchdeps: ${_fd_deps_path} is not valid JSON: ${_fd_err}")
   endif()
 
   # Expose the authoritative deps.json path to the provider so auto-record
   # can write new transitive deps back into it.
-  set_property(GLOBAL PROPERTY _FETCHDEPS_JSON_PATH "${deps_path}")
+  set_property(GLOBAL PROPERTY _FETCHDEPS_JSON_PATH "${_fd_deps_path}")
 
-  get_filename_component(source_root "${deps_path}" DIRECTORY)
+  get_filename_component(_fd_top_source_root "${_fd_deps_path}" DIRECTORY)
 
-  if(n GREATER 0)
-    math(EXPR _last "${n} - 1")
+  if(_fd_n GREATER 0)
+    math(EXPR _fd_top_last "${_fd_n} - 1")
     # Pre-pass: mark every root entry as declared so transitive provider
     # calls that land on a name already in deps.json (possibly later in the
     # array) don't misfire autorecord during the main loop below.
-    foreach(i RANGE 0 ${_last})
-      string(JSON entry GET "${deps_json}" ${i})
-      string(JSON _pre_name GET "${entry}" "x-cmake" name)
-      _fetchdeps_mark_declared("${_pre_name}")
+    foreach(_fd_top_i RANGE 0 ${_fd_top_last})
+      string(JSON _fd_top_entry GET "${_fd_deps_json}" ${_fd_top_i})
+      string(JSON _fd_pre_name GET "${_fd_top_entry}" "x-cmake" name)
+      _fetchdeps_mark_declared("${_fd_pre_name}")
     endforeach()
-    foreach(i RANGE 0 ${_last})
-      string(JSON entry GET "${deps_json}" ${i})
-      _fetchdeps_fetch_one("${entry}" "${source_root}")
+    foreach(_fd_top_i RANGE 0 ${_fd_top_last})
+      string(JSON _fd_top_entry GET "${_fd_deps_json}" ${_fd_top_i})
+      _fetchdeps_fetch_one("${_fd_top_entry}" "${_fd_top_source_root}")
     endforeach()
   endif()
-
-  if(FD_FLATPAK_OUT OR DEFINED ENV{FLATPAK_ID})
-    set(_out "${FD_FLATPAK_OUT}")
-    if(NOT _out)
-      set(_out "${CMAKE_BINARY_DIR}/flatpak_sources.json")
-    endif()
-    # Re-read — transitive deps may have appended entries during fetching.
-    file(READ "${deps_path}" deps_json)
-    _fetchdeps_emit_flatpak("${deps_json}" "${_out}")
-    message(STATUS "fetchdeps: wrote flatpak sources -> ${_out}")
-  endif()
-endfunction()
+endmacro()

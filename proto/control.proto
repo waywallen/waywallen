@@ -22,6 +22,7 @@ message Request {
     WallpaperScanRequest      wallpaper_scan = 20;
     SourceListRequest         source_list = 21;
     WallpaperApplyRequest     wallpaper_apply = 22;
+    DisplayListRequest        display_list = 23;
   }
 }
 
@@ -43,6 +44,7 @@ message Response {
     WallpaperScanResponse      wallpaper_scan = 20;
     SourceListResponse         source_list = 21;
     WallpaperApplyResponse     wallpaper_apply = 22;
+    DisplayListResponse        display_list = 23;
   }
 }
 
@@ -165,4 +167,27 @@ message WallpaperApplyResponse {
   string wallpaper_id = 2;
   string wp_type = 3;
   string name = 4;
+}
+
+// ---------------------------------------------------------------------------
+// Displays
+// ---------------------------------------------------------------------------
+
+message DisplayLinkInfo {
+  string renderer_id = 1;
+  int32  z_order     = 2;
+}
+
+message DisplayInfo {
+  uint64 display_id  = 1;
+  string name        = 2;
+  uint32 width       = 3;
+  uint32 height      = 4;
+  uint32 refresh_mhz = 5;
+  repeated DisplayLinkInfo links = 6;
+}
+
+message DisplayListRequest {}
+message DisplayListResponse {
+  repeated DisplayInfo displays = 1;
 }

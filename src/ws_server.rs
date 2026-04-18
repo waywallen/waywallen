@@ -247,6 +247,29 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
             }
         }
 
+        Req::DisplayList(_) => {
+            let snap = state.router.snapshot_displays().await;
+            let displays = snap
+                .into_iter()
+                .map(|d| pb::DisplayInfo {
+                    display_id: d.id,
+                    name: d.name,
+                    width: d.width,
+                    height: d.height,
+                    refresh_mhz: d.refresh_mhz,
+                    links: d
+                        .links
+                        .into_iter()
+                        .map(|l| pb::DisplayLinkInfo {
+                            renderer_id: l.renderer_id,
+                            z_order: l.z_order,
+                        })
+                        .collect(),
+                })
+                .collect();
+            ok(rid, Res::DisplayList(pb::DisplayListResponse { displays }))
+        }
+
         Req::WallpaperApply(r) => {
             let entry = {
                 let mgr = state.source_manager.lock().await;

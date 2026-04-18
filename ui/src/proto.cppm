@@ -41,4 +41,9 @@ using proto::WallpaperApplyResponse;
 using proto::SourceListRequest;
 using proto::SourceListResponse;
 using proto::SourcePluginInfo;
+
+using proto::DisplayInfo;
+using proto::DisplayLinkInfo;
+using proto::DisplayListRequest;
+using proto::DisplayListResponse;
 } // namespace waywallen::control::v1

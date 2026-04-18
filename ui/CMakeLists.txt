@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick DBus Protobuf ProtobufQuick ProtobufWellKnownTypes)
+find_package(Qt6 REQUIRED COMPONENTS Quick QuickShapes DBus Protobuf ProtobufQuick ProtobufWellKnownTypes)
 include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
 
 # FetchContent driver. To enable the flatpak-aware dependency provider
@@ -20,8 +20,7 @@ include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
 #   -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=cmake/FetchDepsProvider.cmake
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchDeps.cmake)
 
-fetchdeps(${CMAKE_CURRENT_SOURCE_DIR}/deps.json
-  FLATPAK_OUT ${CMAKE_BINARY_DIR}/flatpak_sources.json)
+fetchdeps(${CMAKE_CURRENT_SOURCE_DIR}/deps.json)
 
 
 
@@ -54,6 +53,7 @@ set(SOURCES_NO_MOC
   src/query/renderer_query.cpp
   src/query/source_query.cpp
   src/query/health_query.cpp
+  src/query/display_query.cpp
 )
 
 set(SOURCES
@@ -69,6 +69,7 @@ set(MOC_SOURCE_FILES
   src/query/renderer_query.cppm
   src/query/source_query.cppm
   src/query/health_query.cppm
+  src/query/display_query.cppm
 )
 set(MODULES
     src/mod.cppm
@@ -82,6 +83,7 @@ set(QML_FILES
   qml/page/WallpaperPage.qml
   qml/page/WallpaperCard.qml
   qml/page/StatusPage.qml
+  qml/page/DisplaysPage.qml
 )
 set(RESOURCES)
 
@@ -106,6 +108,7 @@ qt_add_qml_module(
   DEPENDENCIES
   QtCore
   QtQuick
+  QtQuick.Shapes
   Qcm.Material
   waywallen.control
   RESOURCE_PREFIX

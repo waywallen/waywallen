@@ -45,12 +45,20 @@ MD.ApplicationWindow {
             name: "Wallpapers"
         },
         {
-            icon: MD.Token.icon.info,
+            icon: MD.Token.icon.monitor,
+            name: "Displays"
+        },
+        {
+            icon: MD.Token.icon.monitor_heart,
             name: "Status"
         }
     ]
 
-    readonly property var pageComponents: ["qrc:/waywallen/ui/qml/page/WallpaperPage.qml", "qrc:/waywallen/ui/qml/page/StatusPage.qml"]
+    readonly property var pageComponents: [
+        "qrc:/waywallen/ui/qml/page/WallpaperPage.qml",
+        "qrc:/waywallen/ui/qml/page/DisplaysPage.qml",
+        "qrc:/waywallen/ui/qml/page/StatusPage.qml"
+    ]
 
     onCurrentPageChanged: {
         m_content.replace(m_content.currentItem, pageComponents[currentPage], {});
