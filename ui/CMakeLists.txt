@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick QuickShapes DBus Protobuf ProtobufQuick ProtobufWellKnownTypes)
+find_package(Qt6 REQUIRED COMPONENTS Quick DBus Protobuf ProtobufQuick ProtobufWellKnownTypes)
 include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
 
 # FetchContent driver. To enable the flatpak-aware dependency provider
