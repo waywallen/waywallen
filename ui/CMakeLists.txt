@@ -21,6 +21,17 @@ if(QT_KNOWN_POLICY_QTP0004)
   qt_policy(SET QTP0003 NEW)
   qt_policy(SET QTP0004 NEW)
 endif()
+set(QT_QML_GENERATE_QMLLS_INI ON)
+
+set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml_modules")
+set(QML_IMPORT_PATH
+    "${CMAKE_CURRENT_BINARY_DIR}/qml_modules"
+    CACHE STRING "QML import paths for IDE and tooling" FORCE
+)
+list(APPEND QML_DIRS "${QT_QML_OUTPUT_DIRECTORY}")
+if("${QT_INSTALL_QML}" STREQUAL "")
+  set(QT_INSTALL_QML "${CMAKE_INSTALL_LIBDIR}/qt6/qml")
+endif()
 
 # FetchContent driver. To enable the flatpak-aware dependency provider
 # (source redirect + transitive auto-record), pass on the cmake command line:
@@ -30,10 +41,6 @@ fetchdeps(${CMAKE_CURRENT_SOURCE_DIR}/deps.json)
 
 qt_standard_project_setup()
 
-set(QML_IMPORT_PATH
-    "${CMAKE_CURRENT_BINARY_DIR}/qml_modules"
-    CACHE STRING "QML import paths for IDE and tooling" FORCE
-)
 # ---------------------------------------------------------------------------
 # Control-plane protobuf (shared schema with the Rust backend).
 # Generates C++/QML types from ../proto/control.proto via qt_add_protobuf.
