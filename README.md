@@ -32,7 +32,7 @@ Waywallen ships in two pieces — install them separately as needed:
 
 **Flatpak**
 
-<a href='https://flathub.org/apps/details/org.waywallen.waywallen.Qcm'><img width='240' alt='Download on Flathub' src='https://dl.flathub.org/assets/badges/flathub-badge-en.png'/></a>
+<a href='https://flathub.org/apps/details/org.waywallen.waywallen'><img width='240' alt='Download on Flathub' src='https://dl.flathub.org/assets/badges/flathub-badge-en.png'/></a>
 
 **From source** — see [BUILD.md](BUILD.md).
 
