@@ -22,6 +22,7 @@ namespace waywallen
 RendererListQuery::RendererListQuery(QObject* parent): Query(parent) {}
 
 auto RendererListQuery::renderers() const -> const QStringList& { return m_renderers; }
+auto RendererListQuery::instances() const -> const QVariantList& { return m_instances; }
 
 void RendererListQuery::reload() {
     setStatus(Status::Querying);
@@ -39,13 +40,27 @@ void RendererListQuery::reload() {
             self->setError(result.unwrap_err());
             co_return;
         }
-        auto rsp = result.unwrap();
+        auto  rsp      = result.unwrap();
+        auto& list_rsp = rsp.rendererList();
+
         QStringList ids;
-        for (const auto& id : rsp.rendererList().renderers()) {
+        for (const auto& id : list_rsp.renderers()) {
             ids.append(id);
         }
         self->m_renderers = std::move(ids);
         Q_EMIT self->renderersChanged();
+
+        QVariantList instances;
+        for (const auto& inst : list_rsp.instances()) {
+            QVariantMap m;
+            m[u"id"_s]     = inst.rendererId();
+            m[u"fps"_s]    = inst.fps();
+            m[u"status"_s] = inst.status();
+            instances.append(m);
+        }
+        self->m_instances = std::move(instances);
+        Q_EMIT self->instancesChanged();
+
         self->setStatus(Status::Finished);
         co_return;
     });

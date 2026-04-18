@@ -20,6 +20,7 @@ using proto::RendererSpawnRequest;
 using proto::RendererSpawnResponse;
 using proto::RendererListRequest;
 using proto::RendererListResponse;
+using proto::RendererInstance;
 using proto::RendererPlayRequest;
 using proto::RendererPauseRequest;
 using proto::RendererMouseRequest;

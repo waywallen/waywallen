@@ -86,6 +86,12 @@ message RendererSpawnResponse {
 message RendererListRequest {}
 message RendererListResponse {
   repeated string renderers = 1;
+  repeated RendererInstance instances = 2;
+}
+message RendererInstance {
+  string renderer_id = 1;
+  uint32 fps         = 2;
+  string status      = 3; // "playing" | "paused"
 }
 
 message RendererPlayRequest  { string renderer_id = 1; }

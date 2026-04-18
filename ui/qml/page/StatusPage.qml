@@ -203,32 +203,41 @@ MD.Page {
                 SectionTitle { text: "Active Renderers" }
 
                 SectionHint {
-                    visible: !rendererQuery.renderers || rendererQuery.renderers.length === 0
+                    visible: !rendererQuery.instances || rendererQuery.instances.length === 0
                     text: rendererQuery.querying ? "Loading…" : "No active renderers"
                 }
 
                 ListView {
                     Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
                     implicitHeight: contentHeight
                     interactive: false
+                    spacing: 4
 
-                    model: rendererQuery.renderers
+                    model: rendererQuery.instances
 
                     delegate: MD.ListItem {
-                        required property string modelData
+                        required property var modelData
 
                         width: ListView.view.width
-                        text: modelData
+                        radius: 12
+                        text: modelData.id
                         font.family: "monospace"
+                        supportText: (modelData.status || "") + " · " + (modelData.fps || 0) + " fps"
                         leader: MD.Icon {
-                            name: MD.Token.icon.play_arrow
+                            name: modelData.status === "paused"
+                                  ? MD.Token.icon.pause
+                                  : MD.Token.icon.play_arrow
                             size: 24
-                            color: MD.Token.color.primary
+                            color: modelData.status === "paused"
+                                   ? MD.Token.color.on_surface_variant
+                                   : MD.Token.color.primary
                         }
                         trailing: MD.IconButton {
                             icon.name: MD.Token.icon.close
                             onClicked: {
-                                killDialog.rendererId = modelData;
+                                killDialog.rendererId = modelData.id;
                                 killDialog.open();
                             }
                         }
@@ -252,8 +261,11 @@ MD.Page {
 
                 ListView {
                     Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
                     implicitHeight: contentHeight
                     interactive: false
+                    spacing: 4
 
                     model: pluginQuery.renderers
 
@@ -261,18 +273,18 @@ MD.Page {
                         required property var modelData
 
                         width: ListView.view.width
+                        radius: 12
                         text: modelData.name || ""
-                        supportText: (modelData.types ? modelData.types.join(", ") : "") + " | priority: " + (modelData.priority || 0)
+                        supportText: (modelData.types ? modelData.types.join(", ") : "")
                         leader: MD.Icon {
                             name: MD.Token.icon.extension
                             size: 24
                             color: MD.Token.color.on_surface_variant
                         }
                         trailing: MD.Text {
-                            text: modelData.bin || ""
+                            text: "p" + (modelData.priority || 0)
                             typescale: MD.Token.typescale.label_small
                             color: MD.Token.color.on_surface_variant
-                            font.family: "monospace"
                         }
                     }
                 }
@@ -288,8 +300,11 @@ MD.Page {
 
                 ListView {
                     Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
                     implicitHeight: contentHeight
                     interactive: false
+                    spacing: 4
 
                     model: sourceQuery.sources
 
@@ -297,6 +312,7 @@ MD.Page {
                         required property var modelData
 
                         width: ListView.view.width
+                        radius: 12
                         text: modelData.name || ""
                         supportText: "Types: " + (modelData.types ? modelData.types.join(", ") : "—")
                         leader: MD.Icon {

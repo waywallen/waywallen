@@ -306,6 +306,12 @@ impl Router {
         // mirror the legacy behavior: size update without re-config.
     }
 
+    /// Whether this renderer is currently in the paused set (zero
+    /// enabled links). Returns `false` for unknown ids.
+    pub async fn is_paused(self: &Arc<Self>, renderer_id: &str) -> bool {
+        self.inner.lock().await.paused_renderers.contains(renderer_id)
+    }
+
     /// Snapshot of every registered display plus the enabled links
     /// pointing at it, ordered by ascending id for UI stability.
     /// Pure read — does not touch renderer state or emit events.

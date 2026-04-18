@@ -125,7 +125,23 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
 
         Req::RendererList(_) => {
             let ids = state.renderer_manager.list().await;
-            ok(rid, Res::RendererList(pb::RendererListResponse { renderers: ids }))
+            let mut instances = Vec::with_capacity(ids.len());
+            for id in &ids {
+                let fps = state.renderer_manager.get(id).await.map(|h| h.fps).unwrap_or(0);
+                let status = if state.router.is_paused(id).await { "paused" } else { "playing" };
+                instances.push(pb::RendererInstance {
+                    renderer_id: id.clone(),
+                    fps,
+                    status: status.into(),
+                });
+            }
+            ok(
+                rid,
+                Res::RendererList(pb::RendererListResponse {
+                    renderers: ids,
+                    instances,
+                }),
+            )
         }
 
         Req::RendererPlay(r) => match state

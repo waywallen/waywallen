@@ -16,18 +16,22 @@ export class RendererListQuery : public Query {
     QML_ELEMENT
 
     Q_PROPERTY(QStringList renderers READ renderers NOTIFY renderersChanged FINAL)
+    Q_PROPERTY(QVariantList instances READ instances NOTIFY instancesChanged FINAL)
 
 public:
     RendererListQuery(QObject* parent = nullptr);
 
     auto renderers() const -> const QStringList&;
+    auto instances() const -> const QVariantList&;
 
     void reload() override;
 
     Q_SIGNAL void renderersChanged();
+    Q_SIGNAL void instancesChanged();
 
 private:
-    QStringList m_renderers;
+    QStringList  m_renderers;
+    QVariantList m_instances;
 };
 
 export class RendererPluginListQuery : public Query {
