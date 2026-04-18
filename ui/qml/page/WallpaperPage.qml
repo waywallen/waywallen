@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 pragma ValueTypeBehavior: Assertable
 import QtQuick
 import QtQuick.Layouts
@@ -43,11 +44,16 @@ MD.Page {
 
     // Target display ids for Apply. Empty set = "All displays".
     property var applyTargetIds: []
-    function isTargetAll() { return applyTargetIds.length === 0; }
+    function isTargetAll() {
+        return applyTargetIds.length === 0;
+    }
     function toggleTarget(id) {
         const next = applyTargetIds.slice();
         const i = next.indexOf(id);
-        if (i >= 0) next.splice(i, 1); else next.push(id);
+        if (i >= 0)
+            next.splice(i, 1);
+        else
+            next.push(id);
         applyTargetIds = next;
     }
 
@@ -264,13 +270,16 @@ MD.Page {
                         }
 
                         // Apply button
-                        MD.Button {
+                        MD.BusyButton {
                             Layout.fillWidth: true
-                            text: applyQuery.querying ? "Applying…" : "Apply"
+                            text: "Apply"
+                            busy: applyQuery.querying
                             mdState.type: MD.Enum.BtFilled
-                            enabled: !applyQuery.querying
 
                             onClicked: {
+                                if (busy)
+                                    return;
+
                                 applyQuery.wallpaperId = root.selectedWallpaper?.id || "";
                                 applyQuery.displayIds = root.applyTargetIds;
                                 applyQuery.reload();
