@@ -417,26 +417,34 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
                     format!("no renderer for wallpaper type '{}'", entry.wp_type),
                 );
             }
-            // Resolution/fps come from settings.global. Plugin-scoped
-            // settings (from `[plugin.<name>]`) are merged into the
-            // spawn metadata as baseline kv; per-wallpaper metadata
-            // wins on key collisions.
+            // Resolution comes from settings.global. fps is a per-plugin
+            // concern: pulled out of `[plugin.<name>].fps` if present,
+            // otherwise hardcoded to 30 as a safe last resort. The
+            // remaining `[plugin.<name>]` keys flow into spawn metadata
+            // as baseline kv; per-wallpaper metadata wins on collisions.
             let g = state.settings.global();
             let width = g.default_width;
             let height = g.default_height;
-            let fps = g.default_fps;
 
             let plugin_name = state
                 .renderer_manager
                 .registry()
                 .resolve(&entry.wp_type)
                 .map(|def| def.name.clone());
-            let mut metadata = std::collections::HashMap::new();
-            if let Some(name) = plugin_name.as_deref() {
-                if let Some(plugin_kv) = state.settings.plugin(name) {
-                    metadata.extend(plugin_kv);
-                }
-            }
+
+            let mut plugin_kv = plugin_name
+                .as_deref()
+                .and_then(|n| state.settings.plugin(n))
+                .unwrap_or_default();
+            // Promote `fps` out of the plugin kv into the typed spawn
+            // field so it ends up as `--fps N` instead of getting
+            // double-passed via metadata.
+            let fps: u32 = plugin_kv
+                .remove("fps")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(30);
+
+            let mut metadata: std::collections::HashMap<String, String> = plugin_kv;
             // Wallpaper-supplied keys override plugin defaults.
             metadata.extend(entry.metadata.clone());
 
@@ -510,7 +518,6 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
                     global: Some(pb::GlobalSettings {
                         default_width: snap.global.default_width,
                         default_height: snap.global.default_height,
-                        default_fps: snap.global.default_fps,
                     }),
                     plugins: snap
                         .plugins
@@ -537,7 +544,6 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
                 if let Some(g) = r.global.as_ref() {
                     s.global.default_width = g.default_width;
                     s.global.default_height = g.default_height;
-                    s.global.default_fps = g.default_fps;
                 }
                 s.plugins = new_plugins;
             });

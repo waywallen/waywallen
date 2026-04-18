@@ -260,7 +260,8 @@ message DisplayRemoved {
 message GlobalSettings {
   uint32 default_width  = 1;
   uint32 default_height = 2;
-  uint32 default_fps    = 3;
+  // Note: fps is per-plugin (in PluginSettings) — different renderer
+  // engines have different sane defaults, so it's not a global field.
 }
 
 // One plugin's settings table. Wire format is string→string for

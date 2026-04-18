@@ -37,12 +37,15 @@ const DEBOUNCE_WRITE: Duration = Duration::from_secs(2);
 
 /// Daemon-wide defaults consumed by `WallpaperApply` when a renderer
 /// has no per-plugin override.
+///
+/// Note: fps is intentionally NOT here. Frame rate is a per-plugin
+/// concern (different renderer engines have different sane defaults
+/// and capabilities), so it lives in `[plugin.<name>]` tables only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GlobalSettings {
     pub default_width: u32,
     pub default_height: u32,
-    pub default_fps: u32,
 }
 
 impl Default for GlobalSettings {
@@ -50,7 +53,6 @@ impl Default for GlobalSettings {
         Self {
             default_width: 1920,
             default_height: 1080,
-            default_fps: 30,
         }
     }
 }
@@ -246,17 +248,16 @@ mod tests {
         let s: Settings = toml::from_str("").unwrap();
         assert_eq!(s.global.default_width, 1920);
         assert_eq!(s.global.default_height, 1080);
-        assert_eq!(s.global.default_fps, 30);
         assert!(s.plugins.is_empty());
     }
 
     #[test]
     fn global_override_parses() {
-        let src = "[global]\ndefault_fps = 60\n";
+        let src = "[global]\ndefault_width = 2560\n";
         let s: Settings = toml::from_str(src).unwrap();
-        assert_eq!(s.global.default_fps, 60);
+        assert_eq!(s.global.default_width, 2560);
         // Unspecified fields keep their defaults.
-        assert_eq!(s.global.default_width, 1920);
+        assert_eq!(s.global.default_height, 1080);
     }
 
     #[test]
@@ -277,14 +278,14 @@ baz = "7"
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("config.toml");
         let store = SettingsStore::load_or_default(path.clone()).await;
-        assert_eq!(store.global().default_fps, 30);
+        assert_eq!(store.global().default_width, 1920);
 
-        store.update(|s| s.global.default_fps = 90);
+        store.update(|s| s.global.default_width = 2560);
         // Wait past the debounce window.
         tokio::time::sleep(DEBOUNCE_WRITE + Duration::from_millis(500)).await;
 
         let written = tokio::fs::read_to_string(&path).await.unwrap();
         let parsed: Settings = toml::from_str(&written).unwrap();
-        assert_eq!(parsed.global.default_fps, 90);
+        assert_eq!(parsed.global.default_width, 2560);
     }
 }
