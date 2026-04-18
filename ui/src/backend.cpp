@@ -112,9 +112,9 @@ Backend::Backend(quint16 port)
 }
 
 Backend::~Backend() {
-    m_client.reset();
     m_thread->quit();
     m_thread->wait();
+    m_client.reset();
 }
 
 void Backend::connectTo() {
