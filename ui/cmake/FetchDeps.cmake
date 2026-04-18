@@ -178,6 +178,7 @@ macro(_fetchdeps_fetch_one _fd_entry _fd_source_root)
       _fetchdeps_json_get_opt(_fd_v "${_fd_xc}" source_subdir)
       if(_fd_v)
         list(APPEND _fd_declare_args SOURCE_SUBDIR "${_fd_v}")
+        set(_FETCHDEPS_SOURCE_SUBDIR_${_fd_name} "${_fd_v}" CACHE INTERNAL "" FORCE)
       endif()
 
       _fetchdeps_json_has_key(_fd_has_sub "${_fd_xc}" git_submodules)

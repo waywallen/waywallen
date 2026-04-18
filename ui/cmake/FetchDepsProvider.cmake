@@ -110,6 +110,9 @@ function(_fetchdeps_autorecord name)
   if(FD_EXCLUDE_FROM_ALL)
     string(JSON _xc SET "${_xc}" exclude_from_all "true")
   endif()
+  if(FD_SOURCE_SUBDIR)
+    string(JSON _xc SET "${_xc}" source_subdir "\"${FD_SOURCE_SUBDIR}\"")
+  endif()
   string(JSON entry SET "${entry}" "x-cmake" "${_xc}")
 
   # Append to deps.json on disk.
@@ -125,6 +128,9 @@ function(_fetchdeps_autorecord name)
     set(_FETCHDEPS_EXCLUDE_${name} TRUE CACHE INTERNAL "" FORCE)
   else()
     set(_FETCHDEPS_EXCLUDE_${name} FALSE CACHE INTERNAL "" FORCE)
+  endif()
+  if(FD_SOURCE_SUBDIR)
+    set(_FETCHDEPS_SOURCE_SUBDIR_${name} "${FD_SOURCE_SUBDIR}" CACHE INTERNAL "" FORCE)
   endif()
 
   message(STATUS "fetchdeps: recorded transitive '${name}' -> ${deps_path}")
@@ -151,12 +157,20 @@ macro(_fetchdeps_provider method dep_name)
     set(_fd_src "$ENV{FLATPAK_BUILDER_BUILDDIR}/${_FETCHDEPS_DEST_${dep_name}}")
     set(_fd_bin "${CMAKE_BINARY_DIR}/_deps/${dep_name}-build")
     message(STATUS "fetchdeps[flatpak]: ${dep_name} <- ${_fd_src}")
-    if(EXISTS "${_fd_src}/CMakeLists.txt")
+    # Honor x-cmake.source_subdir: point add_subdirectory at <src>/<subdir>.
+    # When the subdir has no CMakeLists.txt (e.g. cmake-noop), this skips
+    # add_subdirectory entirely — matching FetchContent_MakeAvailable's
+    # behavior for SOURCE_SUBDIR.
+    set(_fd_add_src "${_fd_src}")
+    if(DEFINED _FETCHDEPS_SOURCE_SUBDIR_${dep_name})
+      set(_fd_add_src "${_fd_src}/${_FETCHDEPS_SOURCE_SUBDIR_${dep_name}}")
+    endif()
+    if(EXISTS "${_fd_add_src}/CMakeLists.txt")
       set(_fd_extra "")
       if(_FETCHDEPS_EXCLUDE_${dep_name})
         list(APPEND _fd_extra EXCLUDE_FROM_ALL)
       endif()
-      add_subdirectory("${_fd_src}" "${_fd_bin}" ${_fd_extra})
+      add_subdirectory("${_fd_add_src}" "${_fd_bin}" ${_fd_extra})
     endif()
     FetchContent_SetPopulated(${dep_name}
       SOURCE_DIR "${_fd_src}"
