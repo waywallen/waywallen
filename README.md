@@ -25,8 +25,8 @@ It started life as a Wallpaper Engine plugin for KDE.
 
 Waywallen ships in two pieces — install them separately as needed:
 
-1. **Core** — daemon + management UI + renderers. Handles loading, rendering and dispatching wallpapers.
-2. **Desktop integration plugin** — pipes the picture onto your DE's desktop background. Different DEs need different plugins; pick the one you use.
+1. **Core** — Handles loading, rendering and dispatching wallpapers.
+2. **Desktop integration plugin** — pipes the picture onto your DE's desktop background.
 
 ### 1. Install the core
 
@@ -42,8 +42,6 @@ flatpak install org.waywallen.waywallen
 |---------|--------|---------------|
 | **KDE Plasma 6** | `waywallen-kde` | Search **Waywallen** on the Pling store, or build from source in `waywallen-kde/` |
 | **GNOME / Hyprland / others** | — | No official plugin yet — contributions welcome via `waywallen-display` |
-
-Once installed: **right-click the desktop → Configure Wallpaper → pick Waywallen**, and choose one.
 
 ## Compatibility
 

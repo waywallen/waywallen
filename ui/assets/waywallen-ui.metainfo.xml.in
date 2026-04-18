@@ -9,10 +9,22 @@
 
   <description>
     <p>
-      Waywallen is a wallpaper manager that produces Vulkan-backed DMA-BUFs
-      and delivers them to compositors and consumers via PipeWire.
+      Waywallen is a wallpaper manager for linux desktops.  
+      It started life as a Wallpaper Engine plugin for KDE.
     </p>
   </description>
+
+  <screenshots>
+      <screenshot type="default">
+        <caption>main window</caption>
+        <image type="source">https://github.com/waywallen/waywallen/blob/main/ui/assets/main_page.png?raw=true</image>
+      </screenshot>
+  </screenshots>
+
+  <categories>
+    <category>System</category>
+    <category>Graphics</category>
+  </categories>
 
   <launchable type="desktop-id">@APP_ID@.desktop</launchable>
 
