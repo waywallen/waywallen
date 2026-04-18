@@ -32,6 +32,8 @@ Waywallen 由两部分组成，按需分别安装：
 
 <a href='https://flathub.org/apps/details/io.github.hypengw.Qcm'><img width='240' alt='Download on Flathub' src='https://dl.flathub.org/assets/badges/flathub-badge-en.png'/></a>
 
+**从源码构建** —— 见 [BUILD.md](BUILD.md)。
+
 ### 2. 安装桌面集成插件
 
 | 桌面 | 插件 | 获取方式 |

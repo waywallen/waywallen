@@ -34,6 +34,8 @@ Waywallen ships in two pieces — install them separately as needed:
 
 <a href='https://flathub.org/apps/details/org.waywallen.waywallen.Qcm'><img width='240' alt='Download on Flathub' src='https://dl.flathub.org/assets/badges/flathub-badge-en.png'/></a>
 
+**From source** — see [BUILD.md](BUILD.md).
+
 ### 2. Install a desktop integration plugin
 
 | Desktop | Plugin | How to get it |
