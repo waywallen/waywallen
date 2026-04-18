@@ -4,14 +4,20 @@
 //! session connection, so we serve the two extra object paths on it and
 //! call `org.kde.StatusNotifierWatcher.RegisterStatusNotifierItem`.
 //!
-//! Discovery contract (freedesktop SNI):
-//!   - service name: `org.kde.StatusNotifierItem-<pid>-1`
+//! Discovery contract (freedesktop SNI, object-path form):
+//!   - we pass the item object path to `RegisterStatusNotifierItem`; the
+//!     watcher pairs it with our unique bus name (the message sender) and
+//!     exposes `:1.NN/StatusNotifierItem` in `RegisteredStatusNotifierItems`
 //!   - item object path: `/StatusNotifierItem`
 //!   - menu object path: `/MenuBar` (advertised via `Menu` property)
 //!
-//! Compatible hosts: Plasma, Waybar/swaybar tray, XFCE, GNOME with the
-//! AppIndicator extension. Without a Watcher we record a warning and bail
-//! — the daemon keeps running.
+//! We deliberately do NOT `request_name` `org.kde.StatusNotifierItem-<pid>-1`:
+//! modern hosts (Plasma, Waybar, XFCE panel, GNOME AppIndicator, KNotifications,
+//! current libappindicator / Chromium / Electron ≥ 23.3) accept the path-only
+//! form, and skipping the own-name step lets us run under Flatpak without
+//! `--own-name=org.kde.*`.
+//!
+//! Without a Watcher we record a warning and bail — the daemon keeps running.
 
 mod dbusmenu;
 mod sni;
@@ -30,45 +36,36 @@ const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 const WATCHER_IFACE: &str = "org.kde.StatusNotifierWatcher";
 
 pub async fn spawn(conn: Arc<Connection>, app: Arc<AppState>) -> Result<()> {
-    let pid = std::process::id();
-    let bus_name = format!("org.kde.StatusNotifierItem-{pid}-1");
-
-    // Request the unique tray service name on the shared connection.
-    conn.request_name(bus_name.as_str())
-        .await
-        .map_err(|e| anyhow!("request_name {bus_name}: {e}"))?;
-
     let item = sni::StatusNotifierItem::new(app.clone());
     let menu = dbusmenu::DBusMenu::new(app.clone());
 
     conn.object_server().at(ITEM_PATH, item).await?;
     conn.object_server().at(MENU_PATH, menu).await?;
 
-    register_with_watcher(&conn, &bus_name).await?;
+    register_with_watcher(&conn).await?;
 
     // Re-register whenever the watcher (re)appears.
     let conn_bg = conn.clone();
-    let bus_name_bg = bus_name.clone();
     tokio::spawn(async move {
-        if let Err(e) = watch_watcher(conn_bg, bus_name_bg).await {
+        if let Err(e) = watch_watcher(conn_bg).await {
             log::warn!("tray watcher monitor exited: {e}");
         }
     });
 
-    log::info!("tray: registered {bus_name}");
+    log::info!("tray: registered {ITEM_PATH}");
     Ok(())
 }
 
-async fn register_with_watcher(conn: &Connection, bus_name: &str) -> Result<()> {
+async fn register_with_watcher(conn: &Connection) -> Result<()> {
     let proxy = zbus::Proxy::new(conn, WATCHER_SERVICE, WATCHER_PATH, WATCHER_IFACE).await?;
     proxy
-        .call_method("RegisterStatusNotifierItem", &bus_name)
+        .call_method("RegisterStatusNotifierItem", &ITEM_PATH)
         .await
         .map_err(|e| anyhow!("RegisterStatusNotifierItem: {e}"))?;
     Ok(())
 }
 
-async fn watch_watcher(conn: Arc<Connection>, bus_name: String) -> Result<()> {
+async fn watch_watcher(conn: Arc<Connection>) -> Result<()> {
     use futures_util::StreamExt;
     let dbus = zbus::fdo::DBusProxy::new(&conn).await?;
     let mut stream = dbus.receive_name_owner_changed().await?;
@@ -83,7 +80,7 @@ async fn watch_watcher(conn: Arc<Connection>, bus_name: String) -> Result<()> {
         let new_owner = args.new_owner.as_ref().map(|o| o.as_str()).unwrap_or("");
         if !new_owner.is_empty() {
             log::info!("tray: watcher reappeared, re-registering");
-            if let Err(e) = register_with_watcher(&conn, &bus_name).await {
+            if let Err(e) = register_with_watcher(&conn).await {
                 log::warn!("tray: re-register failed: {e}");
             }
         }
