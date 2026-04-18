@@ -3,6 +3,13 @@
 //! `RoutingTable` is the source of truth for which displays exist,
 //! which renderers exist, and how they are linked. The router wraps
 //! it in a `tokio::Mutex` and layers the dispatcher logic on top.
+//!
+//! **Invariant (Phase 1, single-wallpaper mode):** every display has
+//! at most one enabled link. The wire protocol does not multiplex
+//! multiple renderers' DMA-BUF pools onto a single display, so
+//! `add_link` enforces this by deleting any existing link(s) for the
+//! same display before inserting the new one. Renderers, however, may
+//! be referenced by N displays.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -116,7 +123,24 @@ impl RoutingTable {
     // Links
     // ---------------------------------------------------------------
 
+    /// Add a `(renderer → display)` link and return its id. Enforces
+    /// the single-wallpaper invariant by *first* deleting any prior
+    /// link(s) on `display_id` (whether enabled or not) so callers
+    /// cannot accidentally end up with the daemon trying to push two
+    /// renderers' DMA-BUFs at one display. If you need a "swap"
+    /// semantic just call `add_link` directly — the cleanup is implicit.
     pub fn add_link(&mut self, renderer_id: RendererId, display_id: DisplayId) -> LinkId {
+        // Delete any pre-existing links for this display. Phase 1
+        // policy: each display sees exactly one renderer.
+        let existing: Vec<LinkId> = self
+            .by_display
+            .get(&display_id)
+            .map(|v| v.clone())
+            .unwrap_or_default();
+        for old in existing {
+            let _ = self.remove_link(old);
+        }
+
         self.next_link_id += 1;
         let id = self.next_link_id;
         let link = Link {
@@ -279,12 +303,34 @@ mod tests {
     }
 
     #[test]
+    fn add_link_evicts_prior_link_on_same_display() {
+        // Single-display invariant: adding rB → d1 must drop the
+        // existing rA → d1 link automatically.
+        let mut t = RoutingTable::new();
+        let l_a = t.add_link("rA".into(), 1);
+        let l_b = t.add_link("rB".into(), 1);
+
+        assert_ne!(l_a, l_b, "second add returns a fresh id");
+        let links = t.links_for_display(1);
+        assert_eq!(links.len(), 1, "exactly one link survives");
+        assert_eq!(links[0].id, l_b);
+        assert_eq!(links[0].renderer_id, "rB");
+        assert!(t.links_for_renderer("rA").is_empty(), "rA fully unlinked");
+        assert_eq!(t.links_for_renderer("rB").len(), 1);
+    }
+
+    #[test]
     fn remove_display_drops_its_links() {
+        // Under the single-link-per-display invariant, only the most
+        // recently-added link survives in `by_display`. `remove_display`
+        // must drop that one link plus its renderer-side index entry.
         let mut t = RoutingTable::new();
         let _ = t.add_link("r1".into(), 1);
+        // r2's add evicts r1's link as part of the invariant.
         let _ = t.add_link("r2".into(), 1);
         let removed = t.remove_display(1);
-        assert_eq!(removed.len(), 2);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].renderer_id, "r2");
         assert!(t.links_for_renderer("r1").is_empty());
         assert!(t.links_for_renderer("r2").is_empty());
     }

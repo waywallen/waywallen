@@ -545,3 +545,44 @@ impl Drop for TempUnlink {
 
 #[allow(dead_code)]
 fn _assert_path_ok<P: AsRef<std::path::Path>>(_p: P) {} // compile-time shim
+
+// ---------------------------------------------------------------------------
+// Test stubs
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+impl RendererHandle {
+    /// Construct a `RendererHandle` with no running child process.
+    /// Useful for routing-table tests that need a handle to register
+    /// against the router but never push frames through it.
+    pub fn test_stub(id: &str, wp_type: &str) -> Arc<Self> {
+        let (a, _b) = StdUnixStream::pair().expect("UnixStream pair");
+        let (events_tx, _) = broadcast::channel::<EventMsg>(8);
+        Arc::new(Self {
+            id: id.into(),
+            wp_type: wp_type.into(),
+            width: 1920,
+            height: 1080,
+            fps: 30,
+            metadata: HashMap::new(),
+            name: "test-stub".into(),
+            pid: None,
+            sock: Arc::new(StdMutex::new(a)),
+            events: events_tx,
+            bind_snapshot: Arc::new(StdMutex::new(None)),
+            sync_fds: Arc::new(StdMutex::new(std::collections::VecDeque::new())),
+            child: Arc::new(TokioMutex::new(None)),
+        })
+    }
+}
+
+#[cfg(test)]
+impl RendererManager {
+    /// Insert a pre-built handle into the manager's map without
+    /// spawning a child process. Pair with `RendererHandle::test_stub`
+    /// for unit tests of the router/reaper logic.
+    pub async fn register_test_handle(&self, handle: Arc<RendererHandle>) {
+        let mut inner = self.inner.lock().await;
+        inner.renderers.insert(handle.id.clone(), handle);
+    }
+}

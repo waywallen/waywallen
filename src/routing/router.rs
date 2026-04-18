@@ -23,12 +23,15 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, broadcast::error::RecvError, mpsc, Mutex as TokioMutex};
 use tokio::task::JoinHandle;
 
-/// Renderers that stay paused (ref_count == 0) longer than this are
-/// automatically killed to reclaim GPU/VRAM. Defeatable by touching
-/// the link again.
-const IDLE_KILL_TIMEOUT: Duration = Duration::from_secs(300);
-/// How often the reaper task wakes up to scan for idle renderers.
-const IDLE_SCAN_INTERVAL: Duration = Duration::from_secs(30);
+/// Backstop only. The mainline path is `Router::reap_orphans`, which
+/// is called from every `relink_*` mutation and synchronously kills
+/// any renderer that just lost its last link. This timeout exists
+/// purely to catch renderers that somehow ended up paused without
+/// going through the apply path (defensive — should never fire in
+/// practice).
+const IDLE_KILL_TIMEOUT: Duration = Duration::from_secs(3600);
+/// How often the backstop reaper task wakes up to scan for stragglers.
+const IDLE_SCAN_INTERVAL: Duration = Duration::from_secs(60);
 
 use crate::ipc::proto::{ControlMsg, EventMsg};
 use crate::renderer_manager::{RendererHandle, RendererId, RendererManager};
@@ -360,6 +363,44 @@ impl Router {
         self.events_tx.subscribe()
     }
 
+    /// Walk every renderer in the table and kill the ones that no
+    /// longer have any enabled link, **except** any id in `keep`. Used
+    /// by the apply path to reclaim renderers that were just unlinked
+    /// — and to preserve the just-applied renderer in the 0-display
+    /// case where it has no links yet but should still hang around for
+    /// the next display hotplug.
+    ///
+    /// Returns the list of ids that were actually killed (useful for
+    /// log lines and tests).
+    pub async fn reap_orphans(self: &Arc<Self>, keep: Option<&str>) -> Vec<RendererId> {
+        let victims: Vec<RendererId> = {
+            let inner = self.inner.lock().await;
+            inner
+                .table
+                .renderer_ids()
+                .into_iter()
+                .filter(|rid| {
+                    if Some(rid.as_str()) == keep {
+                        return false;
+                    }
+                    inner
+                        .table
+                        .links_for_renderer(rid)
+                        .iter()
+                        .all(|l| !l.enabled)
+                })
+                .collect()
+        };
+        for rid in &victims {
+            log::info!("router: reaping orphan renderer {rid}");
+            self.unregister_renderer(rid).await;
+            if let Err(e) = self.mgr.kill(rid).await {
+                log::warn!("router: kill orphan {rid}: {e}");
+            }
+        }
+        victims
+    }
+
     /// Fire an event to all subscribers. Send errors (no subscribers)
     /// are downgraded to debug logs.
     fn emit(&self, evt: RouterEvent) {
@@ -463,6 +504,11 @@ impl Router {
             self.sync_display(*did).await;
         }
         self.reconcile_lifecycle().await;
+        // See `relink_all_displays_to` for the GC rationale. We always
+        // run the reap pass so that switching one display away from a
+        // renderer that no other display still uses immediately frees
+        // its GPU resources.
+        self.reap_orphans(Some(new_renderer_id)).await;
         if !applied.is_empty() {
             let all = self.snapshot_displays().await;
             self.emit(RouterEvent::DisplaysReplace(all));
@@ -487,6 +533,10 @@ impl Router {
             self.sync_display(did).await;
         }
         self.reconcile_lifecycle().await;
+        // Active GC: any renderer that is no longer referenced by any
+        // display dies right now. The new renderer is preserved by id
+        // even if no displays were affected (0-display apply path).
+        self.reap_orphans(Some(new_renderer_id)).await;
         if had_ids {
             let all = self.snapshot_displays().await;
             self.emit(RouterEvent::DisplaysReplace(all));
@@ -656,9 +706,12 @@ impl Router {
             return;
         }
         // Compute target (link + renderer + generation) under immutable borrows.
-        let target: Option<(Link, Arc<RendererHandle>, u64)> = inner
-            .table
-            .links_for_display(display_id)
+        let display_links = inner.table.links_for_display(display_id);
+        debug_assert!(
+            display_links.iter().filter(|l| l.enabled).count() <= 1,
+            "display {display_id} has multiple enabled links — invariant violated"
+        );
+        let target: Option<(Link, Arc<RendererHandle>, u64)> = display_links
             .into_iter()
             .find(|l| l.enabled)
             .and_then(|l| {
@@ -823,5 +876,141 @@ mod tests {
         assert_eq!(snap.len(), 1);
         assert_eq!(snap[0].id, h2.id);
         assert_eq!(snap[0].name, "DP-1");
+    }
+
+    // -----------------------------------------------------------------
+    // M8 — orphan reaping
+    // -----------------------------------------------------------------
+
+    /// Register a stub renderer with both the manager and the router
+    /// so apply-side lookups (`mgr.kill`, `table.get_renderer`) both
+    /// succeed.
+    async fn add_stub_renderer(mgr: &Arc<RendererManager>, router: &Arc<Router>, id: &str) {
+        let h = RendererHandle::test_stub(id, "scene");
+        mgr.register_test_handle(h.clone()).await;
+        router.register_renderer(h).await;
+    }
+
+    /// Are these ids still in the manager's live list?
+    async fn live_renderers(mgr: &Arc<RendererManager>) -> Vec<RendererId> {
+        let mut ids = mgr.list().await;
+        ids.sort();
+        ids
+    }
+
+    #[tokio::test]
+    async fn reap_kills_orphan_after_relink_all() {
+        // single display starts on r1; relink_all → r2 should reap r1.
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+        add_stub_renderer(&mgr, &router, "r1").await;
+        add_stub_renderer(&mgr, &router, "r2").await;
+
+        let _h = router.register_display(reg("HDMI-A-1", 1920, 1080)).await;
+        // r1 was registered first → first_renderer() picked it for the auto-link.
+        router.relink_all_displays_to("r2").await;
+
+        let live = live_renderers(&mgr).await;
+        assert_eq!(live, vec!["r2".to_string()], "r1 should have been reaped");
+    }
+
+    #[tokio::test]
+    async fn reap_keeps_renderer_still_referenced() {
+        // Two displays both on r1. Relink only display A → r2; r1 must
+        // survive because display B still uses it.
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+        add_stub_renderer(&mgr, &router, "r1").await;
+        add_stub_renderer(&mgr, &router, "r2").await;
+
+        let a = router.register_display(reg("HDMI-A-1", 1920, 1080)).await;
+        let _b = router.register_display(reg("DP-1", 1920, 1080)).await;
+
+        router.relink_displays_to(&[a.id], "r2").await;
+        let live = live_renderers(&mgr).await;
+        assert_eq!(live, vec!["r1".to_string(), "r2".to_string()]);
+
+        // Now move display B over too — r1 finally orphaned, gets reaped.
+        router.relink_all_displays_to("r2").await;
+        let live = live_renderers(&mgr).await;
+        assert_eq!(live, vec!["r2".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn relink_all_with_zero_displays_replaces_old_renderer() {
+        // Apply path semantics with no displays attached:
+        //   1. apply wp1 → r1 spawned and preserved (no displays to link).
+        //   2. apply wp2 → r2 spawned; r1 must be killed even though
+        //      relink_all touches no displays.
+        // This is what the daemon's WallpaperApply does: register the
+        // new renderer, then `relink_all_displays_to(new_id)`. We verify
+        // here that the second leg reaps r1 thanks to
+        // `reap_orphans(Some(new_id))` running unconditionally.
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+
+        // First apply: r1 spawn + relink_all (no displays).
+        add_stub_renderer(&mgr, &router, "r1").await;
+        router.relink_all_displays_to("r1").await;
+        assert_eq!(live_renderers(&mgr).await, vec!["r1".to_string()]);
+
+        // Second apply: r2 spawn + relink_all (still no displays).
+        add_stub_renderer(&mgr, &router, "r2").await;
+        router.relink_all_displays_to("r2").await;
+        assert_eq!(
+            live_renderers(&mgr).await,
+            vec!["r2".to_string()],
+            "r1 must be reaped when r2 takes over with no displays"
+        );
+
+        // Third apply: same wallpaper as r2 → caller would `find_reusable`
+        // and reuse r2; relink_all("r2") is a no-op + reap_orphans
+        // protects r2.
+        router.relink_all_displays_to("r2").await;
+        assert_eq!(live_renderers(&mgr).await, vec!["r2".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn unregister_last_display_keeps_renderer_alive() {
+        // After all displays unplug, the lone renderer must NOT be
+        // reaped — otherwise hotplug would leave the user with nothing
+        // to auto-link to. Only an explicit apply should replace it.
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+        add_stub_renderer(&mgr, &router, "r1").await;
+        let h = router.register_display(reg("HDMI-A-1", 1920, 1080)).await;
+        assert_eq!(live_renderers(&mgr).await, vec!["r1".to_string()]);
+
+        router.unregister_display(h.id).await;
+        assert_eq!(
+            live_renderers(&mgr).await,
+            vec!["r1".to_string()],
+            "renderer must survive last display unregister"
+        );
+
+        // Plug a fresh display in: it auto-links to r1 (first_renderer).
+        let h2 = router.register_display(reg("DP-1", 1920, 1080)).await;
+        let snap = router.snapshot_displays().await;
+        let entry = snap.iter().find(|d| d.id == h2.id).unwrap();
+        assert_eq!(entry.links.len(), 1);
+        assert_eq!(entry.links[0].renderer_id, "r1");
+    }
+
+    #[tokio::test]
+    async fn reap_preserves_keep_id_with_no_displays() {
+        // 0-display: spawn r1 → it has no link, but `keep=Some("r1")`
+        // protects it. Then spawn r2 and reap_orphans(Some("r2")) must
+        // kill r1 (no longer protected) and keep r2.
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+        add_stub_renderer(&mgr, &router, "r1").await;
+        let killed = router.reap_orphans(Some("r1")).await;
+        assert!(killed.is_empty());
+        assert_eq!(live_renderers(&mgr).await, vec!["r1".to_string()]);
+
+        add_stub_renderer(&mgr, &router, "r2").await;
+        let killed = router.reap_orphans(Some("r2")).await;
+        assert_eq!(killed, vec!["r1".to_string()]);
+        assert_eq!(live_renderers(&mgr).await, vec!["r2".to_string()]);
     }
 }
