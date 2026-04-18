@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{broadcast::error::RecvError, mpsc, Mutex as TokioMutex};
+use tokio::sync::{broadcast, broadcast::error::RecvError, mpsc, Mutex as TokioMutex};
 use tokio::task::JoinHandle;
 
 /// Renderers that stay paused (ref_count == 0) longer than this are
@@ -84,6 +84,22 @@ pub struct DisplayLinkSnapshot {
     pub z_order: i32,
 }
 
+/// Transport-agnostic router event. `ws_server` subscribes and
+/// translates these into `pb::Event`s on the wire; tests can also
+/// subscribe and observe router state changes without going through the
+/// protobuf layer.
+#[derive(Debug, Clone)]
+pub enum RouterEvent {
+    /// A single display was added or its fields changed (links, size).
+    /// Receivers should upsert by `snap.id`.
+    DisplayUpsert(DisplaySnapshot),
+    /// A display was unregistered. Receivers should drop the entry.
+    DisplayRemoved(DisplayId),
+    /// A batch mutation affected many displays — send the whole list
+    /// as a single replace instead of N upserts.
+    DisplaysReplace(Vec<DisplaySnapshot>),
+}
+
 /// Read-only view of a registered display. Returned from
 /// `Router::snapshot_displays`; carries metadata from `DisplayInfo`
 /// plus the enabled links currently pointing at this display.
@@ -127,10 +143,14 @@ pub struct Router {
     /// For Pause/Play lifecycle control. Phase 2: a renderer with zero
     /// enabled links is paused; the next link added resumes it.
     mgr: Arc<RendererManager>,
+    /// Fan-out channel for `RouterEvent`s. Always present; `send` errors
+    /// when there are no subscribers are logged at debug and ignored.
+    events_tx: broadcast::Sender<RouterEvent>,
 }
 
 impl Router {
     pub fn new(mgr: Arc<RendererManager>) -> Arc<Self> {
+        let (events_tx, _) = broadcast::channel(128);
         let router = Arc::new(Self {
             inner: TokioMutex::new(Inner {
                 table: RoutingTable::new(),
@@ -142,6 +162,7 @@ impl Router {
                 next_config_generation: 0,
             }),
             mgr,
+            events_tx,
         });
         // Spawn the idle-renderer reaper.
         {
@@ -234,10 +255,15 @@ impl Router {
             inner.paused_since.remove(id);
             removed.into_iter().map(|(_, did)| did).collect()
         };
+        let had_affected = !affected.is_empty();
         for did in affected {
             self.sync_display(did).await;
         }
         self.reconcile_lifecycle().await;
+        if had_affected {
+            let all = self.snapshot_displays().await;
+            self.emit(RouterEvent::DisplaysReplace(all));
+        }
     }
 
     // ---------------------------------------------------------------
@@ -279,6 +305,9 @@ impl Router {
         };
         self.sync_display(display_id).await;
         self.reconcile_lifecycle().await;
+        if let Some(snap) = self.snapshot_display(display_id).await {
+            self.emit(RouterEvent::DisplayUpsert(snap));
+        }
         DisplayHandle { id: display_id, rx }
     }
 
@@ -289,6 +318,7 @@ impl Router {
             inner.table.remove_display(display_id);
         }
         self.reconcile_lifecycle().await;
+        self.emit(RouterEvent::DisplayRemoved(display_id));
     }
 
     pub async fn update_display_size(
@@ -297,19 +327,71 @@ impl Router {
         width: u32,
         height: u32,
     ) {
-        let mut inner = self.inner.lock().await;
-        if let Some(s) = inner.displays.get_mut(&display_id) {
-            s.info.width = width;
-            s.info.height = height;
+        let existed = {
+            let mut inner = self.inner.lock().await;
+            if let Some(s) = inner.displays.get_mut(&display_id) {
+                s.info.width = width;
+                s.info.height = height;
+                true
+            } else {
+                false
+            }
+            // Phase 3 will re-emit SetConfig on resize. For Phase 1 we
+            // mirror the legacy behavior: size update without re-config.
+        };
+        if existed {
+            if let Some(snap) = self.snapshot_display(display_id).await {
+                self.emit(RouterEvent::DisplayUpsert(snap));
+            }
         }
-        // Phase 3 will re-emit SetConfig on resize. For Phase 1 we
-        // mirror the legacy behavior: size update without re-config.
     }
 
     /// Whether this renderer is currently in the paused set (zero
     /// enabled links). Returns `false` for unknown ids.
     pub async fn is_paused(self: &Arc<Self>, renderer_id: &str) -> bool {
         self.inner.lock().await.paused_renderers.contains(renderer_id)
+    }
+
+    /// Subscribe to router events (display add/change/remove). The
+    /// returned receiver is lagged-on-overflow — callers should expect
+    /// `RecvError::Lagged` and resync via `snapshot_displays` when it
+    /// happens.
+    pub fn subscribe_events(self: &Arc<Self>) -> broadcast::Receiver<RouterEvent> {
+        self.events_tx.subscribe()
+    }
+
+    /// Fire an event to all subscribers. Send errors (no subscribers)
+    /// are downgraded to debug logs.
+    fn emit(&self, evt: RouterEvent) {
+        if let Err(e) = self.events_tx.send(evt) {
+            log::debug!("router: no event subscribers ({e})");
+        }
+    }
+
+    /// Snapshot of a single display by id. Returns `None` if the
+    /// display has been unregistered. Must not be called while the
+    /// inner lock is held.
+    pub async fn snapshot_display(self: &Arc<Self>, id: DisplayId) -> Option<DisplaySnapshot> {
+        let inner = self.inner.lock().await;
+        let s = inner.displays.get(&id)?;
+        let links = inner
+            .table
+            .links_for_display(id)
+            .into_iter()
+            .filter(|l| l.enabled)
+            .map(|l| DisplayLinkSnapshot {
+                renderer_id: l.renderer_id,
+                z_order: l.z_order,
+            })
+            .collect();
+        Some(DisplaySnapshot {
+            id,
+            name: s.info.name.clone(),
+            width: s.info.width,
+            height: s.info.height,
+            refresh_mhz: s.info.refresh_mhz,
+            links,
+        })
     }
 
     /// Snapshot of every registered display plus the enabled links
@@ -352,6 +434,41 @@ impl Router {
     /// `WallpaperApply` in single-wallpaper mode. Idempotent: calling
     /// twice with the same id is a no-op (the link already points
     /// there, sync_display sees no diff).
+    /// Re-point the single enabled link of every display in
+    /// `display_ids` at `new_renderer_id`. Displays not in the list
+    /// keep their current renderer binding. Unknown display ids are
+    /// skipped silently (callers are expected to validate upstream).
+    pub async fn relink_displays_to(
+        self: &Arc<Self>,
+        display_ids: &[DisplayId],
+        new_renderer_id: &str,
+    ) {
+        let applied: Vec<DisplayId> = {
+            let mut inner = self.inner.lock().await;
+            let mut out = Vec::with_capacity(display_ids.len());
+            for did in display_ids {
+                if !inner.displays.contains_key(did) {
+                    continue;
+                }
+                let existing = inner.table.links_for_display(*did);
+                for link in existing {
+                    inner.table.remove_link(link.id);
+                }
+                inner.table.add_link(new_renderer_id.to_string(), *did);
+                out.push(*did);
+            }
+            out
+        };
+        for did in &applied {
+            self.sync_display(*did).await;
+        }
+        self.reconcile_lifecycle().await;
+        if !applied.is_empty() {
+            let all = self.snapshot_displays().await;
+            self.emit(RouterEvent::DisplaysReplace(all));
+        }
+    }
+
     pub async fn relink_all_displays_to(self: &Arc<Self>, new_renderer_id: &str) {
         let display_ids: Vec<DisplayId> = {
             let mut inner = self.inner.lock().await;
@@ -365,10 +482,15 @@ impl Router {
             }
             ids
         };
+        let had_ids = !display_ids.is_empty();
         for did in display_ids {
             self.sync_display(did).await;
         }
         self.reconcile_lifecycle().await;
+        if had_ids {
+            let all = self.snapshot_displays().await;
+            self.emit(RouterEvent::DisplaysReplace(all));
+        }
     }
 
     /// Mutate a link's geometry/clear color and re-emit `SetConfig` to
@@ -413,10 +535,16 @@ impl Router {
             let cfg = project_link(&link, &renderer, &info, cfg_gen);
             Some((link.display_id, cfg))
         };
+        let affected_display = payload.as_ref().map(|(d, _)| *d);
         if let Some((did, cfg)) = payload {
             let inner = self.inner.lock().await;
             if let Some(state) = inner.displays.get(&did) {
                 let _ = state.tx.send(DisplayOutEvent::SetConfig(cfg));
+            }
+        }
+        if let Some(did) = affected_display {
+            if let Some(snap) = self.snapshot_display(did).await {
+                self.emit(RouterEvent::DisplayUpsert(snap));
             }
         }
         true

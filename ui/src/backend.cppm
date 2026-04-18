@@ -46,6 +46,10 @@ public:
     Q_SIGNAL void connected();
     Q_SIGNAL void disconnected();
     Q_SIGNAL void error(QString);
+    /// Server-initiated event (no request_id). Carried in
+    /// `ServerFrame.event` and dispatched on the ws thread; receivers
+    /// should marshal to the main thread via queued connections.
+    Q_SIGNAL void eventReceived(proto::Event evt);
 
     Q_SLOT void on_retry();
 

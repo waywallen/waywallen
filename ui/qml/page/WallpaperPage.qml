@@ -41,6 +41,16 @@ MD.Page {
 
     property var selectedWallpaper: null
 
+    // Target display ids for Apply. Empty set = "All displays".
+    property var applyTargetIds: []
+    function isTargetAll() { return applyTargetIds.length === 0; }
+    function toggleTarget(id) {
+        const next = applyTargetIds.slice();
+        const i = next.indexOf(id);
+        if (i >= 0) next.splice(i, 1); else next.push(id);
+        applyTargetIds = next;
+    }
+
     showBackground: false
 
     contentItem: RowLayout {
@@ -215,51 +225,41 @@ MD.Page {
                             Layout.fillWidth: true
                         }
 
-                        // Resolution
+                        // Apply target — chip row over DisplayManager.displays
+                        // plus a leading "All" chip. Multi-select; empty
+                        // selection ⇒ "All" (applied to every display).
+                        // Resolution / FPS are resolved daemon-side from
+                        // plugin settings, not configured here.
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 4
 
                             MD.Text {
-                                text: "Resolution"
+                                text: "Apply to"
                                 typescale: MD.Token.typescale.label_medium
                                 color: MD.Token.color.on_surface_variant
                             }
-                            RowLayout {
-                                spacing: 8
-                                MD.TextField {
-                                    id: widthField
-                                    Layout.preferredWidth: 80
-                                    text: "1920"
-                                    inputMethodHints: Qt.ImhDigitsOnly
-                                }
-                                MD.Text {
-                                    text: "×"
-                                    color: MD.Token.color.on_surface_variant
-                                }
-                                MD.TextField {
-                                    id: heightField
-                                    Layout.preferredWidth: 80
-                                    text: "1080"
-                                    inputMethodHints: Qt.ImhDigitsOnly
-                                }
-                            }
-                        }
 
-                        // FPS
-                        ColumnLayout {
-                            spacing: 4
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: 6
 
-                            MD.Text {
-                                text: "FPS"
-                                typescale: MD.Token.typescale.label_medium
-                                color: MD.Token.color.on_surface_variant
-                            }
-                            MD.TextField {
-                                id: fpsField
-                                Layout.preferredWidth: 80
-                                text: "30"
-                                inputMethodHints: Qt.ImhDigitsOnly
+                                MD.FilterChip {
+                                    text: "All"
+                                    checked: root.isTargetAll()
+                                    onClicked: root.applyTargetIds = []
+                                }
+
+                                Repeater {
+                                    model: DisplayManager.displays
+
+                                    MD.FilterChip {
+                                        required property var modelData
+                                        text: modelData?.name || ("Display " + modelData?.id)
+                                        checked: root.applyTargetIds.indexOf(modelData?.id) >= 0
+                                        onClicked: root.toggleTarget(modelData?.id)
+                                    }
+                                }
                             }
                         }
 
@@ -272,9 +272,7 @@ MD.Page {
 
                             onClicked: {
                                 applyQuery.wallpaperId = root.selectedWallpaper?.id || "";
-                                applyQuery.width = parseInt(widthField.text) || 1920;
-                                applyQuery.height = parseInt(heightField.text) || 1080;
-                                applyQuery.fps = parseInt(fpsField.text) || 30;
+                                applyQuery.displayIds = root.applyTargetIds;
                                 applyQuery.reload();
                             }
                         }

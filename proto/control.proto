@@ -5,6 +5,22 @@ package waywallen.control.v1;
 // ---------------------------------------------------------------------------
 // Envelope
 // ---------------------------------------------------------------------------
+//
+// Wire direction is asymmetric:
+//   * client → server : a bare `Request` on every frame.
+//   * server → client : a `ServerFrame` wrapping either the matching
+//     `Response` (request_id echoes the client's Request) or a
+//     server-initiated `Event` (no request_id).
+//
+// Splitting Event out of `Response` keeps request_id semantics clean
+// and lets the server push display state changes without a poll.
+
+message ServerFrame {
+  oneof kind {
+    Response response = 1;
+    Event    event    = 2;
+  }
+}
 
 message Request {
   uint64 request_id = 1;
@@ -23,6 +39,8 @@ message Request {
     SourceListRequest         source_list = 21;
     WallpaperApplyRequest     wallpaper_apply = 22;
     DisplayListRequest        display_list = 23;
+    SettingsGetRequest        settings_get = 24;
+    SettingsSetRequest        settings_set = 25;
   }
 }
 
@@ -45,6 +63,8 @@ message Response {
     SourceListResponse         source_list = 21;
     WallpaperApplyResponse     wallpaper_apply = 22;
     DisplayListResponse        display_list = 23;
+    SettingsGetResponse        settings_get = 24;
+    Empty                      settings_set = 25;
   }
 }
 
@@ -166,9 +186,12 @@ message SourcePluginInfo {
 
 message WallpaperApplyRequest {
   string wallpaper_id = 1;
-  uint32 width = 2;
-  uint32 height = 3;
-  uint32 fps = 4;
+  // Target displays. Empty means "apply to all currently registered displays"
+  // (the pre-M4 default behaviour). Non-empty: apply only to the listed
+  // display_ids (others keep their current wallpaper). Resolution/fps are
+  // resolved from settings (global default + plugin overrides), not from
+  // this request.
+  repeated uint64 display_ids = 5;
 }
 message WallpaperApplyResponse {
   string renderer_id = 1;
@@ -198,4 +221,64 @@ message DisplayInfo {
 message DisplayListRequest {}
 message DisplayListResponse {
   repeated DisplayInfo displays = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Server-initiated events (no request_id, carried in `ServerFrame.event`)
+// ---------------------------------------------------------------------------
+
+message Event {
+  oneof payload {
+    DisplaySnapshot display_snapshot = 1;
+    DisplayChanged  display_changed  = 2;
+    DisplayRemoved  display_removed  = 3;
+  }
+}
+
+// Full replacement — sent once right after the WS handshake so a
+// freshly-connected UI has a complete picture, and on any mutation that
+// touches more than one display (e.g. a batch relink).
+message DisplaySnapshot {
+  repeated DisplayInfo displays = 1;
+}
+
+// A single display was added or its fields changed (links, size, …).
+// Receivers should upsert by `display.display_id`.
+message DisplayChanged {
+  DisplayInfo display = 1;
+}
+
+// A display was unregistered. Receivers should drop the entry.
+message DisplayRemoved {
+  uint64 display_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Settings
+// ---------------------------------------------------------------------------
+
+message GlobalSettings {
+  uint32 default_width  = 1;
+  uint32 default_height = 2;
+  uint32 default_fps    = 3;
+}
+
+// One plugin's settings table. Wire format is string→string for
+// uniformity; plugins parse their own values.
+message PluginSettings {
+  map<string, string> values = 1;
+}
+
+message SettingsGetRequest {}
+message SettingsGetResponse {
+  GlobalSettings global = 1;
+  // Keyed by plugin name (RendererDef.name).
+  map<string, PluginSettings> plugins = 2;
+}
+
+// Full replace. The daemon overwrites global and the plugin map with
+// what's sent here. Plugins not present in the request are removed.
+message SettingsSetRequest {
+  GlobalSettings global = 1;
+  map<string, PluginSettings> plugins = 2;
 }

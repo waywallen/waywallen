@@ -99,7 +99,7 @@ impl Daemon1 {
     }
 
     fn quit(&self) {
-        self.app.shutdown.notify_waiters();
+        self.app.shutdown_now();
     }
 
     #[zbus(signal)]

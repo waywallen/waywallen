@@ -11,6 +11,11 @@ using proto::StatusGadget::Status;
 
 using proto::Request;
 using proto::Response;
+using proto::ServerFrame;
+using proto::Event;
+using proto::DisplaySnapshot;
+using proto::DisplayChanged;
+using proto::DisplayRemoved;
 using proto::Empty;
 
 using proto::HealthRequest;

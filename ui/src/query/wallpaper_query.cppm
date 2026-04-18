@@ -60,9 +60,8 @@ export class WallpaperApplyQuery : public Query {
     QML_ELEMENT
 
     Q_PROPERTY(QString wallpaperId READ wallpaperId WRITE setWallpaperId NOTIFY wallpaperIdChanged FINAL)
-    Q_PROPERTY(quint32 width READ width WRITE setWidth NOTIFY widthChanged FINAL)
-    Q_PROPERTY(quint32 height READ height WRITE setHeight NOTIFY heightChanged FINAL)
-    Q_PROPERTY(quint32 fps READ fps WRITE setFps NOTIFY fpsChanged FINAL)
+    /// Target display ids. Empty list = "apply to all displays" (legacy default).
+    Q_PROPERTY(QVariantList displayIds READ displayIds WRITE setDisplayIds NOTIFY displayIdsChanged FINAL)
     Q_PROPERTY(QString rendererId READ rendererId NOTIFY rendererIdChanged FINAL)
 
 public:
@@ -71,31 +70,21 @@ public:
     auto wallpaperId() const -> const QString&;
     void setWallpaperId(const QString&);
 
-    auto width() const -> quint32;
-    void setWidth(quint32);
-
-    auto height() const -> quint32;
-    void setHeight(quint32);
-
-    auto fps() const -> quint32;
-    void setFps(quint32);
+    auto displayIds() const -> const QVariantList&;
+    void setDisplayIds(const QVariantList&);
 
     auto rendererId() const -> const QString&;
 
     void reload() override;
 
     Q_SIGNAL void wallpaperIdChanged();
-    Q_SIGNAL void widthChanged();
-    Q_SIGNAL void heightChanged();
-    Q_SIGNAL void fpsChanged();
+    Q_SIGNAL void displayIdsChanged();
     Q_SIGNAL void rendererIdChanged();
 
 private:
-    QString m_wallpaper_id;
-    quint32 m_width { 1920 };
-    quint32 m_height { 1080 };
-    quint32 m_fps { 30 };
-    QString m_renderer_id;
+    QString      m_wallpaper_id;
+    QVariantList m_display_ids;
+    QString      m_renderer_id;
 };
 
 } // namespace waywallen

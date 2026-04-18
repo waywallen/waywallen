@@ -1,25 +1,5 @@
 //! `waywallen_display_demo` — minimal headless client that exercises
 //! the `waywallen-display-v1` wire protocol end-to-end.
-//!
-//! Phase 1 scope:
-//!   * open the daemon's `display.sock`
-//!   * hello → welcome → register_display → display_accepted
-//!   * bind_buffers + set_config (log only; close incoming dma-buf fds)
-//!   * loop on frame_ready → buffer_release (close incoming sync_fd)
-//!
-//! Everything here runs on a blocking `std::os::unix::net::UnixStream`.
-//! There is no GL/Vk / windowing in this bin; it exists solely to
-//! validate the wire format and server-side state machine. A real
-//! display library (the `libwaywallen_display` C crate, lands in a
-//! later phase) takes the place of this demo for production clients.
-//!
-//! The previous Vulkan/winit swapchain demo (~1200 lines) has been
-//! removed; the new demo is intentionally small and dependency-free.
-//!
-//! The demo runs a 2-second reconnect loop: when the socket is absent
-//! (daemon not yet up) or the session closes, it sleeps and retries.
-//! This lets it double as a smoke-test harness that can start before
-//! the daemon and still converge.
 
 use anyhow::{anyhow, Context, Result};
 use std::os::unix::net::UnixStream;

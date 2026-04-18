@@ -1,5 +1,6 @@
 module;
 #include "waywallen/query/wallpaper_query.moc.h"
+#include <qtprotobuftypes.h>
 #undef assert
 #include <rstd/macro.hpp>
 
@@ -116,27 +117,11 @@ void WallpaperApplyQuery::setWallpaperId(const QString& v) {
     }
 }
 
-auto WallpaperApplyQuery::width() const -> quint32 { return m_width; }
-void WallpaperApplyQuery::setWidth(quint32 v) {
-    if (m_width != v) {
-        m_width = v;
-        Q_EMIT widthChanged();
-    }
-}
-
-auto WallpaperApplyQuery::height() const -> quint32 { return m_height; }
-void WallpaperApplyQuery::setHeight(quint32 v) {
-    if (m_height != v) {
-        m_height = v;
-        Q_EMIT heightChanged();
-    }
-}
-
-auto WallpaperApplyQuery::fps() const -> quint32 { return m_fps; }
-void WallpaperApplyQuery::setFps(quint32 v) {
-    if (m_fps != v) {
-        m_fps = v;
-        Q_EMIT fpsChanged();
+auto WallpaperApplyQuery::displayIds() const -> const QVariantList& { return m_display_ids; }
+void WallpaperApplyQuery::setDisplayIds(const QVariantList& v) {
+    if (m_display_ids != v) {
+        m_display_ids = v;
+        Q_EMIT displayIdsChanged();
     }
 }
 
@@ -151,9 +136,16 @@ void WallpaperApplyQuery::reload() {
     auto req   = proto::Request {};
     auto inner = proto::WallpaperApplyRequest {};
     inner.setWallpaperId(m_wallpaper_id);
-    inner.setWidth(m_width);
-    inner.setHeight(m_height);
-    inner.setFps(m_fps);
+    // Empty list is a legitimate value: daemon treats it as "apply to
+    // all displays". Non-empty restricts the relink to named ids.
+    QtProtobuf::uint64List ids;
+    ids.reserve(m_display_ids.size());
+    for (const auto& v : m_display_ids) {
+        bool ok = false;
+        auto id = v.toULongLong(&ok);
+        if (ok) ids.append(id);
+    }
+    inner.setDisplayIds(ids);
     req.setWallpaperApply(std::move(inner));
 
     auto self = QWatcher { this };

@@ -12,6 +12,7 @@ mod plugin;
 mod renderer_manager;
 mod routing;
 mod scheduler;
+mod settings;
 mod tray;
 mod wallpaper_type;
 mod ws_server;
@@ -21,10 +22,32 @@ pub struct AppState {
     pub renderer_manager: Arc<renderer_manager::RendererManager>,
     pub source_manager: Arc<tokio::sync::Mutex<plugin::source_manager::SourceManager>>,
     pub router: Arc<routing::Router>,
+    pub settings: Arc<settings::SettingsStore>,
     pub playlist: tokio::sync::Mutex<control::PlaylistState>,
     pub ws_port: std::sync::atomic::AtomicU16,
     pub ui_path: std::sync::Mutex<Option<PathBuf>>,
-    pub shutdown: tokio::sync::Notify,
+    /// Daemon-wide shutdown signal. Flips `false` → `true` exactly once.
+    /// Every long-lived task (display endpoint, per-client loops, tray,
+    /// ws server) should race its work against
+    /// `shutdown.subscribe().wait_for(|v| *v)` so that a D-Bus `Quit`
+    /// (or Ctrl-C) tears everything down without leaving blocking I/O
+    /// parked in `recvmsg`.
+    pub shutdown: tokio::sync::watch::Sender<bool>,
+}
+
+impl AppState {
+    /// Flip the shutdown flag. Idempotent — safe to call from multiple
+    /// places (DBus `Quit`, tray "Quit", Ctrl-C handler).
+    pub fn shutdown_now(&self) {
+        let _ = self.shutdown.send(true);
+    }
+
+    /// Subscribe for shutdown notification. Await with
+    /// `rx.wait_for(|v| *v).await` — that returns immediately if we're
+    /// already shutting down, otherwise parks until the flag flips.
+    pub fn shutdown_subscribe(&self) -> tokio::sync::watch::Receiver<bool> {
+        self.shutdown.subscribe()
+    }
 }
 
 struct Args {
@@ -159,14 +182,18 @@ async fn main() -> anyhow::Result<()> {
 
     let renderer_mgr = Arc::new(renderer_manager::RendererManager::new(registry));
     let router = routing::Router::new(renderer_mgr.clone());
+    let settings_store =
+        settings::SettingsStore::load_or_default(settings::default_config_path()).await;
+    let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
     let state = Arc::new(AppState {
         renderer_manager: renderer_mgr,
         source_manager: Arc::new(tokio::sync::Mutex::new(source_mgr)),
         router: router.clone(),
+        settings: settings_store,
         playlist: tokio::sync::Mutex::new(control::PlaylistState::default()),
         ws_port: std::sync::atomic::AtomicU16::new(0),
         ui_path: std::sync::Mutex::new(None),
-        shutdown: tokio::sync::Notify::new(),
+        shutdown: shutdown_tx,
     });
     // Seed the playlist from the initial source scan.
     {
@@ -258,7 +285,10 @@ async fn main() -> anyhow::Result<()> {
         _ = tokio::signal::ctrl_c() => {
             log::info!("SIGINT received, shutting down");
         }
-        _ = state.shutdown.notified() => {
+        _ = async {
+            let mut rx = state.shutdown_subscribe();
+            let _ = rx.wait_for(|v| *v).await;
+        } => {
             log::info!("shutdown requested via D-Bus");
         }
     }

@@ -72,16 +72,20 @@ Backend::Backend(quint16 port)
                                           std::span<const std::byte> bytes, bool last) {
         if (! last) {
             std::ranges::copy(bytes, std::back_inserter(*cache));
-        } else {
-            proto::Response rsp;
-            if (cache->empty()) {
-                rsp.deserialize(m_serializer.get(), bytes);
-            } else {
-                std::ranges::copy(bytes, std::back_inserter(*cache));
-                rsp.deserialize(m_serializer.get(), *cache);
-                cache->clear();
-            }
+            return;
+        }
 
+        proto::ServerFrame frame;
+        if (cache->empty()) {
+            frame.deserialize(m_serializer.get(), bytes);
+        } else {
+            std::ranges::copy(bytes, std::back_inserter(*cache));
+            frame.deserialize(m_serializer.get(), *cache);
+            cache->clear();
+        }
+
+        if (frame.hasResponse()) {
+            auto rsp = frame.response();
             if (auto it = m_handlers.find(rsp.requestId()); it != m_handlers.end()) {
                 it->second(asio::error_code {}, std::move(rsp));
                 m_handlers.erase(it);
@@ -90,6 +94,10 @@ Backend::Backend(quint16 port)
                        (unsigned long long)rsp.requestId(),
                        (int)rsp.status());
             }
+        } else if (frame.hasEvent()) {
+            Q_EMIT this->eventReceived(frame.event());
+        } else {
+            qWarning("ws: ServerFrame with no kind set");
         }
     });
 

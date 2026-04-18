@@ -20,7 +20,7 @@ MD.Page {
     function layoutRects() {
         const out = [];
         let x = 0;
-        for (const d of displayQuery.displays || []) {
+        for (const d of DisplayManager.displays || []) {
             out.push({ x: x, y: 0, w: d.width, h: d.height, d: d });
             x += d.width + root.displayGapPx;
         }
@@ -42,7 +42,7 @@ MD.Page {
 
     function selectedDisplay() {
         if (root.selectedId === null) return null;
-        for (const d of displayQuery.displays || []) {
+        for (const d of DisplayManager.displays || []) {
             if (d.id === root.selectedId) return d;
         }
         return null;

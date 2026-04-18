@@ -136,7 +136,7 @@ impl DBusMenu {
                 }
             }
             ID_QUIT => {
-                app.shutdown.notify_waiters();
+                app.shutdown_now();
             }
             _ => {}
         }
@@ -294,7 +294,7 @@ async fn dispatch_click(app: &Arc<AppState>, id: i32) -> zbus::fdo::Result<()> {
             let _ = control::rescan(app).await;
         }
         ID_QUIT => {
-            app.shutdown.notify_waiters();
+            app.shutdown_now();
         }
         _ => {}
     }

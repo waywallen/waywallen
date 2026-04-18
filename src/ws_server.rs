@@ -15,6 +15,7 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use crate::control_proto as pb;
 use crate::ipc::proto::ControlMsg;
 use crate::renderer_manager;
+use crate::routing::{DisplaySnapshot, RouterEvent};
 use crate::AppState;
 
 /// Bind the WebSocket control plane and return the actual local address
@@ -54,31 +55,132 @@ async fn handle_conn(
     log::debug!("ws conn {peer} open");
     let (mut sink, mut src) = ws.split();
 
-    while let Some(msg) = src.next().await {
-        let msg = msg?;
-        let bytes = match msg {
-            Message::Binary(b) => b,
-            Message::Text(t) => t.into_bytes(),
-            Message::Ping(_) | Message::Pong(_) => continue,
-            Message::Close(_) => break,
-            Message::Frame(_) => continue,
-        };
+    // Subscribe to router events *before* snapshotting so no updates
+    // get dropped between the snapshot and the live stream starting.
+    let mut events_rx = state.router.subscribe_events();
+    {
+        let snap = state.router.snapshot_displays().await;
+        let evt = displays_replace_event(snap);
+        sink.send(Message::Binary(wrap_event(evt).encode_to_vec())).await?;
+    }
 
-        let req = match pb::Request::decode(&bytes[..]) {
-            Ok(r) => r,
-            Err(e) => {
-                let resp = error_response(0, pb::Status::InvalidArgument, format!("decode: {e}"));
-                sink.send(Message::Binary(resp.encode_to_vec())).await?;
-                continue;
+    loop {
+        tokio::select! {
+            msg = src.next() => {
+                let Some(msg) = msg else { break };
+                let msg = msg?;
+                let bytes = match msg {
+                    Message::Binary(b) => b,
+                    Message::Text(t) => t.into_bytes(),
+                    Message::Ping(_) | Message::Pong(_) => continue,
+                    Message::Close(_) => break,
+                    Message::Frame(_) => continue,
+                };
+
+                let req = match pb::Request::decode(&bytes[..]) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        let resp = error_response(0, pb::Status::InvalidArgument, format!("decode: {e}"));
+                        sink.send(Message::Binary(wrap_response(resp).encode_to_vec())).await?;
+                        continue;
+                    }
+                };
+
+                let resp = dispatch(&state, req).await;
+                sink.send(Message::Binary(wrap_response(resp).encode_to_vec())).await?;
             }
-        };
-
-        let resp = dispatch(&state, req).await;
-        sink.send(Message::Binary(resp.encode_to_vec())).await?;
+            evt = events_rx.recv() => {
+                match evt {
+                    Ok(e) => {
+                        let pe = router_event_to_pb(e);
+                        sink.send(Message::Binary(wrap_event(pe).encode_to_vec())).await?;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("ws {peer}: event lag {n}; resending full snapshot");
+                        let snap = state.router.snapshot_displays().await;
+                        let evt = displays_replace_event(snap);
+                        sink.send(Message::Binary(wrap_event(evt).encode_to_vec())).await?;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Router shut down; stop emitting but keep the
+                        // request path alive until the client closes.
+                        log::info!("ws {peer}: router event channel closed");
+                        // Drain remaining requests without event select.
+                        while let Some(msg) = src.next().await {
+                            let msg = msg?;
+                            let bytes = match msg {
+                                Message::Binary(b) => b,
+                                Message::Text(t) => t.into_bytes(),
+                                Message::Ping(_) | Message::Pong(_) => continue,
+                                Message::Close(_) => break,
+                                Message::Frame(_) => continue,
+                            };
+                            let req = match pb::Request::decode(&bytes[..]) {
+                                Ok(r) => r,
+                                Err(e) => {
+                                    let resp = error_response(0, pb::Status::InvalidArgument, format!("decode: {e}"));
+                                    sink.send(Message::Binary(wrap_response(resp).encode_to_vec())).await?;
+                                    continue;
+                                }
+                            };
+                            let resp = dispatch(&state, req).await;
+                            sink.send(Message::Binary(wrap_response(resp).encode_to_vec())).await?;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     log::debug!("ws conn {peer} closed");
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// RouterEvent → pb::Event translation
+// ---------------------------------------------------------------------------
+
+fn display_snapshot_to_pb(s: DisplaySnapshot) -> pb::DisplayInfo {
+    pb::DisplayInfo {
+        display_id: s.id,
+        name: s.name,
+        width: s.width,
+        height: s.height,
+        refresh_mhz: s.refresh_mhz,
+        links: s
+            .links
+            .into_iter()
+            .map(|l| pb::DisplayLinkInfo {
+                renderer_id: l.renderer_id,
+                z_order: l.z_order,
+            })
+            .collect(),
+    }
+}
+
+fn displays_replace_event(snap: Vec<DisplaySnapshot>) -> pb::Event {
+    pb::Event {
+        payload: Some(pb::event::Payload::DisplaySnapshot(pb::DisplaySnapshot {
+            displays: snap.into_iter().map(display_snapshot_to_pb).collect(),
+        })),
+    }
+}
+
+fn router_event_to_pb(e: RouterEvent) -> pb::Event {
+    match e {
+        RouterEvent::DisplayUpsert(s) => pb::Event {
+            payload: Some(pb::event::Payload::DisplayChanged(pb::DisplayChanged {
+                display: Some(display_snapshot_to_pb(s)),
+            })),
+        },
+        RouterEvent::DisplayRemoved(id) => pb::Event {
+            payload: Some(pb::event::Payload::DisplayRemoved(pb::DisplayRemoved {
+                display_id: id,
+            })),
+        },
+        RouterEvent::DisplaysReplace(list) => displays_replace_event(list),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -315,45 +417,131 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
                     format!("no renderer for wallpaper type '{}'", entry.wp_type),
                 );
             }
-            // Single-wallpaper mode, spawn-before-kill: bring the new
-            // renderer up first so any active display frame loop has a
-            // replacement to rebind to before the old broadcast closes.
-            let pre_existing: Vec<String> = state.renderer_manager.list().await;
-            let width = if r.width == 0 { 1920 } else { r.width };
-            let height = if r.height == 0 { 1080 } else { r.height };
-            let fps = if r.fps == 0 { 30 } else { r.fps };
+            // Resolution/fps come from settings.global. Plugin-scoped
+            // settings (from `[plugin.<name>]`) are merged into the
+            // spawn metadata as baseline kv; per-wallpaper metadata
+            // wins on key collisions.
+            let g = state.settings.global();
+            let width = g.default_width;
+            let height = g.default_height;
+            let fps = g.default_fps;
+
+            let plugin_name = state
+                .renderer_manager
+                .registry()
+                .resolve(&entry.wp_type)
+                .map(|def| def.name.clone());
+            let mut metadata = std::collections::HashMap::new();
+            if let Some(name) = plugin_name.as_deref() {
+                if let Some(plugin_kv) = state.settings.plugin(name) {
+                    metadata.extend(plugin_kv);
+                }
+            }
+            // Wallpaper-supplied keys override plugin defaults.
+            metadata.extend(entry.metadata.clone());
+
             let spawn_req = renderer_manager::SpawnRequest {
                 wp_type: entry.wp_type.clone(),
-                metadata: entry.metadata.clone(),
+                metadata,
                 width,
                 height,
                 fps,
                 test_pattern: false,
             };
-            match state.renderer_manager.spawn(spawn_req).await {
-                Ok(renderer_id) => {
-                    if let Some(handle) = state.renderer_manager.get(&renderer_id).await {
-                        state.router.register_renderer(handle).await;
-                    }
-                    state.router.relink_all_displays_to(&renderer_id).await;
-                    for old_id in pre_existing {
-                        if old_id != renderer_id {
-                            state.router.unregister_renderer(&old_id).await;
-                            let _ = state.renderer_manager.kill(&old_id).await;
-                        }
-                    }
-                    ok(
-                        rid,
-                        Res::WallpaperApply(pb::WallpaperApplyResponse {
-                            renderer_id,
-                            wallpaper_id: entry.id,
-                            wp_type: entry.wp_type,
-                            name: entry.name,
-                        }),
-                    )
+
+            // Reuse an existing renderer if its spawn parameters match
+            // exactly (wp_type + metadata + w/h/fps). This makes per-
+            // display apply cheap: N displays pointing at the same
+            // wallpaper + same settings share one renderer process.
+            let renderer_id = match state.renderer_manager.find_reusable(&spawn_req).await {
+                Some(existing_id) => {
+                    log::info!(
+                        "wallpaper_apply: reusing renderer {existing_id} for wallpaper {}",
+                        entry.id
+                    );
+                    existing_id
                 }
-                Err(e) => error_response(rid, pb::Status::Internal, format!("spawn failed: {e}")),
+                None => match state.renderer_manager.spawn(spawn_req).await {
+                    Ok(new_id) => {
+                        if let Some(handle) = state.renderer_manager.get(&new_id).await {
+                            state.router.register_renderer(handle).await;
+                        }
+                        new_id
+                    }
+                    Err(e) => {
+                        return error_response(
+                            rid,
+                            pb::Status::Internal,
+                            format!("spawn failed: {e}"),
+                        );
+                    }
+                },
+            };
+
+            // Relink: empty display_ids means "all currently registered
+            // displays" (pre-M4 behaviour). Old renderers left with
+            // zero links get paused immediately and reclaimed by the
+            // router's idle reaper after IDLE_KILL_TIMEOUT.
+            if r.display_ids.is_empty() {
+                state.router.relink_all_displays_to(&renderer_id).await;
+            } else {
+                state
+                    .router
+                    .relink_displays_to(&r.display_ids, &renderer_id)
+                    .await;
             }
+
+            ok(
+                rid,
+                Res::WallpaperApply(pb::WallpaperApplyResponse {
+                    renderer_id,
+                    wallpaper_id: entry.id,
+                    wp_type: entry.wp_type,
+                    name: entry.name,
+                }),
+            )
+        }
+
+        Req::SettingsGet(_) => {
+            let snap = state.settings.snapshot();
+            ok(
+                rid,
+                Res::SettingsGet(pb::SettingsGetResponse {
+                    global: Some(pb::GlobalSettings {
+                        default_width: snap.global.default_width,
+                        default_height: snap.global.default_height,
+                        default_fps: snap.global.default_fps,
+                    }),
+                    plugins: snap
+                        .plugins
+                        .into_iter()
+                        .map(|(k, v)| (k, pb::PluginSettings { values: v }))
+                        .collect(),
+                }),
+            )
+        }
+
+        Req::SettingsSet(r) => {
+            // Full replace. Missing `global` falls back to current
+            // values so callers can update plugins alone by sending
+            // None for global.
+            let new_plugins: std::collections::HashMap<
+                String,
+                std::collections::HashMap<String, String>,
+            > = r
+                .plugins
+                .into_iter()
+                .map(|(k, v)| (k, v.values))
+                .collect();
+            state.settings.update(|s| {
+                if let Some(g) = r.global.as_ref() {
+                    s.global.default_width = g.default_width;
+                    s.global.default_height = g.default_height;
+                    s.global.default_fps = g.default_fps;
+                }
+                s.plugins = new_plugins;
+            });
+            ok(rid, Res::SettingsSet(pb::Empty {}))
         }
     }
 }
@@ -368,6 +556,19 @@ fn ok(request_id: u64, payload: pb::response::Payload) -> pb::Response {
         status: pb::Status::Ok as i32,
         message: String::new(),
         payload: Some(payload),
+    }
+}
+
+fn wrap_response(resp: pb::Response) -> pb::ServerFrame {
+    pb::ServerFrame {
+        kind: Some(pb::server_frame::Kind::Response(resp)),
+    }
+}
+
+#[allow(dead_code)]
+pub fn wrap_event(evt: pb::Event) -> pb::ServerFrame {
+    pb::ServerFrame {
+        kind: Some(pb::server_frame::Kind::Event(evt)),
     }
 }
 

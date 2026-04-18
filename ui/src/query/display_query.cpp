@@ -6,6 +6,7 @@ module;
 module waywallen;
 import :query.display;
 import :app;
+import :display;
 
 using namespace Qt::Literals::StringLiterals;
 using namespace qextra::prelude;
@@ -37,6 +38,13 @@ void DisplayListQuery::reload() {
         }
         auto  rsp      = result.unwrap();
         auto& list_rsp = rsp.displayList();
+
+        // Sync the global DisplayManager first so any consumer pulling
+        // from the manager sees the freshly-fetched rows before this
+        // query's own `displaysChanged` fires.
+        if (auto* dm = DisplayManager::instance()) {
+            dm->replaceAll(list_rsp.displays());
+        }
 
         QVariantList items;
         for (const auto& d : list_rsp.displays()) {

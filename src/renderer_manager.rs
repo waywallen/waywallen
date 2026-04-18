@@ -81,6 +81,11 @@ pub struct RendererHandle {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
+    /// The `SpawnRequest.metadata` this renderer was started with.
+    /// Retained so the manager can deduplicate a subsequent spawn
+    /// request that would produce an identical renderer — see
+    /// `RendererManager::find_reusable`.
+    pub metadata: HashMap<String, String>,
     /// Renderer plugin name from the resolved `RendererDef` (e.g.
     /// `"wescene"`). Surfaced to the UI so users see a friendly
     /// `<name>-<pid>` label instead of the opaque UUID.
@@ -316,6 +321,7 @@ impl RendererManager {
             width: req.width,
             height: req.height,
             fps: req.fps,
+            metadata: req.metadata.clone(),
             name: renderer_def.name.clone(),
             pid: child_pid,
             sock,
@@ -331,6 +337,25 @@ impl RendererManager {
         }
         log::info!("spawned renderer {id} ({}x{} @ {} fps)", req.width, req.height, req.fps);
         Ok(id)
+    }
+
+    /// Find an already-running renderer whose spawn parameters match
+    /// `req` (wp_type, metadata, width, height, fps, test_pattern).
+    /// Returns its id so callers can relink displays to it instead of
+    /// spawning a duplicate. `None` if no match exists.
+    pub async fn find_reusable(&self, req: &SpawnRequest) -> Option<RendererId> {
+        let inner = self.inner.lock().await;
+        for (id, h) in inner.renderers.iter() {
+            if h.wp_type == req.wp_type
+                && h.width == req.width
+                && h.height == req.height
+                && h.fps == req.fps
+                && h.metadata == req.metadata
+            {
+                return Some(id.clone());
+            }
+        }
+        None
     }
 
     pub async fn get(&self, id: &str) -> Option<Arc<RendererHandle>> {
