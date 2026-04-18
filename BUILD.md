@@ -34,8 +34,17 @@ cmake --build ui/build
 
 These live in sibling directories in the same repo umbrella:
 
-| Component | Dir | Build |
-|-----------|-----|-------|
-| `waywallen-bridge` | `../waywallen-bridge` | build/install with cmake |
-| `open-wallpaper-engine` | `../open-wallpaper-engine` | build/install with cmake(preset) |
-| `waywallen-mpv` | `../waywallen-mpv` | see its README |
+| Component | Build |
+|-----------|-------|
+| `waywallen-bridge` | build/install with cmake |
+| `open-wallpaper-engine` | build/install with cmake(preset) |
+| `waywallen-mpv` | see its README |
+
+## Launching
+
+```bash
+QML_IMPORT_PATH=$PWD/ui/build/clang-debug/qml_modules \
+./target/release/waywallen --ui $PWD/ui/build/waywallen-ui
+
+# --plugin <install-prefix>/share/waywallen
+```
