@@ -81,6 +81,14 @@ pub struct RendererHandle {
     pub width: u32,
     pub height: u32,
     pub fps: u32,
+    /// Renderer plugin name from the resolved `RendererDef` (e.g.
+    /// `"wescene"`). Surfaced to the UI so users see a friendly
+    /// `<name>-<pid>` label instead of the opaque UUID.
+    pub name: String,
+    /// OS pid of the renderer child captured right after `spawn()`.
+    /// `None` only if tokio could not return one (process already
+    /// exited before id() was queried).
+    pub pid: Option<u32>,
 
     /// Blocking std UnixStream. Guarded by a std Mutex so HTTP handlers
     /// hold the lock only while a `sendmsg` is in flight; they spawn the
@@ -242,6 +250,7 @@ impl RendererManager {
         let mut child = cmd
             .spawn()
             .with_context(|| format!("spawn {}", renderer_def.bin.display()))?;
+        let child_pid = child.id();
 
         // Accept, with a bound to avoid hanging forever on a broken host.
         let accept = listener.accept();
@@ -307,6 +316,8 @@ impl RendererManager {
             width: req.width,
             height: req.height,
             fps: req.fps,
+            name: renderer_def.name.clone(),
+            pid: child_pid,
             sock,
             events: events_tx,
             bind_snapshot,

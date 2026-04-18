@@ -56,6 +56,8 @@ void RendererListQuery::reload() {
             m[u"id"_s]     = inst.rendererId();
             m[u"fps"_s]    = inst.fps();
             m[u"status"_s] = inst.status();
+            m[u"name"_s]   = inst.name();
+            m[u"pid"_s]    = inst.pid();
             instances.append(m);
         }
         self->m_instances = std::move(instances);

@@ -92,6 +92,8 @@ message RendererInstance {
   string renderer_id = 1;
   uint32 fps         = 2;
   string status      = 3; // "playing" | "paused"
+  string name        = 4; // renderer plugin name from RendererDef.name
+  uint32 pid         = 5; // OS pid of the renderer child; 0 if unknown
 }
 
 message RendererPlayRequest  { string renderer_id = 1; }

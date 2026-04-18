@@ -62,6 +62,12 @@ MD.Page {
         sourceQuery.reload();
     }
 
+    function rendererLabel(d) {
+        const name = (d && d.name && d.name.length) ? d.name : "renderer";
+        const pid  = (d && d.pid) ? d.pid : 0;
+        return name + "-" + pid;
+    }
+
     RendererKillQuery {
         id: killQuery
         onStatusChanged: {
@@ -75,12 +81,13 @@ MD.Page {
     MD.Dialog {
         id: killDialog
         property string rendererId: ""
+        property string label: ""
         title: "Kill renderer?"
         parent: T.Overlay.overlay
         standardButtons: T.Dialog.Cancel | T.Dialog.Ok
 
         contentItem: MD.Text {
-            text: "Stop the renderer process\n\"" + killDialog.rendererId + "\"?\nUnsaved frame state may be lost."
+            text: "Stop the renderer process\n\"" + killDialog.label + "\"?\nUnsaved frame state may be lost."
             typescale: MD.Token.typescale.body_medium
             color: MD.Token.color.on_surface_variant
             wrapMode: Text.WordWrap
@@ -222,7 +229,7 @@ MD.Page {
 
                         width: ListView.view.width
                         radius: 12
-                        text: modelData.id
+                        text: root.rendererLabel(modelData)
                         font.family: "monospace"
                         supportText: (modelData.status || "") + " · " + (modelData.fps || 0) + " fps"
                         leader: MD.Icon {
@@ -238,6 +245,7 @@ MD.Page {
                             icon.name: MD.Token.icon.close
                             onClicked: {
                                 killDialog.rendererId = modelData.id;
+                                killDialog.label = root.rendererLabel(modelData);
                                 killDialog.open();
                             }
                         }
