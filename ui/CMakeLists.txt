@@ -12,17 +12,21 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(BUILD_SHARED_LIBS "Build using shared libraries" OFF)
+
 find_package(Qt6 REQUIRED COMPONENTS Quick DBus Protobuf ProtobufQuick ProtobufWellKnownTypes)
 include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
+
+if(QT_KNOWN_POLICY_QTP0004)
+  qt_policy(SET QTP0003 NEW)
+  qt_policy(SET QTP0004 NEW)
+endif()
 
 # FetchContent driver. To enable the flatpak-aware dependency provider
 # (source redirect + transitive auto-record), pass on the cmake command line:
 #   -DCMAKE_PROJECT_TOP_LEVEL_INCLUDES=cmake/FetchDepsProvider.cmake
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/FetchDeps.cmake)
-
 fetchdeps(${CMAKE_CURRENT_SOURCE_DIR}/deps.json)
-
-
 
 qt_standard_project_setup()
 
