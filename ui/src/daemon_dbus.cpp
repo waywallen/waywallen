@@ -19,9 +19,9 @@ namespace waywallen
 
 namespace {
 
-constexpr const char* kBusName     = "org.waywallen.Daemon";
-constexpr const char* kObjectPath  = "/org/waywallen/Daemon";
-constexpr const char* kInterface   = "org.waywallen.Daemon1";
+constexpr const char* kBusName     = "org.waywallen.waywallen.Daemon";
+constexpr const char* kObjectPath  = "/org/waywallen/waywallen/Daemon";
+constexpr const char* kInterface   = "org.waywallen.waywallen.Daemon1";
 constexpr const char* kPropsIface  = "org.freedesktop.DBus.Properties";
 
 DaemonDBusClient* g_instance { nullptr };

@@ -100,7 +100,7 @@ fn parse_args() -> Args {
 }
 
 /// Spawn the `waywallen-ui` subprocess fire-and-forget. UI reads the WS
-/// port from the `org.waywallen.Daemon1` DBus interface; its lifecycle is
+/// port from the `org.waywallen.waywallen.Daemon1` DBus interface; its lifecycle is
 /// independent of the daemon.
 pub fn spawn_ui(state: &AppState) -> bool {
     let ui_bin = match state.ui_path.lock().unwrap().clone() {
@@ -257,7 +257,7 @@ async fn async_main() -> anyhow::Result<()> {
         }
     }
 
-    // Session-bus presence: publish org.waywallen.Daemon so consumers can
+    // Session-bus presence: publish org.waywallen.waywallen.Daemon so consumers can
     // detect daemon (re)start via NameOwnerChanged / Ready and reconnect
     // immediately instead of waiting for their local backoff. Optional —
     // if the session bus is absent (e.g. TTY, embedded) we keep running.

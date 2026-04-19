@@ -18,15 +18,15 @@ use zbus::{interface, Connection, SignalContext};
 use crate::control;
 use crate::AppState;
 
-pub const BUS_NAME: &str = "org.waywallen.Daemon";
-pub const OBJECT_PATH: &str = "/org/waywallen/Daemon";
+pub const BUS_NAME: &str = "org.waywallen.waywallen.Daemon";
+pub const OBJECT_PATH: &str = "/org/waywallen/waywallen/Daemon";
 
 pub struct Daemon1 {
     app: Arc<AppState>,
     display_socket_path: String,
 }
 
-#[interface(name = "org.waywallen.Daemon1")]
+#[interface(name = "org.waywallen.waywallen.Daemon1")]
 impl Daemon1 {
     #[zbus(property)]
     fn display_socket_path(&self) -> &str {
@@ -110,7 +110,7 @@ impl Daemon1 {
 }
 
 /// Connect to the session bus, publish the interface, and claim
-/// `org.waywallen.Daemon`. Returns the `Connection` so the caller can keep
+/// `org.waywallen.waywallen.Daemon`. Returns the `Connection` so the caller can keep
 /// it alive for the process lifetime and emit signals through it.
 ///
 /// On any failure (no session bus, name already owned, …) returns `Err`;
