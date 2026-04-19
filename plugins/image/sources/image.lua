@@ -38,18 +38,14 @@ local function push_split(list, seen, s)
 end
 
 local function gather_dirs(ctx)
-    -- Priority: explicit daemon config, then env, then XDG, then sensible
-    -- defaults under $HOME. Each source may be colon-separated (PATH-style)
-    -- so users can enumerate multiple wallpaper folders in one setting.
+    -- Opt-in only: users must set `image_dir` in daemon config or the
+    -- `WAYWALLEN_IMAGE_DIR` env var. No implicit ~/Pictures fallback —
+    -- an unconfigured image plugin reports zero entries so no library
+    -- row is ever created. Each source may be colon-separated
+    -- (PATH-style) to enumerate multiple folders in one setting.
     local dirs, seen = {}, {}
     push_split(dirs, seen, ctx.config("image_dir"))
     push_split(dirs, seen, ctx.env("WAYWALLEN_IMAGE_DIR"))
-    push_split(dirs, seen, ctx.env("XDG_PICTURES_DIR"))
-    local home = ctx.env("HOME")
-    if home and home ~= "" then
-        push_split(dirs, seen, home .. "/Pictures/Wallpapers")
-        push_split(dirs, seen, home .. "/Pictures")
-    end
 
     local kept = {}
     for _, d in ipairs(dirs) do
