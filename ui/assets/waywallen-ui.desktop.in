@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=@APP_NAME@
-GenericName=Wallpaper Manager
+Name=Waywallen
+GenericName=Wallpaper Manager for Linux
 Comment=@APP_SUMMARY@
-Exec=waywallen-ui
+Exec=waywallen
 Icon=@APP_ID@
 Terminal=false
 Categories=Graphics;Qt;
