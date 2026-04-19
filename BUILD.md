@@ -11,40 +11,26 @@ End-to-end build instructions for developers.
 | CMake | 3.28+ | UI requires Ninja generator (`cmake-ninja` buildsystem) |
 | Vulkan SDK | ≥ 1.1 |  |
 | Qt6 | ≥ 6.10 | Quick, DBus, Protobuf |
+| mpv | - |  |
 
-## Building the daemon (Rust)
+## Building the Daemon
 
 ```bash
 cargo build --release
 ```
 
-## Building the UI (Qt6 / QML)
-
-The UI lives in `ui/` and is an independent CMake project (top-level target name: `waywallen-ui`).
+## Building the UI and Plugins
 
 ```bash
-cmake -S ui -B ui/build -G Ninja \
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DCMAKE_CXX_COMPILER=clang++ \
-    -DCMAKE_LINKER=lld
-cmake --build ui/build
+cmake --preset clang-release -DCMAKE_INSTALL_PREFIX=install
+cmake --build build/clang-release
+cmake --install build/clang-release
 ```
-
-## Companion components
-
-These live in sibling directories in the same repo umbrella:
-
-| Component | Build |
-|-----------|-------|
-| `waywallen-bridge` | build/install with cmake |
-| `open-wallpaper-engine` | build/install with cmake(preset) |
-| `waywallen-mpv` | see its README |
 
 ## Launching
 
 ```bash
-QML_IMPORT_PATH=$PWD/ui/build/clang-debug/qml_modules \
-./target/release/waywallen --ui $PWD/ui/build/waywallen-ui
-
-# --plugin <install-prefix>/share/waywallen
+cd ./install
+export QML_IMPORT_PATH=./lib/qt6/qml
+../target/release/waywallen --ui ./bin/waywallen-ui --plugin ./share/waywallen
 ```

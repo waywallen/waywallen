@@ -1,0 +1,13 @@
+# waywallen-mpv — libmpv-backed video renderer for waywallen.
+#
+# Installed to <prefix>/share/waywallen/renderers/waywallen-mpv.toml.
+# The daemon spawns `waywallen-mpv-renderer` for any wallpaper with
+# wp_type = "video". Source plugins forward the video file path in
+# their metadata as `video` or `path`, which the daemon surfaces to
+# the binary as `--video <path>` / `--path <path>`.
+
+[renderer]
+name = "waywallen-mpv"
+bin = "../../../bin/waywallen-mpv-renderer"
+types = ["video"]
+priority = 100

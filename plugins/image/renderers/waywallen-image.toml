@@ -1,0 +1,5 @@
+[renderer]
+name = "waywallen-image"
+bin = "../../../bin/waywallen-image-renderer"
+types = ["image"]
+priority = 100
