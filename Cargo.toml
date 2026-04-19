@@ -29,6 +29,15 @@ toml = "0.8"
 glob = "0.3"
 mlua = { version = "0.10", features = ["lua54", "vendored", "send"] }
 zbus = { version = "4", default-features = false, features = ["tokio"] }
+sea-orm = { version = "1.1", default-features = false, features = [
+    "macros",
+    "runtime-tokio-rustls",
+    "sqlx-sqlite",
+] }
+sea-orm-migration = { version = "1.1", default-features = false, features = [
+    "runtime-tokio-rustls",
+    "sqlx-sqlite",
+] }
 
 [dev-dependencies]
 tempfile = "3"

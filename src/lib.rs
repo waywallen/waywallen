@@ -1,6 +1,7 @@
 pub mod display_endpoint;
 pub mod display_proto;
 pub mod ipc;
+pub mod model;
 pub mod plugin;
 pub mod renderer_manager;
 pub mod routing;

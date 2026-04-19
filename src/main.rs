@@ -1,12 +1,15 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::Context;
+
 mod control;
 mod control_proto;
 mod dbus_iface;
 mod display_endpoint;
 mod display_proto;
 mod ipc;
+mod model;
 mod plugin;
 mod renderer_manager;
 mod routing;
@@ -22,6 +25,7 @@ pub struct AppState {
     pub source_manager: Arc<tokio::sync::Mutex<plugin::source_manager::SourceManager>>,
     pub router: Arc<routing::Router>,
     pub settings: Arc<settings::SettingsStore>,
+    pub db: sea_orm::DatabaseConnection,
     pub playlist: tokio::sync::Mutex<control::PlaylistState>,
     pub ws_port: std::sync::atomic::AtomicU16,
     pub ui_path: std::sync::Mutex<Option<PathBuf>>,
@@ -198,12 +202,17 @@ async fn async_main() -> anyhow::Result<()> {
     let router = routing::Router::new(renderer_mgr.clone());
     let settings_store =
         settings::SettingsStore::load_or_default(settings::default_config_path()).await;
+    let db_path = settings::default_db_path();
+    let db = model::connect(&db_path)
+        .await
+        .with_context(|| format!("open database {}", db_path.display()))?;
     let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
     let state = Arc::new(AppState {
         renderer_manager: renderer_mgr,
         source_manager: Arc::new(tokio::sync::Mutex::new(source_mgr)),
         router: router.clone(),
         settings: settings_store,
+        db,
         playlist: tokio::sync::Mutex::new(control::PlaylistState::default()),
         ws_port: std::sync::atomic::AtomicU16::new(0),
         ui_path: std::sync::Mutex::new(None),
