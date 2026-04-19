@@ -29,8 +29,7 @@ Waywallen 由两部分组成，按需分别安装：
 ### 1. 安装本体
 
 **Flatpak**
-
-<a href='https://flathub.org/apps/details/org.waywallen.waywallen'><img width='240' alt='Download on Flathub' src='https://dl.flathub.org/assets/badges/flathub-badge-en.png'/></a>
+[org.waywallen.waywallen](https://github.com/hypengw/org.waywallen.waywallen)
 
 **从源码构建** —— 见 [BUILD.md](BUILD.md)。
 

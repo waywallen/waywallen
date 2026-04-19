@@ -31,8 +31,7 @@ Waywallen ships in two pieces — install them separately as needed:
 ### 1. Install the core
 
 **Flatpak**
-
-<a href='https://flathub.org/apps/details/org.waywallen.waywallen'><img width='240' alt='Download on Flathub' src='https://dl.flathub.org/assets/badges/flathub-badge-en.png'/></a>
+[org.waywallen.waywallen](https://github.com/hypengw/org.waywallen.waywallen)
 
 **From source** — see [BUILD.md](BUILD.md).
 
