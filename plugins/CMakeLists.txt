@@ -14,17 +14,7 @@ option(WAYWALLEN_BUILD_IMAGE_PLUGIN "Build the ffmpeg+Vulkan image plugin" ON)
 # target instead of rebuilding it per-subdir. Plugins that also stand alone
 # guard their own bridge block with `if(NOT TARGET waywallen::bridge)`.
 if(NOT TARGET waywallen::bridge)
-    find_package(waywallen-bridge QUIET)
-    if(NOT waywallen-bridge_FOUND)
-        set(_ww_bridge_tree "${CMAKE_CURRENT_SOURCE_DIR}/../bridge")
-        if(EXISTS "${_ww_bridge_tree}/CMakeLists.txt")
-            message(STATUS "waywallen-plugins: using in-tree bridge at ${_ww_bridge_tree}")
-            add_subdirectory("${_ww_bridge_tree}" waywallen-bridge-build EXCLUDE_FROM_ALL)
-        else()
-            message(FATAL_ERROR
-                "waywallen-bridge not found (no package, no tree at ${_ww_bridge_tree})")
-        endif()
-    endif()
+    add_subdirectory(../bridge waywallen-bridge-build)
 endif()
 
 if(WAYWALLEN_BUILD_MPV_PLUGIN)
