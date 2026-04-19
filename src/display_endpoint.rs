@@ -24,7 +24,6 @@ use std::sync::Arc;
 
 use crate::display_proto::generated::Rect;
 use crate::display_proto::{codec, opcode, Event, Request, PROTOCOL_NAME};
-use crate::dummy_fence;
 use crate::renderer_manager::{BindSnapshot, RendererHandle};
 use crate::routing::{DisplayHandle, DisplayOutEvent, DisplayRegistration, Router};
 use crate::scheduler::ProjectedConfig;
@@ -485,12 +484,9 @@ fn build_bind_event(snap: &BindSnapshot) -> Result<(Event, Vec<RawFd>)> {
 // ---------------------------------------------------------------------------
 
 fn acquire_sync_fd(renderer: &Arc<RendererHandle>, seq: u64) -> Result<OwnedFd> {
-    if let Some(fd) = renderer.clone_sync_fd(seq) {
-        log::debug!("forwarding real acquire sync_fd for seq={seq}");
-        return Ok(fd);
-    }
-    log::debug!("falling back to dummy fence for seq={seq}");
-    dummy_fence::make_signaled_dummy_fence().map_err(|e| anyhow!("dummy fence: {e}"))
+    renderer
+        .clone_sync_fd(seq)
+        .ok_or_else(|| anyhow!("acquire sync_fd for seq={seq} missing (evicted or never arrived)"))
 }
 
 async fn forward_frame_ready(

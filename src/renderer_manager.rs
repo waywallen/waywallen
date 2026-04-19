@@ -115,9 +115,8 @@ pub struct RendererHandle {
     /// entries are evicted once the map exceeds `SYNC_FD_RETENTION`.
     ///
     /// Phase 3b limitation: only one consumer gets the real fd per
-    /// (seq); additional display subscribers fall back to the
-    /// `dummy_fence` placeholder. Multi-display real-sync fan-out
-    /// will require a dup-on-take API.
+    /// (seq). Multi-display real-sync fan-out will require a
+    /// dup-on-take API.
     sync_fds: Arc<StdMutex<std::collections::VecDeque<(u64, OwnedFd)>>>,
 
     /// The child process. Kept alive so dropping the manager reaps it.

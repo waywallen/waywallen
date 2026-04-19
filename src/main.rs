@@ -6,7 +6,6 @@ mod control_proto;
 mod dbus_iface;
 mod display_endpoint;
 mod display_proto;
-mod dummy_fence;
 mod ipc;
 mod plugin;
 mod renderer_manager;
