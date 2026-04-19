@@ -206,6 +206,18 @@ async fn async_main() -> anyhow::Result<()> {
     let db = model::connect(&db_path)
         .await
         .with_context(|| format!("open database {}", db_path.display()))?;
+
+    // Persist the current scan snapshot. Double-write for now: the
+    // in-memory SourceManager stays authoritative for reads; DB will
+    // become the read path in Stage 4.
+    match model::sync::sync_source_entries(&db, "source_manager", source_mgr.list()).await {
+        Ok(summary) => log::info!(
+            "library sync: upserted {} item(s), pruned {}",
+            summary.upserted,
+            summary.deleted,
+        ),
+        Err(e) => log::warn!("library sync failed: {e:#}"),
+    }
     let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
     let state = Arc::new(AppState {
         renderer_manager: renderer_mgr,

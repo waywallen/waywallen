@@ -13,12 +13,15 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use sea_orm::{ConnectOptions, Database, DatabaseConnection};
+use sea_orm::{
+    ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, Statement,
+};
 use sea_orm_migration::MigratorTrait;
 
 pub mod entities;
 pub mod migration;
 pub mod repo;
+pub mod sync;
 
 /// Open (or create) the SQLite DB at `db_path`, run pending migrations,
 /// and hand back a pooled [`DatabaseConnection`]. The parent directory
@@ -43,6 +46,15 @@ pub async fn connect_url(url: &str) -> Result<DatabaseConnection> {
     let db = Database::connect(opt)
         .await
         .with_context(|| format!("connect {url}"))?;
+    // SQLite ignores FK declarations unless FK enforcement is opted in
+    // per-connection. Do it before migrating so CREATE TABLE's FK
+    // clauses start enforcing cascade on the very first use.
+    db.execute(Statement::from_string(
+        DatabaseBackend::Sqlite,
+        "PRAGMA foreign_keys = ON",
+    ))
+    .await
+    .context("enable sqlite foreign_keys")?;
     migration::Migrator::up(&db, None)
         .await
         .context("run migrations")?;
