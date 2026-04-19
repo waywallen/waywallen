@@ -11,8 +11,7 @@ project(waywallen-ui LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-
-option(BUILD_SHARED_LIBS "Build using shared libraries" OFF)
+set(BUILD_SHARED_LIBS OFF)
 
 find_package(Qt6 REQUIRED COMPONENTS Quick DBus Protobuf ProtobufQuick ProtobufWellKnownTypes QuickPrivate)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
