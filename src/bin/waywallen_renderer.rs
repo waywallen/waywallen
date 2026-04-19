@@ -195,12 +195,16 @@ fn run(instance: &Instance, args: &Args) -> Result<()> {
                     .handle_type(vk::ExternalSemaphoreHandleTypeFlags::SYNC_FD),
             )?
         };
+        let ts_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(1);
         let send_result = send_event(
             &stream,
             &EventMsg::FrameReady {
                 image_index: slot as u32,
                 seq,
-                ts_ns: 0,
+                ts_ns,
             },
             &[sync_fd],
         );

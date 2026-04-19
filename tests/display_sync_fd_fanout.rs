@@ -22,6 +22,7 @@ mod common;
 /// Returns the count of real `anon_inode:sync_file` fds received.
 fn run_client(sock: &PathBuf, name: &str, n_frames: usize) -> anyhow::Result<usize> {
     let stream = UnixStream::connect(sock)?;
+    stream.set_read_timeout(Some(Duration::from_secs(10)))?;
 
     // hello
     codec::send_request(
@@ -139,7 +140,7 @@ async fn two_displays_both_get_real_sync_fds() {
             test_pattern: false,
         })
         .await;
-    let _renderer_id = match spawn_res {
+    let renderer_id = match spawn_res {
         Ok(id) => id,
         Err(e) => {
             eprintln!("skip: renderer spawn: {e:#}");
@@ -148,6 +149,10 @@ async fn two_displays_both_get_real_sync_fds() {
             return;
         }
     };
+
+    if let Some(handle) = mgr.get(&renderer_id).await {
+        router.register_renderer(handle).await;
+    }
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 

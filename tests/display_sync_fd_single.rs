@@ -61,7 +61,7 @@ async fn renderer_produces_real_sync_fds() {
             test_pattern: false,
         })
         .await;
-    let _renderer_id = match spawn_res {
+    let renderer_id = match spawn_res {
         Ok(id) => id,
         Err(e) => {
             eprintln!("skip: could not spawn waywallen_renderer: {e:#}");
@@ -71,6 +71,12 @@ async fn renderer_produces_real_sync_fds() {
         }
     };
 
+    // Wire the renderer into the router — production code does this via
+    // `control::apply_entry`; the test rig has to do it explicitly.
+    if let Some(handle) = mgr.get(&renderer_id).await {
+        router.register_renderer(handle).await;
+    }
+
     // Give the renderer a moment to emit its first BindBuffers.
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -79,6 +85,7 @@ async fn renderer_produces_real_sync_fds() {
     let client = tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
         use std::os::unix::net::UnixStream;
         let stream = UnixStream::connect(&sock_for_client)?;
+        stream.set_read_timeout(Some(Duration::from_secs(10)))?;
 
         // hello / welcome
         codec::send_request(
