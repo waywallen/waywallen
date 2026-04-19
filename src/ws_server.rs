@@ -15,7 +15,7 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use crate::control_proto as pb;
 use crate::ipc::proto::ControlMsg;
 use crate::renderer_manager;
-use crate::routing::{DisplaySnapshot, RouterEvent};
+use crate::routing::{DisplaySnapshot, RendererSnapshot, RouterEvent};
 use crate::AppState;
 
 /// Bind the WebSocket control plane and return the actual local address
@@ -63,6 +63,11 @@ async fn handle_conn(
         let evt = displays_replace_event(snap);
         sink.send(Message::Binary(wrap_event(evt).encode_to_vec())).await?;
     }
+    {
+        let snap = state.router.snapshot_renderers().await;
+        let evt = renderers_replace_event(snap);
+        sink.send(Message::Binary(wrap_event(evt).encode_to_vec())).await?;
+    }
 
     loop {
         tokio::select! {
@@ -100,6 +105,9 @@ async fn handle_conn(
                         let snap = state.router.snapshot_displays().await;
                         let evt = displays_replace_event(snap);
                         sink.send(Message::Binary(wrap_event(evt).encode_to_vec())).await?;
+                        let rsnap = state.router.snapshot_renderers().await;
+                        let revt = renderers_replace_event(rsnap);
+                        sink.send(Message::Binary(wrap_event(revt).encode_to_vec())).await?;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         // Router shut down; stop emitting but keep the
@@ -167,6 +175,24 @@ fn displays_replace_event(snap: Vec<DisplaySnapshot>) -> pb::Event {
     }
 }
 
+fn renderer_snapshot_to_pb(s: RendererSnapshot) -> pb::RendererInstance {
+    pb::RendererInstance {
+        renderer_id: s.id,
+        fps: s.fps,
+        status: s.status.as_str().to_string(),
+        name: s.name,
+        pid: s.pid,
+    }
+}
+
+fn renderers_replace_event(snap: Vec<RendererSnapshot>) -> pb::Event {
+    pb::Event {
+        payload: Some(pb::event::Payload::RendererSnapshot(pb::RendererSnapshot {
+            renderers: snap.into_iter().map(renderer_snapshot_to_pb).collect(),
+        })),
+    }
+}
+
 fn router_event_to_pb(e: RouterEvent) -> pb::Event {
     match e {
         RouterEvent::DisplayUpsert(s) => pb::Event {
@@ -180,6 +206,17 @@ fn router_event_to_pb(e: RouterEvent) -> pb::Event {
             })),
         },
         RouterEvent::DisplaysReplace(list) => displays_replace_event(list),
+        RouterEvent::RendererUpsert(s) => pb::Event {
+            payload: Some(pb::event::Payload::RendererChanged(pb::RendererChanged {
+                renderer: Some(renderer_snapshot_to_pb(s)),
+            })),
+        },
+        RouterEvent::RendererRemoved(id) => pb::Event {
+            payload: Some(pb::event::Payload::RendererRemoved(pb::RendererRemoved {
+                renderer_id: id,
+            })),
+        },
+        RouterEvent::RenderersReplace(list) => renderers_replace_event(list),
     }
 }
 

@@ -229,9 +229,12 @@ message DisplayListResponse {
 
 message Event {
   oneof payload {
-    DisplaySnapshot display_snapshot = 1;
-    DisplayChanged  display_changed  = 2;
-    DisplayRemoved  display_removed  = 3;
+    DisplaySnapshot  display_snapshot  = 1;
+    DisplayChanged   display_changed   = 2;
+    DisplayRemoved   display_removed   = 3;
+    RendererSnapshot renderer_snapshot = 4;
+    RendererChanged  renderer_changed  = 5;
+    RendererRemoved  renderer_removed  = 6;
   }
 }
 
@@ -251,6 +254,23 @@ message DisplayChanged {
 // A display was unregistered. Receivers should drop the entry.
 message DisplayRemoved {
   uint64 display_id = 1;
+}
+
+// Full replacement for the active-renderer list. Sent once on WS
+// handshake and on broadcast-lag recovery.
+message RendererSnapshot {
+  repeated RendererInstance renderers = 1;
+}
+
+// A single renderer was added or its runtime fields changed (status,
+// fps). Receivers should upsert by `renderer.renderer_id`.
+message RendererChanged {
+  RendererInstance renderer = 1;
+}
+
+// A renderer was unregistered. Receivers should drop the entry.
+message RendererRemoved {
+  string renderer_id = 1;
 }
 
 // ---------------------------------------------------------------------------

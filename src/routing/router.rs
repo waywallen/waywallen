@@ -101,6 +101,43 @@ pub enum RouterEvent {
     /// A batch mutation affected many displays — send the whole list
     /// as a single replace instead of N upserts.
     DisplaysReplace(Vec<DisplaySnapshot>),
+    /// A renderer was added or its runtime fields changed (status, fps).
+    /// Receivers should upsert by `snap.id`.
+    RendererUpsert(RendererSnapshot),
+    /// A renderer was unregistered. Receivers should drop the entry.
+    RendererRemoved(RendererId),
+    /// A batch mutation affected many renderers — send the whole list
+    /// as a single replace.
+    RenderersReplace(Vec<RendererSnapshot>),
+}
+
+/// Lifecycle state of a renderer as seen by the router.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RendererStatus {
+    Playing,
+    Paused,
+}
+
+impl RendererStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Playing => "playing",
+            Self::Paused => "paused",
+        }
+    }
+}
+
+/// Read-only view of a registered renderer. Returned from
+/// `Router::snapshot_renderers`; mirrors the fields surfaced on the
+/// control-plane `RendererInstance` message.
+#[derive(Debug, Clone)]
+pub struct RendererSnapshot {
+    pub id: RendererId,
+    pub wp_type: String,
+    pub name: String,
+    pub fps: u32,
+    pub status: RendererStatus,
+    pub pid: u32,
 }
 
 /// Read-only view of a registered display. Returned from
@@ -242,9 +279,15 @@ impl Router {
                 }
             })
         };
-        let mut inner = self.inner.lock().await;
-        inner.table.add_renderer(handle);
-        inner.renderer_tasks.insert(id, task);
+        let snap_id = id.clone();
+        {
+            let mut inner = self.inner.lock().await;
+            inner.table.add_renderer(handle);
+            inner.renderer_tasks.insert(id, task);
+        }
+        if let Some(snap) = self.snapshot_renderer(&snap_id).await {
+            self.emit(RouterEvent::RendererUpsert(snap));
+        }
     }
 
     pub async fn unregister_renderer(self: &Arc<Self>, id: &str) {
@@ -258,6 +301,7 @@ impl Router {
             inner.paused_since.remove(id);
             removed.into_iter().map(|(_, did)| did).collect()
         };
+        self.emit(RouterEvent::RendererRemoved(id.to_string()));
         let had_affected = !affected.is_empty();
         for did in affected {
             self.sync_display(did).await;
@@ -433,6 +477,53 @@ impl Router {
             refresh_mhz: s.info.refresh_mhz,
             links,
         })
+    }
+
+    /// Snapshot of a single renderer by id. Returns `None` if the
+    /// renderer has been unregistered from the routing table.
+    pub async fn snapshot_renderer(self: &Arc<Self>, id: &str) -> Option<RendererSnapshot> {
+        let inner = self.inner.lock().await;
+        let handle = inner.table.get_renderer(id)?;
+        let status = if inner.paused_renderers.contains(id) {
+            RendererStatus::Paused
+        } else {
+            RendererStatus::Playing
+        };
+        Some(RendererSnapshot {
+            id: handle.id.clone(),
+            wp_type: handle.wp_type.clone(),
+            name: handle.name.clone(),
+            fps: handle.fps,
+            status,
+            pid: handle.pid.unwrap_or(0),
+        })
+    }
+
+    /// Snapshot of every registered renderer, ordered by ascending id
+    /// for UI stability. Pure read — does not touch renderer state or
+    /// emit events.
+    pub async fn snapshot_renderers(self: &Arc<Self>) -> Vec<RendererSnapshot> {
+        let inner = self.inner.lock().await;
+        let mut ids = inner.table.renderer_ids();
+        ids.sort_unstable();
+        ids.into_iter()
+            .filter_map(|id| {
+                let handle = inner.table.get_renderer(&id)?;
+                let status = if inner.paused_renderers.contains(&id) {
+                    RendererStatus::Paused
+                } else {
+                    RendererStatus::Playing
+                };
+                Some(RendererSnapshot {
+                    id: handle.id.clone(),
+                    wp_type: handle.wp_type.clone(),
+                    name: handle.name.clone(),
+                    fps: handle.fps,
+                    status,
+                    pid: handle.pid.unwrap_or(0),
+                })
+            })
+            .collect()
     }
 
     /// Snapshot of every registered display plus the enabled links
@@ -684,6 +775,7 @@ impl Router {
             }
             out
         };
+        let changed_ids: Vec<RendererId> = actions.iter().map(|(id, _)| id.clone()).collect();
         for (id, msg) in actions {
             let label = match msg {
                 ControlMsg::Pause => "pause",
@@ -694,6 +786,11 @@ impl Router {
                 log::warn!("router: {label} {id}: {e}");
             } else {
                 log::info!("router: {label} renderer {id} (ref_count diff)");
+            }
+        }
+        for id in changed_ids {
+            if let Some(snap) = self.snapshot_renderer(&id).await {
+                self.emit(RouterEvent::RendererUpsert(snap));
             }
         }
     }
@@ -1012,5 +1109,81 @@ mod tests {
         let killed = router.reap_orphans(Some("r2")).await;
         assert_eq!(killed, vec!["r1".to_string()]);
         assert_eq!(live_renderers(&mgr).await, vec!["r2".to_string()]);
+    }
+
+    // -----------------------------------------------------------------
+    // Active-sync RouterEvent::Renderer* emission
+    // -----------------------------------------------------------------
+
+    async fn recv_event(
+        rx: &mut broadcast::Receiver<RouterEvent>,
+    ) -> Option<RouterEvent> {
+        match tokio::time::timeout(Duration::from_millis(500), rx.recv()).await {
+            Ok(Ok(ev)) => Some(ev),
+            _ => None,
+        }
+    }
+
+    #[tokio::test]
+    async fn renderer_upsert_on_register() {
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+        let mut rx = router.subscribe_events();
+
+        add_stub_renderer(&mgr, &router, "R1").await;
+
+        let evt = recv_event(&mut rx).await.expect("no event");
+        match evt {
+            RouterEvent::RendererUpsert(snap) => {
+                assert_eq!(snap.id, "R1");
+                assert_eq!(snap.wp_type, "scene");
+                assert_eq!(snap.status, RendererStatus::Playing);
+                assert_eq!(snap.name, "test-stub");
+            }
+            other => panic!("expected RendererUpsert, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn renderer_removed_on_unregister() {
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+        let mut rx = router.subscribe_events();
+
+        add_stub_renderer(&mgr, &router, "R1").await;
+        let _ = recv_event(&mut rx).await; // consume the RendererUpsert
+
+        router.unregister_renderer("R1").await;
+        let evt = recv_event(&mut rx).await.expect("no event");
+        match evt {
+            RouterEvent::RendererRemoved(id) => assert_eq!(id, "R1"),
+            other => panic!("expected RendererRemoved, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn renderer_upsert_on_pause_transition() {
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+
+        add_stub_renderer(&mgr, &router, "R1").await;
+        let display = router.register_display(reg("D1", 1920, 1080)).await;
+
+        // Subscribe *after* setup so we only observe the unregister path.
+        let mut rx = router.subscribe_events();
+
+        router.unregister_display(display.id).await;
+
+        let mut saw_paused = false;
+        for _ in 0..6 {
+            let Some(evt) = recv_event(&mut rx).await else { break };
+            if let RouterEvent::RendererUpsert(snap) = evt {
+                if snap.id == "R1" && snap.status == RendererStatus::Paused {
+                    saw_paused = true;
+                    break;
+                }
+            }
+        }
+        assert!(saw_paused, "expected R1 Paused upsert after display unregister");
     }
 }

@@ -24,6 +24,7 @@ public:
           m_qml_engine(Box<QQmlApplicationEngine>::make()),
           m_backend(Box<Backend>::make(port)),
           m_display_mgr(Box<DisplayManager>::make()),
+          m_renderer_mgr(Box<RendererManager>::make()),
           m_gui_context(Box<QtExecutionContext>::make(
               QThread::currentThread(),
               (QEvent::Type)QEvent::registerEventType())),
@@ -41,6 +42,7 @@ public:
     Box<QQmlApplicationEngine> m_qml_engine;
     Box<Backend>               m_backend;
     Box<DisplayManager>        m_display_mgr;
+    Box<RendererManager>       m_renderer_mgr;
     Box<QtExecutionContext>    m_gui_context;
     asio::thread_pool          m_pool;
     quint16                    m_port;
@@ -112,6 +114,7 @@ void App::init() {
     // Hook DisplayManager up to Backend events *before* connectTo so
     // the snapshot the daemon pushes right after the handshake lands.
     d->m_display_mgr->attachTo(d->m_backend.get());
+    d->m_renderer_mgr->attachTo(d->m_backend.get());
 
     // Connect to the daemon's WebSocket (no-op if port is still 0).
     d->m_backend->connectTo();

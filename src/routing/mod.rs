@@ -17,6 +17,6 @@ pub mod table;
 
 pub use router::{
     DisplayHandle, DisplayLinkSnapshot, DisplayOutEvent, DisplayRegistration, DisplaySnapshot,
-    Router, RouterEvent,
+    RendererSnapshot, RendererStatus, Router, RouterEvent,
 };
 pub use table::{Link, LinkId, RoutingTable};

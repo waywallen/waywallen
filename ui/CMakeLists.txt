@@ -60,6 +60,7 @@ set(SOURCES_NO_MOC
   src/app.cpp
   src/daemon_dbus.cpp
   src/display.cpp
+  src/renderer.cpp
   src/query/query.cpp
   src/query/wallpaper_query.cpp
   src/query/renderer_query.cpp
@@ -77,6 +78,7 @@ set(MOC_SOURCE_FILES
   src/backend.cppm
   src/daemon_dbus.cppm
   src/display.cppm
+  src/renderer.cppm
   src/query/query.cppm
   src/query/wallpaper_query.cppm
   src/query/renderer_query.cppm
