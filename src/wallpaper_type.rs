@@ -23,4 +23,27 @@ pub struct WallpaperEntry {
     pub preview: Option<String>,
     /// Type-specific metadata. For scene: {"pkg": "...", "assets": "..."}.
     pub metadata: HashMap<String, String>,
+    /// Free-form description (e.g. Wallpaper Engine `project.description`).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Source-assigned tags. Case-insensitive deduped at the DB layer.
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// Stable external identifier (e.g. Wallpaper Engine `workshopid`).
+    #[serde(default)]
+    pub external_id: Option<String>,
+    /// Name of the source plugin that produced this entry. Written by
+    /// `SourceManager::scan_plugin` — Lua plugins do not set it
+    /// themselves. Defaults to empty so deserializing older snapshots
+    /// stays backwards compatible.
+    #[serde(default)]
+    pub plugin_name: String,
+    /// Absolute path of the directory the plugin was scanning when it
+    /// produced this entry. Serves two purposes:
+    ///   - `library.path` = this value (absolute folder).
+    ///   - `item.relative_path` = `resource` minus this prefix.
+    /// Empty means "unrooted" — the sync layer drops such entries
+    /// because it cannot address them relatively.
+    #[serde(default)]
+    pub library_root: String,
 }

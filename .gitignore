@@ -4,4 +4,5 @@ target
 /Cargo.lock
 /.env
 build
+/build*
 .cache

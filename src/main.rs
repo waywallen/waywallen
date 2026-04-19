@@ -207,16 +207,42 @@ async fn async_main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("open database {}", db_path.display()))?;
 
-    // Persist the current scan snapshot. Double-write for now: the
-    // in-memory SourceManager stays authoritative for reads; DB will
-    // become the read path in Stage 4.
-    match model::sync::sync_source_entries(&db, "source_manager", source_mgr.list()).await {
-        Ok(summary) => log::info!(
-            "library sync: upserted {} item(s), pruned {}",
-            summary.upserted,
-            summary.deleted,
-        ),
-        Err(e) => log::warn!("library sync failed: {e:#}"),
+    // Persist the current scan snapshot per plugin. Double-write for
+    // now: the in-memory SourceManager stays authoritative for reads
+    // until the RPC surface is moved over.
+    match source_mgr.plugins() {
+        Ok(plugin_infos) => {
+            for info in &plugin_infos {
+                let entries: Vec<_> = source_mgr
+                    .list()
+                    .iter()
+                    .filter(|e| e.plugin_name == info.name)
+                    .cloned()
+                    .collect();
+                match model::sync::sync_plugin_entries(
+                    &db,
+                    model::sync::PluginRef {
+                        name: &info.name,
+                        version: &info.version,
+                    },
+                    &entries,
+                )
+                .await
+                {
+                    Ok(summary) => log::info!(
+                        "sync plugin={} v{}: +{} / -{} items, -{} libraries, {} dropped",
+                        info.name,
+                        info.version,
+                        summary.items_upserted,
+                        summary.items_deleted,
+                        summary.libraries_deleted,
+                        summary.dropped,
+                    ),
+                    Err(e) => log::warn!("sync plugin={} failed: {e:#}", info.name),
+                }
+            }
+        }
+        Err(e) => log::warn!("list plugins for sync failed: {e:#}"),
     }
     let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
     let state = Arc::new(AppState {

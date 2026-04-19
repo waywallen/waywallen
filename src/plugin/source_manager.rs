@@ -135,8 +135,13 @@ impl SourceManager {
                 name: tbl.get("name").unwrap_or_default(),
                 wp_type: tbl.get("wp_type").unwrap_or_default(),
                 resource: tbl.get("resource").unwrap_or_default(),
-                preview: tbl.get("preview").ok(),
+                preview: tbl.get::<String>("preview").ok(),
                 metadata: parse_lua_string_map(&tbl, "metadata"),
+                plugin_name: name.to_owned(),
+                library_root: tbl.get("library_root").unwrap_or_default(),
+                description: tbl.get::<String>("description").ok(),
+                tags: tbl.get::<Vec<String>>("tags").unwrap_or_default(),
+                external_id: tbl.get::<String>("external_id").ok(),
             };
             let idx = self.entries.len();
             self.by_type
@@ -389,6 +394,7 @@ return M
         assert_eq!(mgr.list().len(), 1);
         assert_eq!(mgr.list()[0].id, "w1");
         assert_eq!(mgr.list()[0].wp_type, "image");
+        assert_eq!(mgr.list()[0].plugin_name, "test");
 
         let by_type = mgr.list_by_type("image");
         assert_eq!(by_type.len(), 1);
