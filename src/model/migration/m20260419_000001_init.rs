@@ -94,7 +94,7 @@ impl MigrationTrait for Migration {
                     )
                     .col(ColumnDef::new(Item::PluginId).big_integer().not_null())
                     .col(ColumnDef::new(Item::LibraryId).big_integer().not_null())
-                    .col(ColumnDef::new(Item::RelativePath).text().not_null())
+                    .col(ColumnDef::new(Item::Path).text().not_null())
                     .col(ColumnDef::new(Item::Type).text().not_null())
                     .col(
                         ColumnDef::new(Item::DisplayName)
@@ -105,12 +105,6 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(Item::PreviewPath).text().null())
                     .col(ColumnDef::new(Item::Description).text().null())
                     .col(ColumnDef::new(Item::ExternalId).text().null())
-                    .col(
-                        ColumnDef::new(Item::MetadataJson)
-                            .text()
-                            .not_null()
-                            .default("{}"),
-                    )
                     .foreign_key(
                         ForeignKey::create()
                             .name("fk_item_plugin")
@@ -135,7 +129,7 @@ impl MigrationTrait for Migration {
                     .name("idx_item_library_path")
                     .table(Item::Table)
                     .col(Item::LibraryId)
-                    .col(Item::RelativePath)
+                    .col(Item::Path)
                     .unique()
                     .to_owned(),
             )
@@ -257,13 +251,12 @@ enum Item {
     Id,
     PluginId,
     LibraryId,
-    RelativePath,
+    Path,
     Type,
     DisplayName,
     PreviewPath,
     Description,
     ExternalId,
-    MetadataJson,
 }
 
 #[derive(DeriveIden)]

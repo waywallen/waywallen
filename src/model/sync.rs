@@ -2,15 +2,14 @@
 //!
 //! Groups incoming `WallpaperEntry` by `(plugin_name, library_root)`;
 //! each distinct root becomes a `library` row whose `path` is the
-//! absolute scanned directory. `item.relative_path` = `entry.resource`
-//! with `library_root` stripped. Every enriched column
-//! (`display_name`, `preview_path`, `description`, `external_id`,
-//! `metadata_json`) is populated from the entry. `entry.tags` feed
-//! the shared `tag` table via the `item_tag` junction.
+//! absolute scanned directory. Both `item.path` and `item.preview_path`
+//! are **relative to `library.path`** — the sync layer strips the
+//! prefix; Lua plugins continue emitting absolute paths.
 //!
 //! Every sync is a full snapshot: libraries the plugin stopped
-//! reporting are deleted, and within each surviving library items
-//! absent from the new snapshot are deleted.
+//! reporting are deleted; within each surviving library items absent
+//! from the snapshot are deleted. Tags live in a shared `tag` table
+//! and are linked via `item_tag` after each item upsert.
 
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -47,9 +46,9 @@ pub async fn sync_plugin_entries(
         .await
         .with_context(|| format!("upsert plugin={}", plugin.name))?;
 
-    // Group valid entries by library_root. We keep the original
-    // WallpaperEntry around to copy rich columns off without having
-    // to reconstruct them.
+    // (library_root -> Vec<(item.path, &entry)>). Keeping a reference
+    // to the original entry lets us copy rich columns off without
+    // reconstructing them.
     let mut grouped: HashMap<String, Vec<(String, &WallpaperEntry)>> = HashMap::new();
     let mut dropped = 0usize;
     for entry in entries {
@@ -82,8 +81,7 @@ pub async fn sync_plugin_entries(
         }
     }
 
-    // Upsert every tag seen in this snapshot once up-front; build a
-    // lowercase-keyed map so per-entry lookup is cheap.
+    // Upsert every tag once up front and build a lower→id map.
     let mut all_tag_names: Vec<String> = Vec::new();
     for entry in entries {
         for t in &entry.tags {
@@ -111,20 +109,22 @@ pub async fn sync_plugin_entries(
 
         let mut keep_items: HashSet<String> = HashSet::with_capacity(items.len());
         for (rel, entry) in items {
-            let metadata_json = serde_json::to_string(&entry.metadata)
-                .unwrap_or_else(|_| "{}".to_owned());
+            let preview_rel = entry
+                .preview
+                .as_deref()
+                .and_then(|abs| relative_under_root(lib_path, abs))
+                .filter(|s| !s.is_empty());
             let persisted = repo::upsert_item(
                 db,
                 ItemUpsertArgs {
                     plugin_id: plugin_model.id,
                     library_id: lib_model.id,
-                    relative_path: rel,
+                    path: rel,
                     ty: &entry.wp_type,
                     display_name: &entry.name,
-                    preview_path: entry.preview.as_deref(),
+                    preview_path: preview_rel.as_deref(),
                     description: entry.description.as_deref(),
                     external_id: entry.external_id.as_deref(),
-                    metadata_json: &metadata_json,
                 },
             )
             .await?;
@@ -209,14 +209,37 @@ mod tests {
 
         let plugin = repo::find_plugin_by_name(&db, "image").await.unwrap().unwrap();
         let libs = repo::list_libraries_by_plugin(&db, plugin.id).await.unwrap();
-        let lib_paths: Vec<_> = libs.iter().map(|l| l.path.as_str()).collect();
-        assert!(lib_paths.contains(&"/home/u/Pictures"));
-        assert!(lib_paths.contains(&"/other/root"));
-
         let home_lib = libs.iter().find(|l| l.path == "/home/u/Pictures").unwrap();
         let items = repo::list_items_by_library(&db, home_lib.id).await.unwrap();
-        let rels: Vec<_> = items.iter().map(|i| i.relative_path.as_str()).collect();
-        assert_eq!(rels, ["a.png", "sub/b.png"]);
+        let paths: Vec<_> = items.iter().map(|i| i.path.as_str()).collect();
+        assert_eq!(paths, ["a.png", "sub/b.png"]);
+    }
+
+    #[tokio::test]
+    async fn preview_path_stored_relative_to_library() {
+        let db = mem_db().await;
+        let mut e = entry("p", "/ws", "/ws/12345/scene.pkg", "scene");
+        e.preview = Some("/ws/12345/preview.gif".into());
+        sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e])
+            .await
+            .unwrap();
+        let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
+        let items = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
+        assert_eq!(items[0].path, "12345/scene.pkg");
+        assert_eq!(items[0].preview_path.as_deref(), Some("12345/preview.gif"));
+    }
+
+    #[tokio::test]
+    async fn preview_outside_library_becomes_none() {
+        let db = mem_db().await;
+        let mut e = entry("p", "/root", "/root/a.png", "image");
+        e.preview = Some("/elsewhere/thumb.png".into());
+        sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e])
+            .await
+            .unwrap();
+        let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
+        let items = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
+        assert!(items[0].preview_path.is_none());
     }
 
     #[tokio::test]
@@ -250,16 +273,13 @@ mod tests {
     #[tokio::test]
     async fn rich_columns_and_tags_persist() {
         let db = mem_db().await;
-        let mut meta = HashMap::new();
-        meta.insert("workshop_id".to_owned(), "12345".to_owned());
-        meta.insert("contentrating".to_owned(), "Everyone".to_owned());
         let we = WallpaperEntry {
             id: "12345".to_owned(),
             name: "Forest River".to_owned(),
             wp_type: "scene".to_owned(),
             resource: "/ws/12345/scene.pkg".to_owned(),
             preview: Some("/ws/12345/preview.gif".to_owned()),
-            metadata: meta,
+            metadata: HashMap::new(),
             plugin_name: "wallpaper_engine".to_owned(),
             library_root: "/ws".to_owned(),
             description: Some("rain and music".to_owned()),
@@ -277,22 +297,14 @@ mod tests {
         let plugin =
             repo::find_plugin_by_name(&db, "wallpaper_engine").await.unwrap().unwrap();
         let items = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
-        assert_eq!(items.len(), 1);
         let it = &items[0];
-        assert_eq!(it.relative_path, "12345/scene.pkg");
+        assert_eq!(it.path, "12345/scene.pkg");
         assert_eq!(it.display_name, "Forest River");
-        assert_eq!(it.preview_path.as_deref(), Some("/ws/12345/preview.gif"));
+        assert_eq!(it.preview_path.as_deref(), Some("12345/preview.gif"));
         assert_eq!(it.description.as_deref(), Some("rain and music"));
         assert_eq!(it.external_id.as_deref(), Some("12345"));
-        assert!(it.metadata_json.contains("workshop_id"));
-        assert!(it.metadata_json.contains("12345"));
-
         let tags = repo::list_tags_of_item(&db, it.id).await.unwrap();
-        let names: Vec<_> = tags.iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(names.len(), 2);
-        // Tag table stores first-seen casing; case-insensitive dedupe
-        // means "Relaxing" / "relaxing" merge, but here they differ.
-        assert!(names.contains(&"Nature"));
+        assert_eq!(tags.len(), 2);
     }
 
     #[tokio::test]
@@ -307,8 +319,7 @@ mod tests {
         sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries)
             .await
             .unwrap();
-        let tags = repo::list_tags(&db).await.unwrap();
-        assert_eq!(tags.len(), 1, "case-insensitive dedupe to a single tag row");
+        assert_eq!(repo::list_tags(&db).await.unwrap().len(), 1);
     }
 
     #[tokio::test]

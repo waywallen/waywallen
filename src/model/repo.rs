@@ -156,12 +156,12 @@ pub async fn delete_libraries_missing(
 // item
 // ---------------------------------------------------------------------------
 
-/// Payload for [`upsert_item`]. All fields are ephemeral `&str`
-/// borrows so the caller keeps ownership of the underlying entry.
+/// Payload for [`upsert_item`]. `path` / `preview_path` are both
+/// relative to `library.path` — callers own the stripping.
 pub struct ItemUpsertArgs<'a> {
     pub plugin_id: i64,
     pub library_id: i64,
-    pub relative_path: &'a str,
+    pub path: &'a str,
     /// Stored lowercase by [`upsert_item`] so `"Scene"` and `"scene"`
     /// don't split on reads.
     pub ty: &'a str,
@@ -169,13 +169,11 @@ pub struct ItemUpsertArgs<'a> {
     pub preview_path: Option<&'a str>,
     pub description: Option<&'a str>,
     pub external_id: Option<&'a str>,
-    pub metadata_json: &'a str,
 }
 
-/// Upsert an item keyed by `(library_id, relative_path)`. Every
-/// non-key column is refreshed on conflict (new scan is truth).
-/// Returns the stored [`item::Model`] — the caller can use
-/// `model.id` for tag linkage without an extra round-trip.
+/// Upsert an item keyed by `(library_id, path)`. Every non-key column
+/// is refreshed on conflict (new scan is truth). Returns the stored
+/// [`item::Model`] — the caller can use `model.id` for tag linkage.
 pub async fn upsert_item(
     db: &DatabaseConnection,
     args: ItemUpsertArgs<'_>,
@@ -184,18 +182,17 @@ pub async fn upsert_item(
     let am = item::ActiveModel {
         plugin_id: Set(args.plugin_id),
         library_id: Set(args.library_id),
-        relative_path: Set(args.relative_path.to_owned()),
-        ty: Set(ty_norm.clone()),
+        path: Set(args.path.to_owned()),
+        ty: Set(ty_norm),
         display_name: Set(args.display_name.to_owned()),
         preview_path: Set(args.preview_path.map(str::to_owned)),
         description: Set(args.description.map(str::to_owned)),
         external_id: Set(args.external_id.map(str::to_owned)),
-        metadata_json: Set(args.metadata_json.to_owned()),
         ..Default::default()
     };
     item::Entity::insert(am)
         .on_conflict(
-            OnConflict::columns([item::Column::LibraryId, item::Column::RelativePath])
+            OnConflict::columns([item::Column::LibraryId, item::Column::Path])
                 .update_columns([
                     item::Column::Ty,
                     item::Column::PluginId,
@@ -203,29 +200,18 @@ pub async fn upsert_item(
                     item::Column::PreviewPath,
                     item::Column::Description,
                     item::Column::ExternalId,
-                    item::Column::MetadataJson,
                 ])
                 .to_owned(),
         )
         .exec(db)
         .await
-        .with_context(|| {
-            format!(
-                "upsert item lib={} rel={}",
-                args.library_id, args.relative_path
-            )
-        })?;
+        .with_context(|| format!("upsert item lib={} path={}", args.library_id, args.path))?;
     item::Entity::find()
         .filter(item::Column::LibraryId.eq(args.library_id))
-        .filter(item::Column::RelativePath.eq(args.relative_path))
+        .filter(item::Column::Path.eq(args.path))
         .one(db)
         .await
-        .with_context(|| {
-            format!(
-                "reload item lib={} rel={}",
-                args.library_id, args.relative_path
-            )
-        })?
+        .with_context(|| format!("reload item lib={} path={}", args.library_id, args.path))?
         .ok_or_else(|| anyhow::anyhow!("reloaded item missing after upsert"))
 }
 
@@ -235,7 +221,7 @@ pub async fn list_items_by_library(
 ) -> Result<Vec<item::Model>> {
     item::Entity::find()
         .filter(item::Column::LibraryId.eq(library_id))
-        .order_by_asc(item::Column::RelativePath)
+        .order_by_asc(item::Column::Path)
         .all(db)
         .await
         .with_context(|| format!("select items lib={library_id}"))
@@ -248,7 +234,7 @@ pub async fn list_items_by_plugin(
     item::Entity::find()
         .filter(item::Column::PluginId.eq(plugin_id))
         .order_by_asc(item::Column::LibraryId)
-        .order_by_asc(item::Column::RelativePath)
+        .order_by_asc(item::Column::Path)
         .all(db)
         .await
         .with_context(|| format!("select items plugin={plugin_id}"))
@@ -261,7 +247,7 @@ pub async fn delete_items_missing(
 ) -> Result<u64> {
     let mut q = item::Entity::delete_many().filter(item::Column::LibraryId.eq(library_id));
     if !keep.is_empty() {
-        q = q.filter(item::Column::RelativePath.is_not_in(keep.iter().cloned()));
+        q = q.filter(item::Column::Path.is_not_in(keep.iter().cloned()));
     }
     let res = q
         .exec(db)
@@ -282,7 +268,6 @@ pub async fn upsert_tags(
     db: &DatabaseConnection,
     names: &[String],
 ) -> Result<Vec<tag::Model>> {
-    // Deduplicate case-insensitively while preserving first-seen casing.
     let mut seen: HashSet<String> = HashSet::new();
     let mut unique_inputs: Vec<&str> = Vec::new();
     for n in names {
@@ -317,8 +302,8 @@ pub async fn upsert_tags(
     Ok(out)
 }
 
-/// Replace the complete tag set of an item. Runs DELETE + INSERT in
-/// a single transaction so partial updates never leak out.
+/// Replace the complete tag set of an item. DELETE + INSERT in one
+/// transaction.
 pub async fn replace_item_tags(
     db: &DatabaseConnection,
     item_id: i64,
@@ -330,8 +315,6 @@ pub async fn replace_item_tags(
         .exec(&tx)
         .await
         .with_context(|| format!("clear item_tag item={item_id}"))?;
-    // Dedupe tag_ids to keep the junction clean; composite PK would
-    // reject duplicates anyway but we'd rather not roundtrip twice.
     let unique: HashSet<i64> = tag_ids.iter().copied().collect();
     if !unique.is_empty() {
         let rows: Vec<item_tag::ActiveModel> = unique
@@ -393,17 +376,21 @@ mod tests {
         connect_url("sqlite::memory:").await.unwrap()
     }
 
-    fn minimal_args<'a>(plugin_id: i64, library_id: i64, rel: &'a str, ty: &'a str) -> ItemUpsertArgs<'a> {
+    fn minimal_args<'a>(
+        plugin_id: i64,
+        library_id: i64,
+        path: &'a str,
+        ty: &'a str,
+    ) -> ItemUpsertArgs<'a> {
         ItemUpsertArgs {
             plugin_id,
             library_id,
-            relative_path: rel,
+            path,
             ty,
             display_name: "",
             preview_path: None,
             description: None,
             external_id: None,
-            metadata_json: "{}",
         }
     }
 
@@ -411,7 +398,6 @@ mod tests {
     async fn upsert_plugin_inserts_then_updates_version() {
         let db = mem_db().await;
         let p1 = upsert_plugin(&db, "wescene", "1.0").await.unwrap();
-        assert_eq!(p1.version, "1.0");
         let p2 = upsert_plugin(&db, "wescene", "1.1").await.unwrap();
         assert_eq!(p2.id, p1.id);
         assert_eq!(p2.version, "1.1");
@@ -437,23 +423,22 @@ mod tests {
             ItemUpsertArgs {
                 plugin_id: p.id,
                 library_id: lib.id,
-                relative_path: "a.png",
+                path: "a.png",
                 ty: "Scene",
                 display_name: "Hello",
-                preview_path: Some("/p/thumb.jpg"),
+                preview_path: Some("thumb.jpg"),
                 description: Some("desc"),
                 external_id: Some("wk-1"),
-                metadata_json: r#"{"scene":"/x"}"#,
             },
         )
         .await
         .unwrap();
         assert!(m.id > 0);
-        assert_eq!(m.ty, "scene"); // lowercased
+        assert_eq!(m.ty, "scene");
+        assert_eq!(m.path, "a.png");
         assert_eq!(m.display_name, "Hello");
-        assert_eq!(m.preview_path.as_deref(), Some("/p/thumb.jpg"));
+        assert_eq!(m.preview_path.as_deref(), Some("thumb.jpg"));
         assert_eq!(m.external_id.as_deref(), Some("wk-1"));
-        assert_eq!(m.metadata_json, r#"{"scene":"/x"}"#);
     }
 
     #[tokio::test]
@@ -466,13 +451,12 @@ mod tests {
             ItemUpsertArgs {
                 plugin_id: p.id,
                 library_id: lib.id,
-                relative_path: "a.png",
+                path: "a.png",
                 ty: "image",
                 display_name: "Old",
                 preview_path: None,
                 description: None,
                 external_id: None,
-                metadata_json: "{}",
             },
         )
         .await
@@ -482,22 +466,21 @@ mod tests {
             ItemUpsertArgs {
                 plugin_id: p.id,
                 library_id: lib.id,
-                relative_path: "a.png",
+                path: "a.png",
                 ty: "GIF",
                 display_name: "New",
-                preview_path: Some("/new/preview.png"),
+                preview_path: Some("new/preview.png"),
                 description: Some("now animated"),
                 external_id: Some("ext-42"),
-                metadata_json: r#"{"k":"v"}"#,
             },
         )
         .await
         .unwrap();
         assert_eq!(updated.ty, "gif");
         assert_eq!(updated.display_name, "New");
+        assert_eq!(updated.preview_path.as_deref(), Some("new/preview.png"));
         assert_eq!(updated.description.as_deref(), Some("now animated"));
         assert_eq!(updated.external_id.as_deref(), Some("ext-42"));
-        assert_eq!(updated.metadata_json, r#"{"k":"v"}"#);
     }
 
     #[tokio::test]
@@ -541,10 +524,8 @@ mod tests {
         replace_item_tags(&db, item.id, &[ids["Anime"], ids["Nature"]])
             .await
             .unwrap();
-        let after = list_tags_of_item(&db, item.id).await.unwrap();
-        assert_eq!(after.len(), 2);
+        assert_eq!(list_tags_of_item(&db, item.id).await.unwrap().len(), 2);
 
-        // Replace wipes the previous set.
         replace_item_tags(&db, item.id, &[ids["Game"]]).await.unwrap();
         let after = list_tags_of_item(&db, item.id).await.unwrap();
         assert_eq!(after.len(), 1);
@@ -566,9 +547,7 @@ mod tests {
         let tags = upsert_tags(&db, &["Shared".into()]).await.unwrap();
         replace_item_tags(&db, i1.id, &[tags[0].id]).await.unwrap();
         replace_item_tags(&db, i2.id, &[tags[0].id]).await.unwrap();
-
-        let hits = list_items_by_tag(&db, tags[0].id).await.unwrap();
-        assert_eq!(hits.len(), 2);
+        assert_eq!(list_items_by_tag(&db, tags[0].id).await.unwrap().len(), 2);
     }
 
     #[tokio::test]
@@ -582,8 +561,6 @@ mod tests {
         let tags = upsert_tags(&db, &["Anime".into()]).await.unwrap();
         replace_item_tags(&db, item.id, &[tags[0].id]).await.unwrap();
 
-        // Dropping the library cascades to item, which must cascade
-        // to item_tag — the tag row itself survives.
         remove_library(&db, lib.id).await.unwrap();
         assert!(list_items_by_tag(&db, tags[0].id).await.unwrap().is_empty());
         assert_eq!(list_tags(&db).await.unwrap().len(), 1);
@@ -620,7 +597,6 @@ mod tests {
         upsert_item(&db, minimal_args(p.id, l2.id, "z", "image"))
             .await
             .unwrap();
-
         let keep: HashSet<String> = ["a".to_owned()].into_iter().collect();
         let deleted = delete_items_missing(&db, l1.id, &keep).await.unwrap();
         assert_eq!(deleted, 2);
@@ -637,11 +613,9 @@ mod tests {
         upsert_item(&db, minimal_args(p.id, drop_lib.id, "x", "image"))
             .await
             .unwrap();
-
         let keep_set: HashSet<String> = ["/keep".to_owned()].into_iter().collect();
         let deleted = delete_libraries_missing(&db, p.id, &keep_set).await.unwrap();
         assert_eq!(deleted, 1);
-
         let remaining = list_libraries_by_plugin(&db, p.id).await.unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, keep_lib.id);

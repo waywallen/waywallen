@@ -2,8 +2,8 @@
 //!
 //! `plugin_id` is denormalized from `library.plugin_id` to keep
 //! per-plugin filter queries cheap; the repo layer enforces they
-//! stay consistent. `metadata_json` stores the raw per-entry
-//! metadata bag as a JSON string (SQLite TEXT).
+//! stay consistent. `path` / `preview_path` are stored **relative to
+//! `library.path`** so the physical root can move without a rewrite.
 
 use sea_orm::entity::prelude::*;
 
@@ -14,14 +14,13 @@ pub struct Model {
     pub id: i64,
     pub plugin_id: i64,
     pub library_id: i64,
-    pub relative_path: String,
+    pub path: String,
     #[sea_orm(column_name = "type")]
     pub ty: String,
     pub display_name: String,
     pub preview_path: Option<String>,
     pub description: Option<String>,
     pub external_id: Option<String>,
-    pub metadata_json: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -14,7 +14,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(BUILD_SHARED_LIBS "Build using shared libraries" OFF)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick DBus Protobuf ProtobufQuick ProtobufWellKnownTypes)
+find_package(Qt6 REQUIRED COMPONENTS Quick DBus Protobuf ProtobufQuick ProtobufWellKnownTypes QuickPrivate)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
 
 if(QT_KNOWN_POLICY_QTP0004)
@@ -178,7 +178,7 @@ target_link_libraries(waywallen-qml
     Qt6::ProtobufQuick
     Qt6::ProtobufWellKnownTypes
     waywallen-control
-    qml_material
+    qml_material::qml_material
     ncrequest
     qextra
 )
