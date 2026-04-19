@@ -15,7 +15,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(BUILD_SHARED_LIBS "Build using shared libraries" OFF)
 
 find_package(Qt6 REQUIRED COMPONENTS Quick DBus Protobuf ProtobufQuick ProtobufWellKnownTypes)
-include(${CMAKE_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/SplitMocFiles.cmake)
 
 if(QT_KNOWN_POLICY_QTP0004)
   qt_policy(SET QTP0003 NEW)

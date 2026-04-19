@@ -55,7 +55,7 @@ function(split_moc_files)
   set(AUTOGEN_DIR "${BINARY_DIR}/${ARG_TARGET}_autogen/include")
 
   # Path to the implementation script
-  set(SPLIT_SCRIPT "${CMAKE_SOURCE_DIR}/cmake/SplitSingleMocImpl.cmake")
+  set(SPLIT_SCRIPT "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/SplitSingleMocImpl.cmake")
 
   # Create individual custom commands for each .moc file
   set(MOC_SPLIT_OUTPUTS "")

@@ -120,10 +120,10 @@ macro(_fetchdeps_fetch_one _fd_entry _fd_source_root)
           "fetchdeps: '${_fd_name}' type=git requires one of commit/tag/branch")
       endif()
 
-      if(_fd_dshallow STREQUAL "true")
-        list(APPEND _fd_declare_args GIT_SHALLOW FALSE)
-      else()
+      if(_fd_dshallow STREQUAL "OFF")
         list(APPEND _fd_declare_args GIT_SHALLOW TRUE)
+      else()
+        list(APPEND _fd_declare_args GIT_SHALLOW FALSE)
       endif()
 
     elseif(_fd_dtype STREQUAL "archive" OR _fd_dtype STREQUAL "file")
