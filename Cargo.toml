@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "tools/wayproto-gen", "displays/layer-shell"]
+
 [package]
 name = "waywallen"
 version = "0.1.0"

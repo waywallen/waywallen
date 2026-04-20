@@ -1,0 +1,8 @@
+# kde-plasma — Plasma 6 integration via the waywallen-kde kpackage.
+
+
+[display]
+name = "kde-plasma"
+de = ["kde"]
+priority = 100
+spawn = "external"

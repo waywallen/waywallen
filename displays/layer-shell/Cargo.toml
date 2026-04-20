@@ -1,0 +1,22 @@
+[package]
+name = "waywallen-display-layer-shell"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "waywallen-display-layer-shell"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.10"
+# Reuse the daemon's display-wire protocol codec so the bin speaks the
+# same bytes as `waywallen-display-v1` without a reimplementation.
+waywallen = { path = "../.." }
+# Wayland client runtime + the two protocol extensions we need:
+# zwlr_layer_shell_v1 (background surface) and zwp_linux_dmabuf_v1
+# (zero-copy wl_buffer import from daemon-supplied DMA-BUF fds).
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }

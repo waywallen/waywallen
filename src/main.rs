@@ -8,6 +8,7 @@ mod control_proto;
 mod dbus_iface;
 mod display_endpoint;
 mod display_proto;
+mod display_spawner;
 mod ipc;
 mod model;
 mod plugin;
@@ -59,6 +60,13 @@ struct Args {
     no_ui: bool,
     no_tray: bool,
     plugin_dirs: Vec<PathBuf>,
+    /// Force a specific display backend by manifest `name`, bypassing
+    /// DE auto-detection. Still subject to "exists in the registry".
+    display_backend: Option<String>,
+    /// Disable the daemon's display-backend auto-spawn entirely. The
+    /// UDS endpoint still listens for external consumers (e.g. an
+    /// already-installed waywallen-kde kpackage).
+    no_display: bool,
 }
 
 fn parse_args() -> Args {
@@ -68,6 +76,8 @@ fn parse_args() -> Args {
         no_ui: false,
         no_tray: false,
         plugin_dirs: Vec::new(),
+        display_backend: None,
+        no_display: false,
     };
 
     let mut it = std::env::args().skip(1);
@@ -76,6 +86,13 @@ fn parse_args() -> Args {
             "--ws-port" => {
                 let val = it.next().expect("--ws-port requires a value");
                 args.ws_port = val.parse().expect("--ws-port must be a valid port number");
+            }
+            "--display-backend" => {
+                let val = it.next().expect("--display-backend requires a name");
+                args.display_backend = Some(val);
+            }
+            "--no-display" => {
+                args.no_display = true;
             }
             "--ui" => {
                 let val = it.next().expect("--ui requires a path");
@@ -93,7 +110,7 @@ fn parse_args() -> Args {
             }
             other => {
                 eprintln!("unknown argument: {other}");
-                eprintln!("usage: waywallen [--ws-port PORT] [--ui PATH] [--no-ui] [--no-tray] [--plugin PATH]...");
+                eprintln!("usage: waywallen [--ws-port PORT] [--ui PATH] [--no-ui] [--no-tray] [--plugin PATH]... [--display-backend NAME] [--no-display]");
                 std::process::exit(1);
             }
         }
@@ -269,6 +286,63 @@ async fn async_main() -> anyhow::Result<()> {
         state.playlist.lock().await.refresh(ids);
     }
 
+    // Display backend registry + auto-selection. This does not spawn the
+    // backend yet (that lands in a follow-up); for now we log the pick
+    // so `journalctl -u waywallen` shows what would have launched.
+    let mut display_registry = plugin::display_registry::build_default_registry()
+        .unwrap_or_else(|e| {
+            log::warn!("display registry init failed: {e:#}");
+            plugin::display_registry::DisplayRegistry::new()
+        });
+    for plugin_dir in &cli.plugin_dirs {
+        let displays_dir = plugin_dir.join("displays");
+        if displays_dir.is_dir() {
+            match plugin::display_registry::DisplayRegistry::scan(&displays_dir) {
+                Ok(scanned) => {
+                    for def in scanned.all() {
+                        display_registry.register(def.clone());
+                    }
+                }
+                Err(e) => log::warn!("scan {}: {e}", displays_dir.display()),
+            }
+        }
+    }
+    let display_caps = display_spawner::detect_de();
+    // Decide which backend to run. We clone the DisplayDef out of the
+    // registry so the spawn task can outlive the borrow.
+    let display_backend: Option<plugin::display_registry::DisplayDef> = if cli.no_display {
+        log::info!("--no-display: skipping display backend selection");
+        None
+    } else {
+        let pick = if let Some(name) = cli.display_backend.as_deref() {
+            match display_registry.find(name) {
+                Some(def) => {
+                    log::info!("display backend pinned by --display-backend: {name}");
+                    display_spawner::PickOutcome::Matched(def)
+                }
+                None => {
+                    log::error!(
+                        "--display-backend {name} not found in registry; falling back to auto-detect"
+                    );
+                    display_spawner::pick_backend(&display_registry, &display_caps)
+                }
+            }
+        } else {
+            display_spawner::pick_backend(&display_registry, &display_caps)
+        };
+        display_spawner::log_outcome(&pick, &display_caps);
+        let should_spawn = display_spawner::should_daemon_spawn(&pick);
+        match pick {
+            display_spawner::PickOutcome::KdeHardMatch(def)
+            | display_spawner::PickOutcome::Matched(def)
+                if should_spawn =>
+            {
+                Some(def.clone())
+            }
+            _ => None,
+        }
+    };
+
     // Display endpoint on UDS (waywallen-display-v1 protocol).
     let display_sock_path = display_endpoint::default_socket_path();
     {
@@ -280,6 +354,19 @@ async fn async_main() -> anyhow::Result<()> {
                 display_endpoint::serve_with_shutdown(&sock_path, router, shutdown_rx).await
             {
                 log::error!("display endpoint exited: {e}");
+            }
+        });
+    }
+
+    // Daemon-managed display backend (layer-shell etc.). Started after
+    // the UDS endpoint is bound so the child's first connect succeeds.
+    if let Some(def) = display_backend {
+        let sock_path = display_sock_path.clone();
+        let shutdown_rx = state.shutdown_subscribe();
+        let name = def.name.clone();
+        tokio::spawn(async move {
+            if let Err(e) = display_spawner::run_backend(def, sock_path, shutdown_rx).await {
+                log::error!("display backend '{name}' supervisor exited: {e:#}");
             }
         });
     }
