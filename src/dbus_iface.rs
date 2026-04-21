@@ -16,6 +16,7 @@ use std::sync::Arc;
 use zbus::{interface, Connection, SignalContext};
 
 use crate::control;
+use crate::tasks::TaskState;
 use crate::AppState;
 
 pub const BUS_NAME: &str = "org.waywallen.waywallen.Daemon";
@@ -100,6 +101,34 @@ impl Daemon1 {
 
     fn quit(&self) {
         self.app.shutdown_now();
+    }
+
+    /// Snapshot of background tasks tracked by the daemon. Returns one
+    /// row per task; rows are not sorted (the registry is a HashMap).
+    /// Schema: `a(tssxs)` — (id, kind, name, started_at_ms, state).
+    /// `state` is one of `running` / `completed` / `failed` /
+    /// `cancelled`. For `failed`, the error message is appended after a
+    /// colon (e.g. `failed: nope`) so callers can read it without an
+    /// extra round-trip.
+    fn list_tasks(&self) -> Vec<(u64, String, String, i64, String)> {
+        self.app
+            .tasks
+            .list()
+            .into_iter()
+            .map(|r| {
+                let state_str = match &r.state {
+                    TaskState::Failed(msg) => format!("failed: {msg}"),
+                    other => other.as_str().to_string(),
+                };
+                (
+                    r.id,
+                    r.kind.as_str().to_string(),
+                    r.name,
+                    r.started_at_ms,
+                    state_str,
+                )
+            })
+            .collect()
     }
 
     #[zbus(signal)]

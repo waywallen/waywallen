@@ -242,7 +242,7 @@ async fn async_main() -> anyhow::Result<()> {
         let db_for_task = db.clone();
         let plugin_dirs = cli.plugin_dirs.clone();
         let state_for_task = state.clone();
-        state.tasks.spawn_async("startup/sources", async move {
+        state.tasks.spawn_async(tasks::TaskKind::Startup, "startup/sources", async move {
             // Step 1 — load + scan. The Lua plugins run synchronous
             // filesystem globs and stat(2) in large loops, so this
             // part goes to the blocking pool.
@@ -350,7 +350,7 @@ async fn async_main() -> anyhow::Result<()> {
             match display_registry.find(name) {
                 Some(def) => {
                     log::info!("display backend pinned by --display-backend: {name}");
-                    display_spawner::PickOutcome::Matched(def)
+                    display_spawner::PickOutcome::Matched(def.clone())
                 }
                 None => {
                     log::error!(
@@ -369,7 +369,7 @@ async fn async_main() -> anyhow::Result<()> {
             | display_spawner::PickOutcome::Matched(def)
                 if should_spawn =>
             {
-                Some(def.clone())
+                Some(def)
             }
             _ => None,
         }
