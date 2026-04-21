@@ -1,5 +1,6 @@
 //! waywallen-display-layer-shell — Wayland layer-shell wallpaper client.
- 
+
+use std::collections::HashMap;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -31,7 +32,7 @@ use waywallen::display_proto::{codec, Event as ProtoEvent, Request as ProtoReque
 
 struct Args {
     socket: PathBuf,
-    name: String,
+    name_prefix: String,
 }
 
 fn usage() -> ! {
@@ -47,7 +48,7 @@ fn usage() -> ! {
 
 fn parse_args() -> Args {
     let mut socket: Option<PathBuf> = None;
-    let mut name = String::from("waywallen-layer-shell");
+    let mut name_prefix = String::from("waywallen-layer-shell");
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -59,7 +60,7 @@ fn parse_args() -> Args {
                 }
             }
             "--name" => {
-                name = it.next().unwrap_or_else(|| {
+                name_prefix = it.next().unwrap_or_else(|| {
                     eprintln!("--name requires a value");
                     usage();
                 });
@@ -74,7 +75,7 @@ fn parse_args() -> Args {
     let socket = socket
         .or_else(|| std::env::var_os("WAYWALLEN_SOCKET").map(PathBuf::from))
         .unwrap_or_else(default_socket_path);
-    Args { socket, name }
+    Args { socket, name_prefix }
 }
 
 fn default_socket_path() -> PathBuf {
@@ -85,113 +86,113 @@ fn default_socket_path() -> PathBuf {
 }
 
 // ---------------------------------------------------------------------------
-// Wayland state machine
+// Per-output state
 // ---------------------------------------------------------------------------
 
-/// Shared surface + protocol proxies the UDS worker needs to attach
-/// frames. All proxies in wayland-client 0.31 are `Send + Sync`, so the
-/// worker thread can call into them freely; request writes are
-/// serialized through the shared `Connection` and flushed explicitly.
+/// Shared surface + protocol proxies a single output's UDS worker needs
+/// to attach frames. All proxies in wayland-client 0.31 are `Send + Sync`,
+/// so the worker thread can invoke requests freely; writes are serialized
+/// through the shared `Connection` and flushed explicitly.
 struct OutputBinding {
+    display_name: String,
     surface: WlSurface,
     dmabuf: ZwpLinuxDmabufV1,
     conn: Connection,
-    /// Size assigned by the compositor's first `configure` event. The
-    /// worker waits until this is populated before starting the UDS
-    /// session — the layer-surface is not renderable before configure.
+    /// Populated by the main thread on the first Configure event for
+    /// this output's layer_surface. The worker waits until this is
+    /// Some before starting the UDS session.
     configured_size: Mutex<Option<(u32, u32)>>,
 }
 
-/// Everything the main thread tracks while driving the Wayland event
-/// queue. Only written from the main thread's dispatch callbacks; the
-/// worker holds an `Arc<OutputBinding>` instead.
-struct App {
-    compositor: Option<WlCompositor>,
-    layer_shell: Option<ZwlrLayerShellV1>,
-    dmabuf: Option<ZwpLinuxDmabufV1>,
-    output: Option<WlOutput>,
+/// One logical output — wl_output plus the layer_surface/UDS worker
+/// set we attached to it.
+struct OutputEntry {
+    wl_output: WlOutput,
     surface: Option<WlSurface>,
     layer_surface: Option<ZwlrLayerSurfaceV1>,
     binding: Option<Arc<OutputBinding>>,
     worker_started: bool,
+}
+
+struct App {
+    compositor: Option<WlCompositor>,
+    layer_shell: Option<ZwlrLayerShellV1>,
+    dmabuf: Option<ZwpLinuxDmabufV1>,
+    /// Keyed by `wl_output` global name (u32). The same key is used as
+    /// Dispatch user-data for every per-output child proxy so events
+    /// find their owning entry in O(1).
+    outputs: HashMap<u32, OutputEntry>,
     uds_sock: PathBuf,
-    display_name: String,
+    name_prefix: String,
 }
 
 impl App {
-    fn new(uds_sock: PathBuf, display_name: String) -> Self {
+    fn new(uds_sock: PathBuf, name_prefix: String) -> Self {
         Self {
             compositor: None,
             layer_shell: None,
             dmabuf: None,
-            output: None,
-            surface: None,
-            layer_surface: None,
-            binding: None,
-            worker_started: false,
+            outputs: HashMap::new(),
             uds_sock,
-            display_name,
+            name_prefix,
         }
     }
 
-    /// Called once we have `WlCompositor`, `ZwlrLayerShellV1` and at
-    /// least one `WlOutput`. Creates the `wl_surface` + layer_surface,
-    /// anchors them BG full-screen, and commits so the compositor
-    /// sends back a `configure` with the actual size.
-    fn bring_up_surface(&mut self, qh: &QueueHandle<App>, conn: &Connection) {
-        if self.surface.is_some() {
-            return;
-        }
-        let (Some(comp), Some(shell), Some(output)) = (
-            self.compositor.as_ref(),
-            self.layer_shell.as_ref(),
-            self.output.as_ref(),
-        ) else {
+    /// Create the `wl_surface` + layer_surface for a specific output.
+    /// Idempotent — skips outputs that already have their surface up.
+    fn bring_up_surface(&mut self, output_name: u32, qh: &QueueHandle<App>) {
+        let Some(entry) = self.outputs.get_mut(&output_name) else {
             return;
         };
-        let surface = comp.create_surface(qh, ());
+        if entry.surface.is_some() {
+            return;
+        }
+        let (Some(comp), Some(shell)) = (self.compositor.as_ref(), self.layer_shell.as_ref())
+        else {
+            return;
+        };
+        let surface = comp.create_surface(qh, output_name);
         let layer_surface = shell.get_layer_surface(
             &surface,
-            Some(output),
+            Some(&entry.wl_output),
             Layer::Background,
             "waywallen-wallpaper".to_string(),
             qh,
-            (),
+            output_name,
         );
         layer_surface.set_anchor(Anchor::Top | Anchor::Bottom | Anchor::Left | Anchor::Right);
         layer_surface.set_exclusive_zone(-1);
         layer_surface.set_keyboard_interactivity(KeyboardInteractivity::None);
-        // Size (0, 0) asks the compositor to pick — it'll tell us via
-        // the first configure event.
         layer_surface.set_size(0, 0);
         surface.commit();
-        self.surface = Some(surface);
-        self.layer_surface = Some(layer_surface);
-        log::info!("layer_surface committed, waiting for configure");
-        let _ = conn;
+        entry.surface = Some(surface);
+        entry.layer_surface = Some(layer_surface);
+        log::info!("output {output_name}: layer_surface committed, waiting for configure");
     }
 
-    /// Worker hand-off: once the compositor has configured the surface,
-    /// spawn the UDS session thread with a shared `OutputBinding`.
-    fn maybe_spawn_worker(&mut self, conn: &Connection) {
-        if self.worker_started {
+    /// Spawn the per-output UDS worker once the compositor has
+    /// configured its layer_surface.
+    fn maybe_spawn_worker(&mut self, output_name: u32) {
+        let Some(entry) = self.outputs.get_mut(&output_name) else {
+            return;
+        };
+        if entry.worker_started {
             return;
         }
-        let (Some(surface), Some(dmabuf), Some(binding)) =
-            (self.surface.as_ref(), self.dmabuf.as_ref(), self.binding.as_ref())
-        else {
+        let Some(binding) = entry.binding.as_ref() else {
             return;
         };
         if binding.configured_size.lock().unwrap().is_none() {
             return;
         }
-        self.worker_started = true;
+        entry.worker_started = true;
         let binding = Arc::clone(binding);
         let sock = self.uds_sock.clone();
-        let name = self.display_name.clone();
-        log::info!("spawning UDS worker for configured surface");
-        thread::spawn(move || uds_worker_loop(sock, name, binding));
-        let _ = (surface, dmabuf, conn);
+        log::info!(
+            "output {output_name}: spawning UDS worker ('{}')",
+            binding.display_name
+        );
+        thread::spawn(move || uds_worker_loop(sock, binding));
     }
 }
 
@@ -206,8 +207,8 @@ impl Dispatch<WlRegistry, GlobalListContents> for App {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
-        // Globals are taken once at startup via registry_queue_init;
-        // runtime add/remove is ignored in this pass.
+        // Runtime output hot-plug is out of scope for this pass —
+        // globals are taken once at startup via registry_queue_init.
     }
 }
 
@@ -223,15 +224,18 @@ impl Dispatch<WlCompositor, ()> for App {
     }
 }
 
-impl Dispatch<WlSurface, ()> for App {
+impl Dispatch<WlSurface, u32> for App {
     fn event(
         _state: &mut Self,
         _p: &WlSurface,
         _e: wayland_client::protocol::wl_surface::Event,
-        _data: &(),
+        _data: &u32,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
+        // Enter/Leave and surface scale events ignored — the compositor
+        // drives layer-surface sizing via configure, and we don't care
+        // which seats hover us.
     }
 }
 
@@ -244,33 +248,23 @@ impl Dispatch<WlBuffer, ()> for App {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
-        use wayland_client::protocol::wl_buffer::Event;
-        if let Event::Release = event {
-            // Compositor released the buffer; the worker learns about
-            // it indirectly via daemon-driven FrameReady pacing. In a
-            // stricter implementation we'd wire release back into the
-            // worker so it knows when to ack BufferRelease — the daemon
-            // already expects per-frame BufferRelease, so this is
-            // informational.
+        if let wayland_client::protocol::wl_buffer::Event::Release = event {
             log::trace!("wl_buffer {} released", buffer.id());
         }
     }
 }
 
-impl Dispatch<WlOutput, ()> for App {
+impl Dispatch<WlOutput, u32> for App {
     fn event(
-        state: &mut Self,
+        _state: &mut Self,
         _p: &WlOutput,
         _e: wayland_client::protocol::wl_output::Event,
-        _data: &(),
-        conn: &Connection,
-        qh: &QueueHandle<Self>,
+        _data: &u32,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
     ) {
-        // Output metadata events (Geometry/Mode/Done) stream in after
-        // bind. We don't need the dimensions — layer-surface configure
-        // carries its own size — but the first "Done" is a convenient
-        // moment to bring up the surface.
-        state.bring_up_surface(qh, conn);
+        // Output metadata (Name/Geometry/Mode/Done) is informational;
+        // the layer_surface's own Configure event is authoritative.
     }
 }
 
@@ -286,15 +280,16 @@ impl Dispatch<ZwlrLayerShellV1, ()> for App {
     }
 }
 
-impl Dispatch<ZwlrLayerSurfaceV1, ()> for App {
+impl Dispatch<ZwlrLayerSurfaceV1, u32> for App {
     fn event(
         state: &mut Self,
         layer_surface: &ZwlrLayerSurfaceV1,
         event: zwlr_layer_surface_v1::Event,
-        _data: &(),
+        data: &u32,
         conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
+        let output_name = *data;
         match event {
             zwlr_layer_surface_v1::Event::Configure {
                 serial,
@@ -302,10 +297,17 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for App {
                 height,
             } => {
                 layer_surface.ack_configure(serial);
-                log::info!("layer_surface configure: {width}x{height}");
-                // Stash the size in the binding so the worker can start.
-                let binding = state.binding.get_or_insert_with(|| {
-                    let surface = state
+                log::info!(
+                    "output {output_name}: layer_surface configure {width}x{height}"
+                );
+                // Ensure the per-output OutputBinding exists, then
+                // record the size and kick the worker.
+                let Some(entry) = state.outputs.get_mut(&output_name) else {
+                    log::warn!("configure for unknown output_name={output_name}");
+                    return;
+                };
+                let binding = entry.binding.get_or_insert_with(|| {
+                    let surface = entry
                         .surface
                         .clone()
                         .expect("configure before surface created");
@@ -314,6 +316,7 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for App {
                         .clone()
                         .expect("configure before dmabuf bind");
                     Arc::new(OutputBinding {
+                        display_name: format!("{}-{}", state.name_prefix, output_name),
                         surface,
                         dmabuf,
                         conn: conn.clone(),
@@ -321,11 +324,21 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for App {
                     })
                 });
                 *binding.configured_size.lock().unwrap() = Some((width, height));
-                state.maybe_spawn_worker(conn);
+                // NOTE: `entry` borrows state.outputs mutably; drop it
+                // before re-entering App via maybe_spawn_worker.
+                let _ = binding;
+                state.maybe_spawn_worker(output_name);
             }
             zwlr_layer_surface_v1::Event::Closed => {
-                log::warn!("layer_surface closed by compositor; exiting");
-                std::process::exit(0);
+                log::warn!(
+                    "output {output_name}: layer_surface closed by compositor"
+                );
+                if let Some(entry) = state.outputs.get_mut(&output_name) {
+                    entry.surface = None;
+                    entry.layer_surface = None;
+                    entry.binding = None;
+                    entry.worker_started = false;
+                }
             }
             _ => {}
         }
@@ -341,9 +354,6 @@ impl Dispatch<ZwpLinuxDmabufV1, ()> for App {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
-        // v3 emits `modifier` events listing supported formats; we
-        // trust the daemon's fourcc/modifier and use `create_immed`
-        // regardless, so these are informational.
     }
 }
 
@@ -356,9 +366,6 @@ impl Dispatch<ZwpLinuxBufferParamsV1, ()> for App {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
-        // `create_immed` sidesteps the async `Created`/`Failed` path,
-        // but compositors may still send `Failed` if the import is
-        // invalid — log it for debugging.
         if let zwp_linux_buffer_params_v1::Event::Failed = event {
             log::error!("zwp_linux_buffer_params_v1 Failed: dmabuf import rejected");
         }
@@ -366,30 +373,36 @@ impl Dispatch<ZwpLinuxBufferParamsV1, ()> for App {
 }
 
 // ---------------------------------------------------------------------------
-// UDS worker — runs in its own thread, owns the daemon UnixStream,
-// creates wl_buffers on BindBuffers, attaches on FrameReady.
+// UDS worker — one per output, each an independent daemon display.
 // ---------------------------------------------------------------------------
 
-fn uds_worker_loop(sock: PathBuf, name: String, binding: Arc<OutputBinding>) {
+fn uds_worker_loop(sock: PathBuf, binding: Arc<OutputBinding>) {
     loop {
-        match run_uds_session(&sock, &name, &binding) {
-            Ok(()) => log::info!("UDS session ended cleanly"),
-            Err(e) => log::warn!("UDS session error: {e:#}"),
+        match run_uds_session(&sock, &binding) {
+            Ok(()) => log::info!(
+                "[{}] UDS session ended cleanly",
+                binding.display_name
+            ),
+            Err(e) => log::warn!("[{}] UDS session error: {e:#}", binding.display_name),
         }
         thread::sleep(Duration::from_secs(2));
     }
 }
 
-fn run_uds_session(sock: &Path, name: &str, binding: &OutputBinding) -> Result<()> {
+fn run_uds_session(sock: &Path, binding: &OutputBinding) -> Result<()> {
     let stream = UnixStream::connect(sock)
         .with_context(|| format!("connect {}", sock.display()))?;
-    log::info!("UDS worker connected to {}", sock.display());
+    log::info!(
+        "[{}] UDS worker connected to {}",
+        binding.display_name,
+        sock.display()
+    );
 
     codec::send_request(
         &stream,
         &ProtoRequest::Hello {
             protocol: PROTOCOL_NAME.to_string(),
-            client_name: name.to_string(),
+            client_name: binding.display_name.clone(),
             client_version: env!("CARGO_PKG_VERSION").to_string(),
         },
         &[],
@@ -414,7 +427,7 @@ fn run_uds_session(sock: &Path, name: &str, binding: &OutputBinding) -> Result<(
     codec::send_request(
         &stream,
         &ProtoRequest::RegisterDisplay {
-            name: name.to_string(),
+            name: binding.display_name.clone(),
             width,
             height,
             refresh_mhz: 60_000,
@@ -430,9 +443,11 @@ fn run_uds_session(sock: &Path, name: &str, binding: &OutputBinding) -> Result<(
         (ProtoEvent::DisplayAccepted { display_id }, _) => display_id,
         (other, _) => bail!("expected display_accepted, got opcode {}", other.opcode()),
     };
-    log::info!("registered as display_id={display_id} ({}x{})", width, height);
+    log::info!(
+        "[{}] registered as display_id={display_id} ({width}x{height})",
+        binding.display_name
+    );
 
-    // Buffer pool state for the active generation.
     let mut gen: Option<u64> = None;
     let mut pool: Vec<WlBuffer> = Vec::new();
     let mut buf_width: u32 = width;
@@ -483,13 +498,13 @@ fn run_uds_session(sock: &Path, name: &str, binding: &OutputBinding) -> Result<(
                     fds,
                 )
                 .context("import DMA-BUFs")?;
-                // Drop the old pool — wl_buffer Drop sends destroy.
                 pool = new_pool;
                 gen = Some(buffer_generation);
                 buf_width = bw;
                 buf_height = bh;
                 log::info!(
-                    "imported {} wl_buffers for generation {} ({}x{} fourcc=0x{:08x})",
+                    "[{}] imported {} wl_buffers for generation {} ({}x{} fourcc=0x{:08x})",
+                    binding.display_name,
                     pool.len(),
                     buffer_generation,
                     bw,
@@ -498,23 +513,22 @@ fn run_uds_session(sock: &Path, name: &str, binding: &OutputBinding) -> Result<(
                 );
             }
             ProtoEvent::SetConfig { .. } => {
-                // Config events (source/dest rect, transform) are
-                // ignored for now — we always present the full buffer
-                // at the compositor-chosen surface size.
+                // source/dest rect + transform: not yet honored; we
+                // always present the full buffer at surface size.
             }
             ProtoEvent::FrameReady {
                 buffer_generation: g,
                 buffer_index,
                 seq,
             } => {
-                // Drop the acquire sync_fd: compositor will wait on
-                // the kernel-visible fence attached to the DMA-BUF
-                // import, so we don't need to block on it here. The
-                // OwnedFd destructor closes the duplicate fd we got.
                 drop(fds);
 
                 if Some(g) != gen {
-                    log::warn!("stray frame_ready gen={g}, current={:?}", gen);
+                    log::warn!(
+                        "[{}] stray frame_ready gen={g}, current={:?}",
+                        binding.display_name,
+                        gen
+                    );
                 } else if let Some(buffer) = pool.get(buffer_index as usize) {
                     binding.surface.attach(Some(buffer), 0, 0);
                     binding
@@ -524,19 +538,20 @@ fn run_uds_session(sock: &Path, name: &str, binding: &OutputBinding) -> Result<(
                     frames_presented += 1;
                     if frames_presented == 1 || frames_presented % 60 == 0 {
                         log::info!(
-                            "frame #{frames_presented}: attached buf[{buffer_index}] gen={g} seq={seq} and committed"
+                            "[{}] frame #{frames_presented}: attached buf[{buffer_index}] gen={g} seq={seq}",
+                            binding.display_name
                         );
                     }
-                    // Requests from non-dispatch threads must be
-                    // flushed explicitly; the main thread's blocking
-                    // dispatch will also flush, but we don't want to
-                    // rely on compositor-originated wake-ups.
                     if let Err(e) = binding.conn.flush() {
-                        log::warn!("wayland flush failed: {e}");
+                        log::warn!(
+                            "[{}] wayland flush failed: {e}",
+                            binding.display_name
+                        );
                     }
                 } else {
                     log::warn!(
-                        "frame_ready buffer_index {} out of range (pool size {})",
+                        "[{}] frame_ready buffer_index {} out of range (pool {})",
+                        binding.display_name,
                         buffer_index,
                         pool.len()
                     );
@@ -555,7 +570,11 @@ fn run_uds_session(sock: &Path, name: &str, binding: &OutputBinding) -> Result<(
             }
             ProtoEvent::Unbind { buffer_generation: g } => {
                 if Some(g) == gen {
-                    log::info!("unbind gen={g}; dropping {} buffers", pool.len());
+                    log::info!(
+                        "[{}] unbind gen={g}; dropping {} buffers",
+                        binding.display_name,
+                        pool.len()
+                    );
                     pool.clear();
                     gen = None;
                 }
@@ -568,9 +587,8 @@ fn run_uds_session(sock: &Path, name: &str, binding: &OutputBinding) -> Result<(
     }
 }
 
-/// Build a pool of `wl_buffer`s from the fds + per-plane metadata the
-/// daemon sent in `BindBuffers`. Uses `create_immed` so we don't need
-/// to round-trip through `Created`/`Failed`.
+/// Turn daemon-supplied DMA-BUF fds + per-plane metadata into a pool of
+/// `wl_buffer`s via `zwp_linux_buffer_params_v1::create_immed`.
 fn import_dmabufs(
     binding: &OutputBinding,
     count: u32,
@@ -583,20 +601,10 @@ fn import_dmabufs(
     plane_offset: &[u32],
     fds: Vec<OwnedFd>,
 ) -> Result<Vec<WlBuffer>> {
-    // Hand-carry a queue handle for child proxy creation. We don't
-    // actually own one in this thread; any QueueHandle<App> works and
-    // it's cheap to clone out of the main thread's. For now the
-    // worker grabs it from the Connection via a one-off queue, which
-    // is enough for create_params + create_immed (no events land on
-    // those proxies after).
     let queue = binding.conn.new_event_queue::<App>();
     let qh = queue.handle();
 
     let mut buffers = Vec::with_capacity(count as usize);
-    // Consume fds by value: create_params::add takes a BorrowedFd but
-    // we want to close our copy only after the buffer is created; the
-    // compositor dup(2)s on its side.
-    let fds: Vec<OwnedFd> = fds;
     for b in 0..count as usize {
         let params = binding.dmabuf.create_params(&qh, ());
         let mod_hi = (modifier >> 32) as u32;
@@ -613,15 +621,16 @@ fn import_dmabufs(
                 mod_lo,
             );
         }
-        let buffer = params.create_immed(width as i32, height as i32, fourcc, zwp_linux_buffer_params_v1::Flags::empty(), &qh, ());
-        // create_params is auto-destroyed after create_immed per protocol.
+        let buffer = params.create_immed(
+            width as i32,
+            height as i32,
+            fourcc,
+            zwp_linux_buffer_params_v1::Flags::empty(),
+            &qh,
+            (),
+        );
         buffers.push(buffer);
     }
-    // Dropping the queue is fine — the params proxies may emit Failed
-    // asynchronously; those would land on the main queue's Dispatch
-    // impl only if registered there. Here we just discard any lingering
-    // events. If users see ImportFailed in compositor logs, switch to
-    // the async create path.
     drop(queue);
     drop(fds);
     Ok(buffers)
@@ -640,10 +649,11 @@ fn main() -> Result<()> {
     let (globals, mut queue) = registry_queue_init::<App>(&conn).context("registry init")?;
     let qh: QueueHandle<App> = queue.handle();
 
-    let mut app = App::new(args.socket, args.name);
+    let mut app = App::new(args.socket, args.name_prefix);
 
-    // Bind each global we care about. We require all four: without
-    // layer_shell + dmabuf there's no way to present a wallpaper.
+    // Bind every global we care about. Outputs are collected into the
+    // App's `outputs` map keyed by global name; every per-output child
+    // proxy carries that name as Dispatch user-data.
     for g in globals.contents().clone_list() {
         match g.interface.as_str() {
             "wl_compositor" => {
@@ -671,18 +681,27 @@ fn main() -> Result<()> {
                 ));
             }
             "wl_output" => {
-                if app.output.is_none() {
-                    app.output = Some(globals.registry().bind::<WlOutput, _, _>(
-                        g.name,
-                        g.version.min(4),
-                        &qh,
-                        (),
-                    ));
-                }
+                let wl_output = globals.registry().bind::<WlOutput, _, _>(
+                    g.name,
+                    g.version.min(4),
+                    &qh,
+                    g.name,
+                );
+                app.outputs.insert(
+                    g.name,
+                    OutputEntry {
+                        wl_output,
+                        surface: None,
+                        layer_surface: None,
+                        binding: None,
+                        worker_started: false,
+                    },
+                );
             }
             _ => {}
         }
     }
+
     if app.compositor.is_none() {
         bail!("compositor does not expose wl_compositor");
     }
@@ -695,19 +714,21 @@ fn main() -> Result<()> {
     if app.dmabuf.is_none() {
         bail!("compositor does not expose zwp_linux_dmabuf_v1");
     }
-    if app.output.is_none() {
+    if app.outputs.is_empty() {
         bail!("no wl_output available");
     }
+    log::info!(
+        "bound globals: compositor + layer_shell + dmabuf + {} output(s)",
+        app.outputs.len()
+    );
 
-    log::info!("bound globals: compositor + layer_shell + dmabuf + 1 output");
+    // Create the per-output layer_surfaces up-front. The compositor will
+    // emit a Configure event for each, which kicks off its UDS worker.
+    let output_keys: Vec<u32> = app.outputs.keys().copied().collect();
+    for name in output_keys {
+        app.bring_up_surface(name, &qh);
+    }
 
-    // First dispatch pulls output metadata (geometry/mode/done) which
-    // triggers surface creation via `bring_up_surface`.
-    queue.blocking_dispatch(&mut app).context("initial dispatch")?;
-
-    // Main event loop: keep spinning Wayland events. The UDS worker
-    // runs on its own thread and mutates the surface's attached
-    // buffer; we just keep the connection alive and responsive.
     loop {
         if let Err(e) = queue.blocking_dispatch(&mut app) {
             log::error!("wayland dispatch error: {e}");
