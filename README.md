@@ -37,7 +37,7 @@ It started life as a Wallpaper Engine plugin for KDE.
 | **KDE Plasma** | [waywallen-kde](https://github.com/waywallen/waywallen-kde) |
 | **Niri** | `zwlr_layer_shell_v1` |
 | **Sway** | `zwlr_layer_shell_v1` |
-| **GNOME** | ❌ |
+| **GNOME** | ️planned |
 
 ## Compatibility
 
@@ -47,11 +47,3 @@ It started life as a Wallpaper Engine plugin for KDE.
 | Scene wallpapers | ✅ via open-wallpaper-engine |
 | Video wallpapers | ✅ via mpv |
 | Web wallpapers | ⚠️ planned |
-
-## Contributing & feedback
-
-Issues and PRs are welcome — especially:
-
-- More DE display-side integrations (Hyprland, Sway, GNOME…)
-- Filling in the remaining Wallpaper Engine features
-- Translations, screenshots, example wallpapers
