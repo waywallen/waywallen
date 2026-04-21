@@ -242,6 +242,31 @@ pub async fn run_backend(
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());
 
+        // Linux-only safety net: `kill_on_drop(true)` covers the happy
+        // path (daemon exits cleanly, Tokio drops the Child handle), but
+        // it does NOT cover the daemon getting SIGKILL'd mid-flight —
+        // in that case the runtime is torn down without dropping anything
+        // and the child becomes reparented to PID 1. PR_SET_PDEATHSIG
+        // asks the kernel to SIGTERM the child as soon as its parent
+        // thread-group-leader dies, regardless of how it died.
+        #[cfg(target_os = "linux")]
+        unsafe {
+            cmd.pre_exec(|| {
+                // prctl(PR_SET_PDEATHSIG, SIGTERM, 0, 0, 0)
+                let rc = libc::prctl(
+                    libc::PR_SET_PDEATHSIG,
+                    libc::SIGTERM as libc::c_ulong,
+                    0,
+                    0,
+                    0,
+                );
+                if rc == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
         let mut child = match cmd.spawn() {
             Ok(c) => c,
             Err(e) => {
@@ -261,10 +286,27 @@ pub async fn run_backend(
         // dies immediately (caught via the loop below).
         let status = tokio::select! {
             biased;
-            // Shutdown wins: drop `child` → kill_on_drop SIGTERMs it.
             _ = wait_shutdown(&mut shutdown_rx) => {
-                log::info!("shutdown: stopping display backend '{}'", def.name);
-                drop(child);
+                log::info!("shutdown: stopping display backend '{}' (pid={pid:?})", def.name);
+                // Send SIGKILL, then wait up to 2s so we leave no zombie.
+                // If the child ignores or is stuck in uninterruptible
+                // sleep we still return — the runtime teardown will
+                // SIGKILL anything tokio still owns.
+                let _ = child.start_kill();
+                match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
+                    Ok(Ok(st)) => log::info!(
+                        "display backend '{}' exited after shutdown: {st:?}",
+                        def.name
+                    ),
+                    Ok(Err(e)) => log::warn!(
+                        "display backend '{}' wait after shutdown failed: {e}",
+                        def.name
+                    ),
+                    Err(_) => log::warn!(
+                        "display backend '{}' did not exit within 2s of shutdown",
+                        def.name
+                    ),
+                }
                 return Ok(());
             }
             res = child.wait() => res,
