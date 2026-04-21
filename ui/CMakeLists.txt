@@ -94,10 +94,12 @@ set(MODULES
 set(QML_FILES
   qml/Window.qml
   qml/component/StatusDot.qml
+  qml/component/PagePopup.qml
   qml/page/WallpaperPage.qml
   qml/page/WallpaperCard.qml
   qml/page/StatusPage.qml
   qml/page/DisplaysPage.qml
+  qml/page/SourceManagePage.qml
 )
 set(RESOURCES)
 

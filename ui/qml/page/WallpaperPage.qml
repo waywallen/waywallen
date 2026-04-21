@@ -87,29 +87,42 @@ MD.Page {
                         color: MD.Token.color.on_surface
                     }
 
-                    Item {
+                    // Repeater {
+                    //     model: root.availableTypes
+
+                    //     MD.FilterChip {
+                    //         required property string modelData
+                    //         required property int index
+
+                    //         text: modelData === "" ? "All" : modelData
+                    //         checked: root.typeFilter === modelData
+                    //         onClicked: root.typeFilter = modelData
+                    //     }
+                    // }
+
+                    MD.ActionToolBar {
                         Layout.fillWidth: true
-                    }
-
-                    Repeater {
-                        model: root.availableTypes
-
-                        MD.FilterChip {
-                            required property string modelData
-                            required property int index
-
-                            text: modelData === "" ? "All" : modelData
-                            checked: root.typeFilter === modelData
-                            onClicked: root.typeFilter = modelData
-                        }
-                    }
-
-                    MD.IconButton {
-                        icon.name: MD.Token.icon.refresh
-                        onClicked: {
-                            scanQuery.reload();
-                            wallpaperQuery.reload();
-                        }
+                        actions: [
+                            MD.Action {
+                                icon.name: MD.Token.icon.filter_list
+                                text: 'Filters'
+                            },
+                            MD.Action {
+                                icon.name: MD.Token.icon.hard_drive
+                                text: 'Sources'
+                                onTriggered: MD.Util.showPopup('waywallen.ui/PagePopup', {
+                                    source: 'waywallen.ui/SourceManagePage'
+                                }, win)
+                            },
+                            MD.Action {
+                                icon.name: MD.Token.icon.refresh
+                                text: 'Refresh'
+                                onTriggered: {
+                                    scanQuery.reload();
+                                    wallpaperQuery.reload();
+                                }
+                            }
+                        ]
                     }
                 }
 

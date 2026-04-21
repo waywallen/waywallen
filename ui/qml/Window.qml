@@ -1,11 +1,10 @@
+pragma ComponentBehavior: Bound
 pragma ValueTypeBehavior: Assertable
-import QtCore
 import QtQuick
 import QtQml
 import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Templates as T
-import QtQuick.Controls as QC
 
 import Qcm.Material as MD
 import waywallen.ui
@@ -128,25 +127,6 @@ MD.ApplicationWindow {
 
                         Item {
                             Layout.fillHeight: true
-                        }
-
-                        StatusDot {
-                            Layout.alignment: Qt.AlignHCenter
-                            Layout.bottomMargin: 16
-                            statusColor: {
-                                if (healthQuery.status === 3)
-                                    return MD.Token.color.primary;
-                                if (healthQuery.querying)
-                                    return MD.Token.color.secondary;
-                                return MD.Token.color.error;
-                            }
-                            statusText: {
-                                if (healthQuery.status === 3)
-                                    return "OK";
-                                if (healthQuery.querying)
-                                    return "…";
-                                return "!";
-                            }
                         }
                     }
                 }
