@@ -16,6 +16,7 @@ mod renderer_manager;
 mod routing;
 mod scheduler;
 mod settings;
+mod tasks;
 mod tray;
 mod wallpaper_type;
 mod ws_server;
@@ -37,6 +38,9 @@ pub struct AppState {
     /// (or Ctrl-C) tears everything down without leaving blocking I/O
     /// parked in `recvmsg`.
     pub shutdown: tokio::sync::watch::Sender<bool>,
+    /// Background task supervisor. Used to off-load startup scanning,
+    /// DB sync, and similar work so `async_main` stays responsive.
+    pub tasks: Arc<tasks::TaskManager>,
 }
 
 impl AppState {
@@ -194,26 +198,15 @@ async fn async_main() -> anyhow::Result<()> {
         }
     }
 
-    // Source management: load Lua plugins from the canonical paths
-    // (bundled `<exec>/../share/waywallen/sources/` first, then user-local
-    // `$XDG_DATA_HOME/waywallen/sources/` — user plugins can shadow bundled
-    // ones by name).
-    let mut source_mgr =
+    // Source management: create an empty manager now, defer loading
+    // the Lua plugins + scanning their directories to a background
+    // task. A cold scan over a large image library is easily seconds
+    // of synchronous filesystem work; keeping it on the startup hot
+    // path means UDS/WS/DBus/layer-shell spawn all wait on it.
+    let source_mgr = Arc::new(tokio::sync::Mutex::new(
         plugin::source_manager::SourceManager::new(std::collections::HashMap::new())
-            .expect("failed to create source manager");
-    for dir in plugin::renderer_registry::standard_plugin_dirs("sources") {
-        if dir.is_dir() {
-            let _ = source_mgr.load_all(&dir);
-        }
-    }
-    // Scan extra --plugin directories for source plugins.
-    for plugin_dir in &cli.plugin_dirs {
-        let sources_dir = plugin_dir.join("sources");
-        if sources_dir.is_dir() {
-            let _ = source_mgr.load_all(&sources_dir);
-        }
-    }
-    let _ = source_mgr.scan_all();
+            .expect("failed to create source manager"),
+    ));
 
     let renderer_mgr = Arc::new(renderer_manager::RendererManager::new(registry));
     let router = routing::Router::new(renderer_mgr.clone());
@@ -224,20 +217,79 @@ async fn async_main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("open database {}", db_path.display()))?;
 
-    // Persist the current scan snapshot per plugin. Double-write for
-    // now: the in-memory SourceManager stays authoritative for reads
-    // until the RPC surface is moved over.
-    match source_mgr.plugins() {
-        Ok(plugin_infos) => {
-            for info in &plugin_infos {
-                let entries: Vec<_> = source_mgr
-                    .list()
+    let (shutdown_tx, shutdown_rx_for_tasks) = tokio::sync::watch::channel(false);
+    let task_mgr = tasks::TaskManager::spawn(shutdown_rx_for_tasks);
+
+    let state = Arc::new(AppState {
+        renderer_manager: renderer_mgr,
+        source_manager: source_mgr.clone(),
+        router: router.clone(),
+        settings: settings_store,
+        db: db.clone(),
+        playlist: tokio::sync::Mutex::new(control::PlaylistState::default()),
+        ws_port: std::sync::atomic::AtomicU16::new(0),
+        ui_path: std::sync::Mutex::new(None),
+        shutdown: shutdown_tx,
+        tasks: task_mgr.clone(),
+    });
+
+    // Off-load source-plugin loading + scanning + DB sync + initial
+    // playlist seed onto the TaskManager. `async_main` proceeds
+    // immediately to bind UDS/WS/DBus; the UI will see an empty
+    // playlist until the task completes and populates it.
+    {
+        let source_mgr = source_mgr.clone();
+        let db_for_task = db.clone();
+        let plugin_dirs = cli.plugin_dirs.clone();
+        let state_for_task = state.clone();
+        state.tasks.spawn_async("startup/sources", async move {
+            // Step 1 — load + scan. The Lua plugins run synchronous
+            // filesystem globs and stat(2) in large loops, so this
+            // part goes to the blocking pool.
+            let source_mgr_blocking = source_mgr.clone();
+            let snapshot: Vec<crate::wallpaper_type::WallpaperEntry> =
+                tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
+                    let mut sm = source_mgr_blocking.blocking_lock();
+                    for dir in plugin::renderer_registry::standard_plugin_dirs("sources") {
+                        if dir.is_dir() {
+                            if let Err(e) = sm.load_all(&dir) {
+                                log::warn!("load sources {}: {e:#}", dir.display());
+                            }
+                        }
+                    }
+                    for plugin_dir in &plugin_dirs {
+                        let sources_dir = plugin_dir.join("sources");
+                        if sources_dir.is_dir() {
+                            if let Err(e) = sm.load_all(&sources_dir) {
+                                log::warn!("load sources {}: {e:#}", sources_dir.display());
+                            }
+                        }
+                    }
+                    sm.scan_all()?;
+                    Ok(sm.list().to_vec())
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("source scan join: {e}"))??;
+
+            // Step 2 — persist scan to DB (async, needs the runtime).
+            let plugins = {
+                let sm = source_mgr.lock().await;
+                match sm.plugins() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        log::warn!("list plugins for sync failed: {e:#}");
+                        Vec::new()
+                    }
+                }
+            };
+            for info in &plugins {
+                let entries: Vec<_> = snapshot
                     .iter()
                     .filter(|e| e.plugin_name == info.name)
                     .cloned()
                     .collect();
                 match model::sync::sync_plugin_entries(
-                    &db,
+                    &db_for_task,
                     model::sync::PluginRef {
                         name: &info.name,
                         version: &info.version,
@@ -258,32 +310,12 @@ async fn async_main() -> anyhow::Result<()> {
                     Err(e) => log::warn!("sync plugin={} failed: {e:#}", info.name),
                 }
             }
-        }
-        Err(e) => log::warn!("list plugins for sync failed: {e:#}"),
-    }
-    let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
-    let state = Arc::new(AppState {
-        renderer_manager: renderer_mgr,
-        source_manager: Arc::new(tokio::sync::Mutex::new(source_mgr)),
-        router: router.clone(),
-        settings: settings_store,
-        db,
-        playlist: tokio::sync::Mutex::new(control::PlaylistState::default()),
-        ws_port: std::sync::atomic::AtomicU16::new(0),
-        ui_path: std::sync::Mutex::new(None),
-        shutdown: shutdown_tx,
-    });
-    // Seed the playlist from the initial source scan.
-    {
-        let ids: Vec<String> = state
-            .source_manager
-            .lock()
-            .await
-            .list()
-            .iter()
-            .map(|e| e.id.clone())
-            .collect();
-        state.playlist.lock().await.refresh(ids);
+
+            // Step 3 — seed the playlist from the fresh snapshot.
+            let ids: Vec<String> = snapshot.iter().map(|e| e.id.clone()).collect();
+            state_for_task.playlist.lock().await.refresh(ids);
+            Ok(())
+        });
     }
 
     // Display backend registry + auto-selection. This does not spawn the

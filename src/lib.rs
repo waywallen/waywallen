@@ -6,4 +6,5 @@ pub mod plugin;
 pub mod renderer_manager;
 pub mod routing;
 pub mod scheduler;
+pub mod tasks;
 pub mod wallpaper_type;

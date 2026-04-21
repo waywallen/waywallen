@@ -536,12 +536,6 @@ fn run_uds_session(sock: &Path, binding: &OutputBinding) -> Result<()> {
                         .damage_buffer(0, 0, buf_width as i32, buf_height as i32);
                     binding.surface.commit();
                     frames_presented += 1;
-                    if frames_presented == 1 || frames_presented % 60 == 0 {
-                        log::info!(
-                            "[{}] frame #{frames_presented}: attached buf[{buffer_index}] gen={g} seq={seq}",
-                            binding.display_name
-                        );
-                    }
                     if let Err(e) = binding.conn.flush() {
                         log::warn!(
                             "[{}] wayland flush failed: {e}",
