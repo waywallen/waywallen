@@ -1,9 +1,0 @@
-# waywallen-display-layer-shell — Wayland layer-shell wallpaper client.
-
-[display]
-name = "layer-shell"
-bin = "../../../bin/waywallen-display-layer-shell"
-de = ["niri"]
-priority = 50
-requires = ["wlr-layer-shell", "linux-dmabuf-v4"]
-spawn = "daemon"

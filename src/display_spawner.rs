@@ -55,28 +55,82 @@ pub fn detect_de() -> DeCaps {
 }
 
 /// Why `pick_backend` returned the choice it did. Mostly for logging.
-#[derive(Debug)]
-pub enum PickOutcome<'a> {
+#[derive(Debug, Clone)]
+pub enum PickOutcome {
     /// KDE session hard-rule matched this backend.
-    KdeHardMatch(&'a DisplayDef),
+    KdeHardMatch(DisplayDef),
     /// Highest-priority backend whose `de` matched and `requires` soft-passed.
-    Matched(&'a DisplayDef),
+    Matched(DisplayDef),
     /// No applicable backend — caller should log and run headless.
     None,
 }
 
-/// Select a backend from the registry for the current environment.
+/// Hardcoded display backends bundled with the daemon. These are used
+/// when no external manifest overrides them.
+pub fn builtin_display_defs() -> Vec<DisplayDef> {
+    let mut defs = Vec::new();
+
+    // kde-plasma — Plasma 6 integration via the waywallen-kde kpackage.
+    defs.push(DisplayDef {
+        name: "kde-plasma".to_string(),
+        bin: PathBuf::new(),
+        de: vec!["kde".to_string()],
+        priority: 100,
+        requires: Vec::new(),
+        extra_args: Vec::new(),
+        spawn: SpawnMode::External,
+    });
+
+    // waywallen-display-layer-shell — Wayland layer-shell wallpaper client.
+    // We look for the binary in the same directory as the daemon.
+    let mut layer_shell_bin = PathBuf::from("waywallen-display-layer-shell");
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let candidate = parent.join("waywallen-display-layer-shell");
+            if candidate.exists() {
+                layer_shell_bin = candidate;
+            }
+        }
+    }
+
+    defs.push(DisplayDef {
+        name: "layer-shell".to_string(),
+        bin: layer_shell_bin,
+        de: vec!["niri".to_string()],
+        priority: 50,
+        requires: vec![
+            "wlr-layer-shell".to_string(),
+            "linux-dmabuf-v4".to_string(),
+        ],
+        extra_args: Vec::new(),
+        spawn: SpawnMode::Daemon,
+    });
+
+    defs
+}
+
+/// Select a backend from the registry or built-ins for the current environment.
 /// See module docs for rules.
-pub fn pick_backend<'a>(reg: &'a DisplayRegistry, caps: &DeCaps) -> PickOutcome<'a> {
+pub fn pick_backend(reg: &DisplayRegistry, caps: &DeCaps) -> PickOutcome {
+    // Merge built-ins with registry. Registry entries shadow built-ins
+    // by name (allowing user overrides).
+    let mut all_defs: Vec<DisplayDef> = reg.all().to_vec();
+    for builtin in builtin_display_defs() {
+        if !all_defs.iter().any(|d| d.name == builtin.name) {
+            all_defs.push(builtin);
+        }
+    }
+    // Sort descending by priority.
+    all_defs.sort_by(|a, b| b.priority.cmp(&a.priority));
+
     // Hard rule: KDE sessions use their dedicated backend (usually
     // spawn=external) and never fall back.
     if caps.is_kde() {
-        if let Some(def) = reg
-            .all()
+        if let Some(def) = all_defs
             .iter()
             .find(|d| d.de.iter().any(|t| t.eq_ignore_ascii_case("kde")))
         {
-            return PickOutcome::KdeHardMatch(def);
+            return PickOutcome::KdeHardMatch(def.clone());
         }
         return PickOutcome::None;
     }
@@ -100,9 +154,9 @@ pub fn pick_backend<'a>(reg: &'a DisplayRegistry, caps: &DeCaps) -> PickOutcome<
     // Soft capability check: only warn on missing `requires`; don't veto
     // until the real wl_registry probe lands. This keeps Hyprland/Sway
     // working today without a Wayland dep in the daemon.
-    let mut best: Option<&DisplayDef> = None;
-    for d in reg.all() {
-        if !de_matches(d) {
+    let mut best: Option<DisplayDef> = None;
+    for d in all_defs {
+        if !de_matches(&d) {
             continue;
         }
         // Skip Plasma-targeted backends here — the KDE branch above owns
@@ -128,7 +182,7 @@ pub fn pick_backend<'a>(reg: &'a DisplayRegistry, caps: &DeCaps) -> PickOutcome<
         }
         match best {
             None => best = Some(d),
-            Some(cur) if d.priority > cur.priority => best = Some(d),
+            Some(ref cur) if d.priority > cur.priority => best = Some(d),
             _ => {}
         }
     }
@@ -141,7 +195,7 @@ pub fn pick_backend<'a>(reg: &'a DisplayRegistry, caps: &DeCaps) -> PickOutcome<
 
 /// Convenience: log the outcome at info level with enough detail to
 /// debug a mis-selection from `journalctl`.
-pub fn log_outcome(outcome: &PickOutcome<'_>, caps: &DeCaps) {
+pub fn log_outcome(outcome: &PickOutcome, caps: &DeCaps) {
     match outcome {
         PickOutcome::KdeHardMatch(def) => log::info!(
             "display backend selected: {} (KDE hard-rule, spawn={:?}, xdg_desktop={:?})",
@@ -174,7 +228,7 @@ pub fn log_outcome(outcome: &PickOutcome<'_>, caps: &DeCaps) {
 /// Return `true` when the daemon should start a subprocess for this
 /// outcome. `External` backends rely on the DE to launch them (e.g.
 /// Plasma kpackage), so the daemon stays out of their way.
-pub fn should_daemon_spawn(outcome: &PickOutcome<'_>) -> bool {
+pub fn should_daemon_spawn(outcome: &PickOutcome) -> bool {
     match outcome {
         PickOutcome::KdeHardMatch(def) | PickOutcome::Matched(def) => {
             matches!(def.spawn, SpawnMode::Daemon)
@@ -380,14 +434,12 @@ mod tests {
     }
 
     fn registry() -> DisplayRegistry {
-        let mut reg = DisplayRegistry::new();
-        reg.register(def("kde-plasma", &["kde"], 100, SpawnMode::External));
-        reg.register(def("layer-shell", &["*"], 50, SpawnMode::Daemon));
-        reg
+        // Return an empty registry; pick_backend will use built-ins.
+        DisplayRegistry::new()
     }
 
     #[test]
-    fn kde_picks_kde_never_layer_shell() {
+    fn kde_picks_builtin_kde() {
         let caps = DeCaps {
             xdg_desktop: vec!["kde".into()],
             ..Default::default()
@@ -400,43 +452,41 @@ mod tests {
     }
 
     #[test]
-    fn kde_without_kde_backend_picks_none() {
+    fn registry_overrides_builtin() {
         let caps = DeCaps {
-            xdg_desktop: vec!["kde".into()],
+            xdg_desktop: vec!["niri".into()],
             ..Default::default()
         };
         let mut reg = DisplayRegistry::new();
-        reg.register(def("layer-shell", &["*"], 50, SpawnMode::Daemon));
-        assert!(matches!(pick_backend(&reg, &caps), PickOutcome::None));
+        // Higher priority than built-in layer-shell (50)
+        reg.register(def("layer-shell", &["niri"], 60, SpawnMode::Daemon));
+
+        match pick_backend(&reg, &caps) {
+            PickOutcome::Matched(d) => {
+                assert_eq!(d.priority, 60);
+                assert_eq!(d.bin, PathBuf::from("/usr/bin/layer-shell"));
+            }
+            other => panic!("expected Matched, got {:?}", other),
+        }
     }
 
     #[test]
-    fn hyprland_picks_layer_shell() {
+    fn hyprland_picks_none_if_no_match() {
+        // Built-in layer-shell only matches "niri" in my new code (following TOML).
+        // Hyprland doesn't match "kde" or "niri".
         let caps = DeCaps {
             xdg_desktop: vec!["hyprland".into()],
             ..Default::default()
         };
-        match pick_backend(&registry(), &caps) {
-            PickOutcome::Matched(d) => assert_eq!(d.name, "layer-shell"),
-            other => panic!("expected Matched, got {:?}", other),
-        }
+        assert!(matches!(pick_backend(&registry(), &caps), PickOutcome::None));
     }
 
     #[test]
-    fn gnome_picks_layer_shell_star_catchall() {
+    fn niri_picks_layer_shell() {
         let caps = DeCaps {
-            xdg_desktop: vec!["gnome".into()],
+            xdg_desktop: vec!["niri".into()],
             ..Default::default()
         };
-        match pick_backend(&registry(), &caps) {
-            PickOutcome::Matched(d) => assert_eq!(d.name, "layer-shell"),
-            other => panic!("expected Matched, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn no_xdg_desktop_still_picks_wildcard() {
-        let caps = DeCaps::default();
         match pick_backend(&registry(), &caps) {
             PickOutcome::Matched(d) => assert_eq!(d.name, "layer-shell"),
             other => panic!("expected Matched, got {:?}", other),
@@ -452,10 +502,10 @@ mod tests {
         let reg = registry();
         assert!(!should_daemon_spawn(&pick_backend(&reg, &caps_kde)));
 
-        let caps_hypr = DeCaps {
-            xdg_desktop: vec!["hyprland".into()],
+        let caps_niri = DeCaps {
+            xdg_desktop: vec!["niri".into()],
             ..Default::default()
         };
-        assert!(should_daemon_spawn(&pick_backend(&reg, &caps_hypr)));
+        assert!(should_daemon_spawn(&pick_backend(&reg, &caps_niri)));
     }
 }
