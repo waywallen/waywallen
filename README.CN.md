@@ -21,39 +21,27 @@ Waywallen 是一个为 Linux 桌面打造的动态壁纸方案
 
 ## 快速开始
 
-Waywallen 由两部分组成，按需分别安装：
-
-1. **本体** —— 负责壁纸的加载、渲染与分发。
-2. **桌面集成插件** —— 把画面接到你所在 DE 的桌面背景上。
-
-### 1. 安装本体
+### 安装
 
 **Flatpak**
 [org.waywallen.waywallen](https://github.com/hypengw/org.waywallen.waywallen)
 
 **从源码构建** —— 见 [BUILD.md](BUILD.md)。
 
-### 2. 安装桌面集成插件
+### 桌面集成
 
-| 桌面 | 插件 | 获取方式 |
-|------|------|----------|
-| **KDE Plasma 6** | `waywallen-kde` | Pling 商店搜索 **Waywallen**，或从 `waywallen-kde/` 安装 |
-| **GNOME / Hyprland / 其它** | — | 暂未提供官方插件，欢迎接入 `waywallen-display` 自行实现 |
+| 桌面 | 集成 |
+|------|------|
+| **KDE Plasma** | [waywallen-kde](https://github.com/waywallen/waywallen-kde) |
+| **GNOME** | ❌ |
+| **Niri** | zwlr_layer_shell_v1 |
+| **Sway** | zwlr_layer_shell_v1 |
 
 ## 兼容性
 
 | 项目 | 现状 |
 |------|------|
-| KDE Plasma 6 | ✅ |
-| GNOME / Hyprland / 其它 | ⚠️ 需自行接入显示端 |
+| 图片壁纸 | ✅ |
 | 场景壁纸 | ✅ open-wallpaper-engine |
 | 视频壁纸 | ✅ mpv |
 | 网页壁纸 | ⚠️ 规划中 |
-
-## 贡献 & 反馈
-
-欢迎 issue / PR，尤其是：
-
-- 更多 DE 的显示端适配（Hyprland、Sway、GNOME……）
-- Wallpaper Engine 剩余特性补齐
-- 翻译、截图、示例壁纸

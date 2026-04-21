@@ -37,17 +37,18 @@ Waywallen ships in two pieces — install them separately as needed:
 
 ### 2. Install a desktop integration plugin
 
-| Desktop | Plugin | How to get it |
-|---------|--------|---------------|
-| **KDE Plasma 6** | `waywallen-kde` | Search **Waywallen** on the Pling store, or build from source in `waywallen-kde/` |
-| **GNOME / Hyprland / others** | — | No official plugin yet — contributions welcome via `waywallen-display` |
+| Desktop | Integration |
+|---------|-------------|
+| **KDE Plasma** | [waywallen-kde](https://github.com/waywallen/waywallen-kde) |
+| **Niri** | `zwlr_layer_shell_v1` |
+| **Sway** | `zwlr_layer_shell_v1` |
+| **GNOME** | ❌ |
 
 ## Compatibility
 
 | Item | Status |
 |------|--------|
-| KDE Plasma 6 | ✅ |
-| GNOME / Hyprland / others | ⚠️ BYO display backend |
+| Image wallpapers | ✅ |
 | Scene wallpapers | ✅ via open-wallpaper-engine |
 | Video wallpapers | ✅ via mpv |
 | Web wallpapers | ⚠️ planned |
