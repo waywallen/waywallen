@@ -23,19 +23,14 @@ It started life as a Wallpaper Engine plugin for KDE.
 
 ## Quick Start
 
-Waywallen ships in two pieces — install them separately as needed:
-
-1. **Core** — Handles loading, rendering and dispatching wallpapers.
-2. **Desktop integration plugin** — pipes the picture onto your DE's desktop background.
-
-### 1. Install the core
+### Install
 
 **Flatpak**
 [org.waywallen.waywallen](https://github.com/hypengw/org.waywallen.waywallen)
 
 **From source** — see [BUILD.md](BUILD.md).
 
-### 2. Install a desktop integration plugin
+### Desktop integration
 
 | Desktop | Integration |
 |---------|-------------|

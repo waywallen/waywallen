@@ -7,8 +7,8 @@ End-to-end build instructions for developers.
 | Dependency | Version | Notes |
 |------------|---------|-------|
 | Rust | stable | |
-| Clang | 22+ | UI and companion C++ projects pin Clang via `CMAKE_CXX_COMPILER=clang++` + `CMAKE_LINKER=lld` |
-| CMake | 3.28+ | UI requires Ninja generator (`cmake-ninja` buildsystem) |
+| Clang | 22+ | [LLVM-22.1.4-Linux-X64](https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.4/LLVM-22.1.4-Linux-X64.tar.xz) |
+| CMake | 3.28+ | |
 | Vulkan SDK | ≥ 1.1 |  |
 | Qt6 | ≥ 6.10 | Quick, DBus, Protobuf |
 | mpv | - |  |
