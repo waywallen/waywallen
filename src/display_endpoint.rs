@@ -1,20 +1,5 @@
 //! Display endpoint — accepts external display client connections on a
 //! Unix socket and speaks the `waywallen-display-v1` protocol with them.
-//!
-//! Phase 1 split: this file is now a thin wire layer. All scheduling
-//! decisions (which renderer feeds which display, when to bind/unbind,
-//! how to project SetConfig) live in `crate::routing::Router`. The
-//! endpoint just:
-//!
-//!   1. Performs the protocol handshake.
-//!   2. Calls `router.register_display(...)` and gets back a
-//!      `DisplayHandle { id, rx }`.
-//!   3. Translates `DisplayOutEvent`s from `rx` into wire `Event`s.
-//!   4. Forwards client requests (BufferRelease/UpdateDisplay/Bye)
-//!      back into the router.
-//!
-//! No `RendererHandle` references remain in the per-client state
-//! machine — the router owns all renderer subscriptions.
 
 use anyhow::{anyhow, Context, Result};
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
@@ -274,12 +259,6 @@ async fn run_frame_loop(
             },
             maybe_req = req_rx.recv() => match maybe_req {
                 Some(Ok(Request::BufferRelease { buffer_generation: g, buffer_index, seq })) => {
-                    log::debug!(
-                        "display {display_id}: release gen={g} idx={buffer_index} seq={seq}"
-                    );
-                    // Phase 1: bookkeeping only — release aggregation
-                    // back to the renderer lands once the renderer
-                    // protocol grows a release channel.
                 }
                 Some(Ok(Request::UpdateDisplay { width, height, properties: _ })) => {
                     router.update_display_size(display_id, width, height).await;
