@@ -2,7 +2,10 @@ pragma ValueTypeBehavior: Assertable
 import QtQuick
 import QtQuick.Layouts
 import Qcm.Material as MD
+import waywallen.ui as W
 
 MD.Page {
-    title: 'source manage'
+    id: root
+    title: 'Source Manage'
+
 }

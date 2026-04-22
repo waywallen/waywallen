@@ -3,7 +3,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Templates as T
 import Qcm.Material as MD
-import waywallen.ui
+import waywallen.ui as W
 
 MD.Page {
     id: root
@@ -35,22 +35,22 @@ MD.Page {
         Layout.bottomMargin: 4
     }
 
-    HealthQuery {
+    W.HealthQuery {
         id: healthQuery
         Component.onCompleted: reload()
     }
 
-    RendererListQuery {
+    W.RendererListQuery {
         id: rendererQuery
         Component.onCompleted: reload()
     }
 
-    RendererPluginListQuery {
+    W.RendererPluginListQuery {
         id: pluginQuery
         Component.onCompleted: reload()
     }
 
-    SourceListQuery {
+    W.SourceListQuery {
         id: sourceQuery
         Component.onCompleted: reload()
     }
@@ -68,7 +68,7 @@ MD.Page {
         return name + "-" + pid;
     }
 
-    RendererKillQuery {
+    W.RendererKillQuery {
         id: killQuery
         onStatusChanged: {
             if (status === 3) {

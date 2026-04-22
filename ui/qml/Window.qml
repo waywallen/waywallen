@@ -7,7 +7,7 @@ import QtQuick.Layouts
 import QtQuick.Templates as T
 
 import Qcm.Material as MD
-import waywallen.ui
+import waywallen.ui as W
 
 MD.ApplicationWindow {
     id: win
@@ -29,7 +29,7 @@ MD.ApplicationWindow {
     width: 900
     title: "waywallen"
 
-    HealthQuery {
+    W.HealthQuery {
         id: healthQuery
         Component.onCompleted: reload()
     }
@@ -69,7 +69,7 @@ MD.ApplicationWindow {
 
     MD.Popup {
         id: m_disconnect_overlay
-        visible: !DaemonDBusClient.daemonAvailable
+        visible: !W.DaemonDBusClient.daemonAvailable
         closePolicy: T.Popup.NoAutoClose
         dim: true
         modal: true

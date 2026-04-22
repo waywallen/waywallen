@@ -3,7 +3,7 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Shapes
 import Qcm.Material as MD
-import waywallen.ui
+import waywallen.ui as W
 
 MD.Page {
     id: root
@@ -12,7 +12,7 @@ MD.Page {
 
     property var selectedId: null
 
-    DisplayListQuery {
+    W.DisplayListQuery {
         id: displayQuery
         Component.onCompleted: reload()
     }
@@ -20,7 +20,7 @@ MD.Page {
     function layoutRects() {
         const out = [];
         let x = 0;
-        for (const d of DisplayManager.displays || []) {
+        for (const d of W.DisplayManager.displays || []) {
             out.push({ x: x, y: 0, w: d.width, h: d.height, d: d });
             x += d.width + root.displayGapPx;
         }
@@ -42,7 +42,7 @@ MD.Page {
 
     function selectedDisplay() {
         if (root.selectedId === null) return null;
-        for (const d of DisplayManager.displays || []) {
+        for (const d of W.DisplayManager.displays || []) {
             if (d.id === root.selectedId) return d;
         }
         return null;

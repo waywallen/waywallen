@@ -2,7 +2,7 @@ pragma ValueTypeBehavior: Assertable
 import QtQuick
 import QtQuick.Layouts
 import Qcm.Material as MD
-import waywallen.ui
+import waywallen.ui as W
 
 MD.ListGridBaseDelegate {
     id: root

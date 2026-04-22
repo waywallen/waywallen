@@ -3,21 +3,21 @@ pragma ValueTypeBehavior: Assertable
 import QtQuick
 import QtQuick.Layouts
 import Qcm.Material as MD
-import waywallen.ui
+import waywallen.ui as W
 
 MD.Page {
     id: root
 
-    WallpaperListQuery {
+    W.WallpaperListQuery {
         id: wallpaperQuery
         Component.onCompleted: reload()
     }
 
-    WallpaperScanQuery {
+    W.WallpaperScanQuery {
         id: scanQuery
     }
 
-    WallpaperApplyQuery {
+    W.WallpaperApplyQuery {
         id: applyQuery
     }
 
@@ -270,7 +270,7 @@ MD.Page {
                                 }
 
                                 Repeater {
-                                    model: DisplayManager.displays
+                                    model: W.DisplayManager.displays
 
                                     MD.FilterChip {
                                         required property var modelData
