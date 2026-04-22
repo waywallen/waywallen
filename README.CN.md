@@ -32,7 +32,7 @@ Waywallen 是一个为 Linux 桌面打造的动态壁纸方案
 
 | 桌面 | 集成 |
 |------|------|
-| **KDE Plasma** | [waywallen-kde](https://github.com/waywallen/waywallen-kde) |
+| **KDE Plasma** | [waywallen-display](https://github.com/waywallen/waywallen-display/) |
 | **Niri** | zwlr_layer_shell_v1 |
 | **Sway** | zwlr_layer_shell_v1 |
 | **GNOME** | 规划中 |
