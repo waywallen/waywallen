@@ -194,6 +194,7 @@ impl RendererManager {
                 types: vec!["scene".to_string()],
                 extra_args: vec![],
                 priority: 100,
+                version: "v0.0.0".to_string(),
             });
         }
         Self::new(registry)

@@ -111,6 +111,7 @@ void RendererPluginListQuery::reload() {
             m[u"name"_s]     = r.name();
             m[u"bin"_s]      = r.bin();
             m[u"priority"_s] = r.priority();
+            m[u"version"_s]  = r.version();
             QStringList types;
             for (const auto& t : r.types()) {
                 types.append(t);

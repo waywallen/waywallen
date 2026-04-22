@@ -23,10 +23,16 @@ pub struct RendererDef {
     pub extra_args: Vec<String>,
     #[serde(default = "default_priority")]
     pub priority: u32,
+    #[serde(default = "default_version")]
+    pub version: String,
 }
 
 fn default_priority() -> u32 {
     100
+}
+
+fn default_version() -> String {
+    "v0.0.0".into()
 }
 
 // ---------------------------------------------------------------------------

@@ -66,7 +66,7 @@ pub async fn apply_wallpaper_by_id(
     let id_owned = id.to_string();
     let (tx, rx) = tokio::sync::oneshot::channel::<Result<ApplyResult>>();
     app.tasks.spawn_async_unique(
-        crate::tasks::TaskKind::Generic,
+        crate::tasks::TaskKind::Apply,
         "apply/global",
         format!("apply/{id_owned}"),
         async move {

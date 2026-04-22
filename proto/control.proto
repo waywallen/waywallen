@@ -146,6 +146,7 @@ message RendererPluginInfo {
   string bin = 2;
   repeated string types = 3;
   uint32 priority = 4;
+  string version = 5;
 }
 
 // ---------------------------------------------------------------------------

@@ -290,7 +290,7 @@ MD.Page {
                             color: MD.Token.color.on_surface_variant
                         }
                         trailing: MD.Text {
-                            text: "p" + (modelData.priority || 0)
+                            text: (modelData.version || "v0.0.0")
                             typescale: MD.Token.typescale.label_small
                             color: MD.Token.color.on_surface_variant
                         }
