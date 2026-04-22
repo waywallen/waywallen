@@ -136,6 +136,10 @@ async fn apply_wallpaper_inner(
         playlist.current = Some(entry.id.clone());
     }
 
+    app.settings.update(|s| {
+        s.global.last_wallpaper = Some(entry.id.clone());
+    });
+
     Ok(ApplyResult { renderer_id, entry })
 }
 

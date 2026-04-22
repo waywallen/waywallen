@@ -71,6 +71,8 @@ struct Args {
     /// UDS endpoint still listens for external consumers (e.g. an
     /// already-installed waywallen-kde kpackage).
     no_display: bool,
+    /// Restore the last applied wallpaper on startup.
+    restore_last: bool,
 }
 
 fn parse_args() -> Args {
@@ -82,6 +84,7 @@ fn parse_args() -> Args {
         plugin_dirs: Vec::new(),
         display_backend: None,
         no_display: false,
+        restore_last: true,
     };
 
     let mut it = std::env::args().skip(1);
@@ -112,9 +115,12 @@ fn parse_args() -> Args {
                 let val = it.next().expect("--plugin requires a path");
                 args.plugin_dirs.push(PathBuf::from(val));
             }
+            "--no-restore" => {
+                args.restore_last = false;
+            }
             other => {
                 eprintln!("unknown argument: {other}");
-                eprintln!("usage: waywallen [--ws-port PORT] [--ui PATH] [--no-ui] [--no-tray] [--plugin PATH]... [--display-backend NAME] [--no-display]");
+                eprintln!("usage: waywallen [--ws-port PORT] [--ui PATH] [--no-ui] [--no-tray] [--plugin PATH]... [--display-backend NAME] [--no-display] [--no-restore]");
                 std::process::exit(1);
             }
         }
@@ -314,6 +320,19 @@ async fn async_main() -> anyhow::Result<()> {
             // Step 3 — seed the playlist from the fresh snapshot.
             let ids: Vec<String> = snapshot.iter().map(|e| e.id.clone()).collect();
             state_for_task.playlist.lock().await.refresh(ids);
+
+            // Step 4 — optional restore of last applied wallpaper.
+            if cli.restore_last {
+                if let Some(last_id) = state_for_task.settings.global().last_wallpaper {
+                    log::info!("restoring last wallpaper: {last_id}");
+                    if let Err(e) =
+                        control::apply_wallpaper_by_id(&state_for_task, &last_id, 0, 0, 0).await
+                    {
+                        log::warn!("failed to restore last wallpaper {last_id}: {e:#}");
+                    }
+                }
+            }
+
             Ok(())
         });
     }
@@ -381,13 +400,15 @@ async fn async_main() -> anyhow::Result<()> {
         let router = router.clone();
         let sock_path = display_sock_path.clone();
         let shutdown_rx = state.shutdown_subscribe();
-        tokio::spawn(async move {
-            if let Err(e) =
-                display_endpoint::serve_with_shutdown(&sock_path, router, shutdown_rx).await
-            {
-                log::error!("display endpoint exited: {e}");
-            }
-        });
+        state.tasks.spawn_async(
+            tasks::TaskKind::Generic,
+            "display/endpoint",
+            async move {
+                display_endpoint::serve_with_shutdown(&sock_path, router, shutdown_rx)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("display endpoint exited: {e}"))
+            },
+        );
     }
 
     // Daemon-managed display backend (layer-shell etc.). Started after
@@ -396,11 +417,15 @@ async fn async_main() -> anyhow::Result<()> {
         let sock_path = display_sock_path.clone();
         let shutdown_rx = state.shutdown_subscribe();
         let name = def.name.clone();
-        tokio::spawn(async move {
-            if let Err(e) = display_spawner::run_backend(def, sock_path, shutdown_rx).await {
-                log::error!("display backend '{name}' supervisor exited: {e:#}");
-            }
-        });
+        state.tasks.spawn_async(
+            tasks::TaskKind::Generic,
+            format!("display/backend/{name}"),
+            async move {
+                display_spawner::run_backend(def, sock_path, shutdown_rx)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("display backend supervisor exited: {e}"))
+            },
+        );
     }
 
     // Bind the WS control plane (port 0 = OS picks an available port).

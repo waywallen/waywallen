@@ -46,6 +46,7 @@ const DEBOUNCE_WRITE: Duration = Duration::from_secs(2);
 pub struct GlobalSettings {
     pub default_width: u32,
     pub default_height: u32,
+    pub last_wallpaper: Option<String>,
 }
 
 impl Default for GlobalSettings {
@@ -53,6 +54,7 @@ impl Default for GlobalSettings {
         Self {
             default_width: 1920,
             default_height: 1080,
+            last_wallpaper: None,
         }
     }
 }
