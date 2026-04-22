@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::os::fd::{AsFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::net::Shutdown;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -102,6 +104,15 @@ struct OutputBinding {
     /// this output's layer_surface. The worker waits until this is
     /// Some before starting the UDS session.
     configured_size: Mutex<Option<(u32, u32)>>,
+    /// Set to `true` when the corresponding `wl_output` is removed at
+    /// runtime (hot-unplug). The worker checks before reconnect; the
+    /// main thread also `shutdown(2)`s the active stream so any
+    /// blocking `recv_event` returns immediately.
+    closed: AtomicBool,
+    /// Most-recent live UDS connection. Worker stashes it after a
+    /// successful `connect`; cleared on session exit. Main thread
+    /// reads + shutdowns it on hot-unplug.
+    stream: RwLock<Option<Arc<UnixStream>>>,
 }
 
 /// One logical output — wl_output plus the layer_surface/UDS worker
@@ -200,15 +211,60 @@ impl App {
 
 impl Dispatch<WlRegistry, GlobalListContents> for App {
     fn event(
-        _state: &mut Self,
-        _registry: &WlRegistry,
-        _event: wayland_client::protocol::wl_registry::Event,
+        state: &mut Self,
+        registry: &WlRegistry,
+        event: wayland_client::protocol::wl_registry::Event,
         _data: &GlobalListContents,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
-        // Runtime output hot-plug is out of scope for this pass —
-        // globals are taken once at startup via registry_queue_init.
+        use wayland_client::protocol::wl_registry::Event;
+        match event {
+            Event::Global { name, interface, version } => {
+                // Runtime hot-plug: only `wl_output` is interesting —
+                // compositor / dmabuf / layer_shell singletons don't
+                // appear post-startup in any sane setup.
+                if interface == "wl_output" {
+                    if state.outputs.contains_key(&name) {
+                        return;
+                    }
+                    let wl_output = registry.bind::<WlOutput, _, _>(
+                        name,
+                        version.min(4),
+                        qh,
+                        name,
+                    );
+                    state.outputs.insert(
+                        name,
+                        OutputEntry {
+                            wl_output,
+                            surface: None,
+                            layer_surface: None,
+                            binding: None,
+                            worker_started: false,
+                        },
+                    );
+                    log::info!("hot-plug: wl_output name={name} added; bringing up surface");
+                    state.bring_up_surface(name, qh);
+                }
+            }
+            Event::GlobalRemove { name } => {
+                if let Some(entry) = state.outputs.remove(&name) {
+                    log::info!("hot-unplug: wl_output name={name} removed");
+                    // Drop layer_surface / surface explicitly so the
+                    // compositor sees the destroy. The worker thread
+                    // still holds a clone of the surface via its
+                    // OutputBinding `Arc`; it will start emitting
+                    // protocol errors on the next FrameReady → its
+                    // session loop will fail, log, and reconnect-loop
+                    // forever (harmlessly — daemon won't have anything
+                    // for a non-registered display). Full worker
+                    // teardown is a follow-up.
+                    drop(entry);
+                }
+            }
+            _ => {}
+        }
     }
 }
 

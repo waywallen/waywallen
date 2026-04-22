@@ -45,7 +45,45 @@ pub struct ApplyResult {
     pub entry: WallpaperEntry,
 }
 
+/// Apply a wallpaper by id, with single-flight semantics across the
+/// daemon: only one apply is in flight at a time. A subsequent call
+/// supersedes any in-flight prior call (the prior caller observes
+/// `apply task superseded or cancelled` and the prior renderer-spawn
+/// in progress is dropped, which kills its child via `kill_on_drop`).
+///
+/// This sits on top of `crate::tasks::TaskManager::spawn_async_unique`
+/// using the fixed key `apply/global` — Iter 3 only serializes globally;
+/// per-display keys land when displays can be assigned distinct
+/// wallpapers.
 pub async fn apply_wallpaper_by_id(
+    app: &Arc<AppState>,
+    id: &str,
+    width: u32,
+    height: u32,
+    fps: u32,
+) -> Result<ApplyResult> {
+    let app_clone = app.clone();
+    let id_owned = id.to_string();
+    let (tx, rx) = tokio::sync::oneshot::channel::<Result<ApplyResult>>();
+    app.tasks.spawn_async_unique(
+        crate::tasks::TaskKind::Generic,
+        "apply/global",
+        format!("apply/{id_owned}"),
+        async move {
+            let res = apply_wallpaper_inner(&app_clone, &id_owned, width, height, fps).await;
+            // If the receiver is gone the caller already moved on (or
+            // was itself cancelled); silently drop the result.
+            let _ = tx.send(res);
+            Ok(())
+        },
+    );
+    rx.await
+        .map_err(|_| anyhow!("apply task superseded or cancelled"))?
+}
+
+/// The actual apply work — spawn renderer, relink displays, kill old
+/// renderers, update playlist. Caller is the unique apply task.
+async fn apply_wallpaper_inner(
     app: &Arc<AppState>,
     id: &str,
     width: u32,

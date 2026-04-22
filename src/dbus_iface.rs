@@ -110,6 +110,15 @@ impl Daemon1 {
     /// `cancelled`. For `failed`, the error message is appended after a
     /// colon (e.g. `failed: nope`) so callers can read it without an
     /// extra round-trip.
+    /// Cancel a Running task by id. Returns `true` if a cancel token
+    /// existed (the task was Running at call time); `false` if the id
+    /// is unknown or the task already finished. The task may take a
+    /// few ms to observe the cancellation depending on what it's
+    /// awaiting.
+    fn cancel_task(&self, id: u64) -> bool {
+        self.app.tasks.cancel(id)
+    }
+
     fn list_tasks(&self) -> Vec<(u64, String, String, i64, String)> {
         self.app
             .tasks
