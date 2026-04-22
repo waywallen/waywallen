@@ -340,8 +340,9 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
                 .map(|def| pb::RendererPluginInfo {
                     name: def.name.clone(),
                     bin: def.bin.to_string_lossy().into_owned(),
-                    types: def.types.clone(),
+                    types: def.types.iter().map(|t| t.to_string()).collect(),
                     priority: def.priority,
+                    version: def.version.clone(),
                 })
                 .collect();
             let supported_types = registry

@@ -13,8 +13,8 @@ use std::time::Duration;
 use anyhow::{anyhow, bail, Context, Result};
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{
-    wl_buffer::WlBuffer, wl_compositor::WlCompositor, wl_output::WlOutput,
-    wl_registry::WlRegistry, wl_surface::WlSurface,
+    wl_buffer::WlBuffer, wl_callback::{self, WlCallback}, wl_compositor::WlCompositor,
+    wl_output::WlOutput, wl_registry::WlRegistry, wl_surface::WlSurface,
 };
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::wp::linux_dmabuf::zv1::client::{
@@ -100,6 +100,14 @@ struct OutputBinding {
     surface: WlSurface,
     dmabuf: ZwpLinuxDmabufV1,
     conn: Connection,
+    /// QueueHandle used for child proxies created from the worker
+    /// thread (frame callbacks, dmabuf params). Clone of the main
+    /// thread's queue handle.
+    qh: QueueHandle<App>,
+    /// Global name of the owning `wl_output`. Used as user-data when
+    /// requesting frame callbacks so the main-thread Dispatch routes
+    /// the `Done` event back to the right `frame_pending` flag.
+    output_name: u32,
     /// Populated by the main thread on the first Configure event for
     /// this output's layer_surface. The worker waits until this is
     /// Some before starting the UDS session.
@@ -113,6 +121,12 @@ struct OutputBinding {
     /// successful `connect`; cleared on session exit. Main thread
     /// reads + shutdowns it on hot-unplug.
     stream: RwLock<Option<Arc<UnixStream>>>,
+    /// `true` while a `wl_callback::done` is outstanding. Set after
+    /// commit + frame(); cleared by the `WlCallback` Dispatch impl.
+    /// Gates whether the worker commits a new buffer (throttles to
+    /// compositor vblank) — `BufferRelease` is always sent so the
+    /// daemon keeps producing.
+    frame_pending: AtomicBool,
 }
 
 /// One logical output — wl_output plus the layer_surface/UDS worker
@@ -251,15 +265,19 @@ impl Dispatch<WlRegistry, GlobalListContents> for App {
             Event::GlobalRemove { name } => {
                 if let Some(entry) = state.outputs.remove(&name) {
                     log::info!("hot-unplug: wl_output name={name} removed");
-                    // Drop layer_surface / surface explicitly so the
-                    // compositor sees the destroy. The worker thread
-                    // still holds a clone of the surface via its
-                    // OutputBinding `Arc`; it will start emitting
-                    // protocol errors on the next FrameReady → its
-                    // session loop will fail, log, and reconnect-loop
-                    // forever (harmlessly — daemon won't have anything
-                    // for a non-registered display). Full worker
-                    // teardown is a follow-up.
+                    // Tear down the worker thread cooperatively:
+                    //   1. flip `closed` so the reconnect loop exits
+                    //      after its current session.
+                    //   2. if the worker is mid-session (blocked on
+                    //      `recv_event`), shutdown its UnixStream —
+                    //      the kernel unblocks the read and the
+                    //      session returns with an error.
+                    if let Some(binding) = entry.binding.as_ref() {
+                        binding.closed.store(true, Ordering::SeqCst);
+                        if let Some(stream) = binding.stream.read().unwrap().clone() {
+                            let _ = stream.shutdown(Shutdown::Both);
+                        }
+                    }
                     drop(entry);
                 }
             }
@@ -310,6 +328,31 @@ impl Dispatch<WlBuffer, ()> for App {
     }
 }
 
+impl Dispatch<WlCallback, u32> for App {
+    fn event(
+        state: &mut Self,
+        _cb: &WlCallback,
+        event: wl_callback::Event,
+        data: &u32,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        // Compositor signalled that it presented the last commit; it's
+        // safe to commit another buffer now. user_data carries the
+        // owning wl_output name so we target the right binding.
+        if let wl_callback::Event::Done { .. } = event {
+            let output_name = *data;
+            if let Some(binding) = state
+                .outputs
+                .get(&output_name)
+                .and_then(|e| e.binding.as_ref())
+            {
+                binding.frame_pending.store(false, Ordering::SeqCst);
+            }
+        }
+    }
+}
+
 impl Dispatch<WlOutput, u32> for App {
     fn event(
         _state: &mut Self,
@@ -343,7 +386,7 @@ impl Dispatch<ZwlrLayerSurfaceV1, u32> for App {
         event: zwlr_layer_surface_v1::Event,
         data: &u32,
         conn: &Connection,
-        _qh: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
     ) {
         let output_name = *data;
         match event {
@@ -376,7 +419,12 @@ impl Dispatch<ZwlrLayerSurfaceV1, u32> for App {
                         surface,
                         dmabuf,
                         conn: conn.clone(),
+                        qh: qh.clone(),
+                        output_name,
                         configured_size: Mutex::new(None),
+                        closed: AtomicBool::new(false),
+                        stream: RwLock::new(None),
+                        frame_pending: AtomicBool::new(false),
                     })
                 });
                 *binding.configured_size.lock().unwrap() = Some((width, height));
@@ -434,20 +482,45 @@ impl Dispatch<ZwpLinuxBufferParamsV1, ()> for App {
 
 fn uds_worker_loop(sock: PathBuf, binding: Arc<OutputBinding>) {
     loop {
-        match run_uds_session(&sock, &binding) {
+        if binding.closed.load(Ordering::SeqCst) {
+            log::info!(
+                "[{}] output closed; worker exiting",
+                binding.display_name
+            );
+            return;
+        }
+        let res = run_uds_session(&sock, &binding);
+        // Always clear the active stream slot on session exit so the
+        // hot-unplug path doesn't shutdown a stale fd on the next
+        // connection.
+        binding.stream.write().unwrap().take();
+        match res {
             Ok(()) => log::info!(
                 "[{}] UDS session ended cleanly",
                 binding.display_name
             ),
             Err(e) => log::warn!("[{}] UDS session error: {e:#}", binding.display_name),
         }
+        if binding.closed.load(Ordering::SeqCst) {
+            log::info!(
+                "[{}] output closed; worker exiting after session end",
+                binding.display_name
+            );
+            return;
+        }
         thread::sleep(Duration::from_secs(2));
     }
 }
 
 fn run_uds_session(sock: &Path, binding: &OutputBinding) -> Result<()> {
-    let stream = UnixStream::connect(sock)
-        .with_context(|| format!("connect {}", sock.display()))?;
+    let stream = Arc::new(
+        UnixStream::connect(sock)
+            .with_context(|| format!("connect {}", sock.display()))?,
+    );
+    // Publish the live stream so the main thread can `shutdown(2)` it
+    // on hot-unplug — that unblocks the blocking `recv_event` below.
+    *binding.stream.write().unwrap() = Some(stream.clone());
+    let stream: &UnixStream = &stream;
     log::info!(
         "[{}] UDS worker connected to {}",
         binding.display_name,
@@ -586,17 +659,36 @@ fn run_uds_session(sock: &Path, binding: &OutputBinding) -> Result<()> {
                         gen
                     );
                 } else if let Some(buffer) = pool.get(buffer_index as usize) {
-                    binding.surface.attach(Some(buffer), 0, 0);
-                    binding
-                        .surface
-                        .damage_buffer(0, 0, buf_width as i32, buf_height as i32);
-                    binding.surface.commit();
-                    frames_presented += 1;
-                    if let Err(e) = binding.conn.flush() {
-                        log::warn!(
-                            "[{}] wayland flush failed: {e}",
+                    // Throttle commits to compositor vblank: if the
+                    // last frame_callback hasn't fired yet, skip this
+                    // commit (but always ack BufferRelease below so
+                    // the daemon isn't starved). The compositor will
+                    // redraw from whatever buffer is currently
+                    // attached.
+                    if binding.frame_pending.load(Ordering::SeqCst) {
+                        log::trace!(
+                            "[{}] skip commit: frame callback pending",
                             binding.display_name
                         );
+                    } else {
+                        binding.surface.attach(Some(buffer), 0, 0);
+                        binding
+                            .surface
+                            .damage_buffer(0, 0, buf_width as i32, buf_height as i32);
+                        // Request a frame callback *before* committing
+                        // so the callback is tied to this surface
+                        // state. user_data = output_name so the
+                        // Dispatch impl can find the right binding.
+                        binding.surface.frame(&binding.qh, binding.output_name);
+                        binding.frame_pending.store(true, Ordering::SeqCst);
+                        binding.surface.commit();
+                        frames_presented += 1;
+                        if let Err(e) = binding.conn.flush() {
+                            log::warn!(
+                                "[{}] wayland flush failed: {e}",
+                                binding.display_name
+                            );
+                        }
                     }
                 } else {
                     log::warn!(

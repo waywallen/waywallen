@@ -37,6 +37,12 @@ pub type TaskId = u64;
 pub enum TaskKind {
     /// One-shot startup work (source scan + DB sync + playlist seed).
     Startup,
+    /// User-initiated wallpaper apply (renderer spawn + router relink).
+    Apply,
+    /// Long-running infrastructure loop (UDS endpoint, layer-shell
+    /// supervisor). One entry per long-lived service; stays `Running`
+    /// for the lifetime of the daemon.
+    Service,
     /// Fallback bucket for everything not otherwise classified.
     Generic,
 }
@@ -45,6 +51,8 @@ impl TaskKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             TaskKind::Startup => "startup",
+            TaskKind::Apply => "apply",
+            TaskKind::Service => "service",
             TaskKind::Generic => "generic",
         }
     }

@@ -401,7 +401,7 @@ async fn async_main() -> anyhow::Result<()> {
         let sock_path = display_sock_path.clone();
         let shutdown_rx = state.shutdown_subscribe();
         state.tasks.spawn_async(
-            tasks::TaskKind::Generic,
+            tasks::TaskKind::Service,
             "display/endpoint",
             async move {
                 display_endpoint::serve_with_shutdown(&sock_path, router, shutdown_rx)
@@ -418,7 +418,7 @@ async fn async_main() -> anyhow::Result<()> {
         let shutdown_rx = state.shutdown_subscribe();
         let name = def.name.clone();
         state.tasks.spawn_async(
-            tasks::TaskKind::Generic,
+            tasks::TaskKind::Service,
             format!("display/backend/{name}"),
             async move {
                 display_spawner::run_backend(def, sock_path, shutdown_rx)
