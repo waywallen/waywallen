@@ -168,6 +168,7 @@ void Backend::on_connected() {
 
 void Backend::on_error(QString msg) {
     qWarning("backend error: %s", qPrintable(msg));
+    Q_EMIT this->disconnected();
 
     // Schedule reconnect with exponential backoff.
     if (! m_reconnect_timer) {

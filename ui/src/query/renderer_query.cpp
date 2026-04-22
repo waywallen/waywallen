@@ -43,6 +43,13 @@ void RendererListQuery::reload() {
         auto  rsp      = result.unwrap();
         auto& list_rsp = rsp.rendererList();
 
+        // Sync the global RendererManager first so any consumer pulling
+        // from the manager sees the freshly-fetched rows before this
+        // query's own `renderersChanged` fires.
+        if (auto* rm = RendererManager::instance()) {
+            rm->replaceAll(list_rsp.instances());
+        }
+
         QStringList ids;
         for (const auto& id : list_rsp.renderers()) {
             ids.append(id);

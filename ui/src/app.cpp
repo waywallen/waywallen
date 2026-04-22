@@ -5,9 +5,14 @@ module;
 
 module waywallen;
 import :app;
+import :display;
+import :renderer;
+import :query;
 
 using namespace waywallen;
 using namespace Qt::Literals::StringLiterals;
+
+namespace proto = waywallen::control::v1;
 
 auto app_instance(waywallen::App* in = nullptr) -> waywallen::App* {
     static waywallen::App* instance { in };
@@ -111,10 +116,19 @@ void App::init() {
         }
     });
 
-    // Hook DisplayManager up to Backend events *before* connectTo so
-    // the snapshot the daemon pushes right after the handshake lands.
     d->m_display_mgr->attachTo(d->m_backend.get());
     d->m_renderer_mgr->attachTo(d->m_backend.get());
+
+    // Perform full sync on every connection (initial and reconnect).
+    connect(d->m_backend.get(), &Backend::connected, this, [d]() {
+        qDebug("ws connected; triggering full status sync");
+        // We use queries for the async fetch + manager sync side effects.
+        // Queries are parented to the manager so they don't leak.
+        auto* dq = new DisplayListQuery(d->m_display_mgr.get());
+        dq->reload();
+        auto* rq = new RendererListQuery(d->m_renderer_mgr.get());
+        rq->reload();
+    });
 
     // Connect to the daemon's WebSocket (no-op if port is still 0).
     d->m_backend->connectTo();
