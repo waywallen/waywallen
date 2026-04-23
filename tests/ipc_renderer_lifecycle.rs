@@ -5,6 +5,7 @@
 
 use waywallen::ipc::proto::ControlMsg;
 use waywallen::renderer_manager::{RendererManager, SpawnRequest};
+use std::sync::Arc;
 use std::time::Duration;
 
 #[path = "common/mod.rs"]
@@ -20,7 +21,7 @@ async fn spawn_control_kill_roundtrip() {
         return;
     }
 
-    let mgr = RendererManager::new_default();
+    let mgr = Arc::new(RendererManager::new_default());
 
     // Spawn a renderer with bogus scene/assets — the host will start its
     // looper threads and emit Ready before noticing the scene is missing,

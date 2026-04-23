@@ -11,7 +11,7 @@ use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak as StdWeak};
 use std::thread;
 use std::time::Duration;
 use tokio::process::{Child, Command};
@@ -19,8 +19,9 @@ use tokio::sync::{broadcast, Mutex as TokioMutex};
 use uuid::Uuid;
 
 use crate::ipc::proto::{ControlMsg, EventMsg};
-use crate::ipc::uds::{recv_event, send_control};
+use crate::ipc::uds::{recv_event, send_control, CodecError};
 use crate::plugin::renderer_registry::{RendererDef, RendererRegistry};
+use crate::routing::Router;
 use crate::wallpaper_type::WallpaperType;
 
 // ---------------------------------------------------------------------------
@@ -165,6 +166,20 @@ pub struct RendererManager {
     inner: TokioMutex<Inner>,
     /// Plugin registry mapping wallpaper types to renderer binaries.
     registry: RendererRegistry,
+    /// Back-reference to the router, installed after construction via
+    /// `attach_router`. Held weak to avoid a cycle with `Router::mgr`.
+    /// Consulted on the crash path (`evict`) so a dead renderer gets
+    /// unlinked from the routing table in lockstep with being evicted
+    /// from our map.
+    router: OnceLock<StdWeak<Router>>,
+    /// Dead-renderer signals queue here (from reader-thread exit or
+    /// a send_control hitting EPIPE). A single background reaper task
+    /// drains the channel and runs the async `evict` — routing it
+    /// through a channel keeps `mark_dead` synchronous, which breaks
+    /// the async-Send inference cycle between `send_control` and
+    /// `router::unregister_renderer → reconcile_lifecycle → send_control`.
+    reap_tx: tokio::sync::mpsc::UnboundedSender<RendererId>,
+    reap_rx: StdMutex<Option<tokio::sync::mpsc::UnboundedReceiver<RendererId>>>,
 }
 
 struct Inner {
@@ -173,12 +188,41 @@ struct Inner {
 
 impl RendererManager {
     pub fn new(registry: RendererRegistry) -> Self {
+        let (reap_tx, reap_rx) = tokio::sync::mpsc::unbounded_channel();
         Self {
             inner: TokioMutex::new(Inner {
                 renderers: HashMap::new(),
             }),
             registry,
+            router: OnceLock::new(),
+            reap_tx,
+            reap_rx: StdMutex::new(Some(reap_rx)),
         }
+    }
+
+    /// Wire the manager to the router. Must be called once after both
+    /// sides have been constructed. Idempotent: further calls are
+    /// no-ops.
+    pub fn attach_router(&self, router: StdWeak<Router>) {
+        let _ = self.router.set(router);
+    }
+
+    /// Start the background reaper task that drains `mark_dead`
+    /// signals and runs the async eviction. Must be called from
+    /// inside a tokio runtime context. No-op if already started or
+    /// if the channel receiver was already taken.
+    pub fn start_reaper(self: &Arc<Self>) {
+        let rx = match self.reap_rx.lock() {
+            Ok(mut g) => g.take(),
+            Err(_) => return,
+        };
+        let Some(mut rx) = rx else { return };
+        let this = Arc::clone(self);
+        tokio::spawn(async move {
+            while let Some(id) = rx.recv().await {
+                this.evict(&id).await;
+            }
+        });
     }
 
     /// Test-only convenience: construct a manager whose registry has a
@@ -311,8 +355,16 @@ impl RendererManager {
         let reader_snapshot = bind_snapshot.clone();
         let reader_sync_fds = sync_fds.clone();
         let reader_id = id.clone();
+        let reader_reap_tx = self.reap_tx.clone();
         thread::spawn(move || {
-            run_reader(reader_id, reader_sock, reader_events, reader_snapshot, reader_sync_fds);
+            run_reader(
+                reader_id,
+                reader_sock,
+                reader_events,
+                reader_snapshot,
+                reader_sync_fds,
+                reader_reap_tx,
+            );
         });
 
         let handle = Arc::new(RendererHandle {
@@ -368,22 +420,69 @@ impl RendererManager {
         inner.renderers.keys().cloned().collect()
     }
 
-    /// Fire-and-forget control send. Returns an error only if the
-    /// renderer is unknown or the underlying socket write fails.
+    /// Fire-and-forget control send. Returns an error if the renderer
+    /// is unknown or the underlying socket write fails. On EPIPE /
+    /// ECONNRESET / ENOTCONN the handle is enqueued for eviction via
+    /// `mark_dead` before the error is returned so follow-up calls
+    /// don't keep re-hitting a dead peer.
     pub async fn send_control(&self, id: &str, msg: ControlMsg) -> Result<()> {
         let handle = self
             .get(id)
             .await
             .ok_or_else(|| anyhow!("unknown renderer: {id}"))?;
         let sock = handle.sock.clone();
-        tokio::task::spawn_blocking(move || {
-            let guard = sock
-                .lock()
-                .map_err(|e| anyhow!("sock mutex poisoned: {e}"))?;
-            send_control(&*guard, &msg, &[]).map_err(|e| anyhow!("send_control: {e}"))
-        })
-        .await
-        .context("send_control join")?
+        let codec_res: Result<std::result::Result<(), CodecError>> =
+            tokio::task::spawn_blocking(move || {
+                let guard = sock
+                    .lock()
+                    .map_err(|e| anyhow!("sock mutex poisoned: {e}"))?;
+                Ok(send_control(&*guard, &msg, &[]))
+            })
+            .await
+            .context("send_control join")?;
+        match codec_res? {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                if is_peer_gone(&e) {
+                    log::warn!("renderer {id}: peer gone on send_control ({e}), evicting");
+                    self.mark_dead(id);
+                }
+                Err(anyhow!("send_control: {e}"))
+            }
+        }
+    }
+
+    /// Enqueue a renderer for eviction. Synchronous (cheap channel
+    /// send); the actual cleanup happens on the reaper task started
+    /// by `start_reaper`. Safe to call from anywhere, including non-
+    /// async contexts (e.g. the reader thread's drop guard). Multiple
+    /// signals for the same id are fine — `evict` is idempotent.
+    pub fn mark_dead(&self, id: &str) {
+        if self.reap_tx.send(id.to_string()).is_err() {
+            log::warn!("renderer {id}: mark_dead dropped (reaper channel closed)");
+        }
+    }
+
+    /// Actual eviction: remove from map, unregister from router, kill
+    /// child. Called only by the reaper task. Idempotent: a second
+    /// call with the same id is a no-op.
+    async fn evict(self: &Arc<Self>, id: &str) {
+        let handle = {
+            let mut inner = self.inner.lock().await;
+            inner.renderers.remove(id)
+        };
+        let Some(handle) = handle else { return };
+        log::warn!("renderer {id}: evicting");
+
+        if let Some(router) = self.router.get().and_then(|w| w.upgrade()) {
+            router.unregister_renderer(id).await;
+        }
+
+        let mut child_guard = handle.child.lock().await;
+        if let Some(mut child) = child_guard.take() {
+            let _ = child.start_kill();
+            let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
+        }
     }
 
     /// Send Shutdown, then kill + reap the child. Removes from the map.
@@ -425,7 +524,13 @@ fn run_reader(
     events: broadcast::Sender<EventMsg>,
     bind_snapshot: Arc<StdMutex<Option<BindSnapshot>>>,
     sync_fds: Arc<StdMutex<std::collections::VecDeque<(u64, OwnedFd)>>>,
+    reap_tx: tokio::sync::mpsc::UnboundedSender<RendererId>,
 ) {
+    // Any exit path from this thread — clean EOF, recvmsg error, or
+    // panic — enqueues the renderer for eviction so stale ids don't
+    // leak out through find_reusable or bind_snapshot.
+    let _reap = ReaperOnDrop { id: id.clone(), tx: reap_tx };
+
     // Hold the stream by dup'ing the raw fd so the blocking recv is not
     // contending with sends on the same mutex. recvmsg on an AF_UNIX
     // stream socket is safe to call from a different fd referencing the
@@ -526,6 +631,34 @@ fn run_reader(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// True when a `send_control` / `recv_event` error indicates the peer
+/// is gone (renderer crashed, closed its UDS, etc.). Callers use this
+/// to trigger `mark_dead` instead of just surfacing the error.
+fn is_peer_gone(err: &CodecError) -> bool {
+    use nix::errno::Errno;
+    matches!(
+        err,
+        CodecError::PeerClosed
+            | CodecError::Nix(Errno::EPIPE | Errno::ECONNRESET | Errno::ENOTCONN)
+    )
+}
+
+/// RAII guard that enqueues the renderer for eviction when the reader
+/// thread drops it — any exit path (EOF, recvmsg error, panic) ends
+/// up here so the manager's map and the router's routing table stay
+/// in sync with the actual set of live renderer children.
+struct ReaperOnDrop {
+    id: RendererId,
+    tx: tokio::sync::mpsc::UnboundedSender<RendererId>,
+}
+
+impl Drop for ReaperOnDrop {
+    fn drop(&mut self) {
+        let id = std::mem::take(&mut self.id);
+        let _ = self.tx.send(id);
+    }
+}
 
 fn temp_sock_path(id: &str) -> PathBuf {
     let runtime_dir = std::env::var("XDG_RUNTIME_DIR")

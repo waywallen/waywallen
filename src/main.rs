@@ -218,6 +218,8 @@ async fn async_main() -> anyhow::Result<()> {
 
     let renderer_mgr = Arc::new(renderer_manager::RendererManager::new(registry));
     let router = routing::Router::new(renderer_mgr.clone());
+    renderer_mgr.attach_router(Arc::downgrade(&router));
+    renderer_mgr.start_reaper();
     let settings_store =
         settings::SettingsStore::load_or_default(settings::default_config_path()).await;
     let db_path = settings::default_db_path();
