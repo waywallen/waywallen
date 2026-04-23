@@ -14,12 +14,17 @@ use anyhow::{anyhow, bail, Context, Result};
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
 use wayland_client::protocol::{
     wl_buffer::WlBuffer, wl_callback::{self, WlCallback}, wl_compositor::WlCompositor,
-    wl_output::WlOutput, wl_registry::WlRegistry, wl_surface::WlSurface,
+    wl_output::{self, Transform, WlOutput},
+    wl_registry::WlRegistry, wl_surface::WlSurface,
 };
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::wp::linux_dmabuf::zv1::client::{
     zwp_linux_buffer_params_v1::{self, ZwpLinuxBufferParamsV1},
     zwp_linux_dmabuf_v1::{self, ZwpLinuxDmabufV1},
+};
+use wayland_protocols::wp::viewporter::client::{
+    wp_viewport::{self, WpViewport},
+    wp_viewporter::{self, WpViewporter},
 };
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1::{self, Layer, ZwlrLayerShellV1},
@@ -108,10 +113,24 @@ struct OutputBinding {
     /// requesting frame callbacks so the main-thread Dispatch routes
     /// the `Done` event back to the right `frame_pending` flag.
     output_name: u32,
-    /// Populated by the main thread on the first Configure event for
-    /// this output's layer_surface. The worker waits until this is
-    /// Some before starting the UDS session.
+    /// Physical buffer size (logical × integer_scale) the daemon must
+    /// render at for 1:1 mapping on HiDPI. Populated on the first
+    /// layer_surface Configure; worker advertises this as the display
+    /// size when registering with the daemon.
     configured_size: Mutex<Option<(u32, u32)>>,
+    /// Logical surface size (from `zwlr_layer_surface_v1::configure`).
+    /// Used as the viewport destination so the compositor maps the
+    /// physical-size buffer onto the correct surface extent.
+    logical_size: Mutex<Option<(u32, u32)>>,
+    /// Integer output scale from `wl_output::scale`. Defaults to 1;
+    /// updated before worker spawns (we roundtrip after bind so
+    /// output metadata has landed).
+    scale: std::sync::atomic::AtomicI32,
+    /// Optional `wp_viewport` — when bound, gives us explicit
+    /// source-rect/dest-rect mapping between buffer and surface
+    /// (handles HiDPI + `SetConfig` crop). Absent → fall back to
+    /// `wl_surface::set_buffer_scale`.
+    viewport: Option<WpViewport>,
     /// Set to `true` when the corresponding `wl_output` is removed at
     /// runtime (hot-unplug). The worker checks before reconnect; the
     /// main thread also `shutdown(2)`s the active stream so any
@@ -135,14 +154,23 @@ struct OutputEntry {
     wl_output: WlOutput,
     surface: Option<WlSurface>,
     layer_surface: Option<ZwlrLayerSurfaceV1>,
+    viewport: Option<WpViewport>,
     binding: Option<Arc<OutputBinding>>,
     worker_started: bool,
+    /// Latest integer scale from `wl_output::scale`. Sampled into the
+    /// binding on first configure. `1` when the event hasn't fired.
+    scale: i32,
 }
 
 struct App {
     compositor: Option<WlCompositor>,
     layer_shell: Option<ZwlrLayerShellV1>,
     dmabuf: Option<ZwpLinuxDmabufV1>,
+    /// Optional `wp_viewporter` — if the compositor exposes it, each
+    /// surface gets a viewport and we set explicit source/dest rects
+    /// every commit. Older compositors without it fall back to
+    /// `wl_surface::set_buffer_scale`.
+    viewporter: Option<WpViewporter>,
     /// Keyed by `wl_output` global name (u32). The same key is used as
     /// Dispatch user-data for every per-output child proxy so events
     /// find their owning entry in O(1).
@@ -157,6 +185,7 @@ impl App {
             compositor: None,
             layer_shell: None,
             dmabuf: None,
+            viewporter: None,
             outputs: HashMap::new(),
             uds_sock,
             name_prefix,
@@ -189,9 +218,17 @@ impl App {
         layer_surface.set_exclusive_zone(-1);
         layer_surface.set_keyboard_interactivity(KeyboardInteractivity::None);
         layer_surface.set_size(0, 0);
+        // If the compositor advertises wp_viewporter, attach a viewport
+        // to this surface so we can map arbitrary buffer regions to
+        // arbitrary surface extents (needed for HiDPI + SetConfig).
+        let viewport = self
+            .viewporter
+            .as_ref()
+            .map(|vp| vp.get_viewport(&surface, qh, output_name));
         surface.commit();
         entry.surface = Some(surface);
         entry.layer_surface = Some(layer_surface);
+        entry.viewport = viewport;
         log::info!("output {output_name}: layer_surface committed, waiting for configure");
     }
 
@@ -254,8 +291,10 @@ impl Dispatch<WlRegistry, GlobalListContents> for App {
                             wl_output,
                             surface: None,
                             layer_surface: None,
+                            viewport: None,
                             binding: None,
                             worker_started: false,
+                            scale: 1,
                         },
                     );
                     log::info!("hot-plug: wl_output name={name} added; bringing up surface");
@@ -355,13 +394,26 @@ impl Dispatch<WlCallback, u32> for App {
 
 impl Dispatch<WlOutput, u32> for App {
     fn event(
-        _state: &mut Self,
+        state: &mut Self,
         _p: &WlOutput,
-        _e: wayland_client::protocol::wl_output::Event,
-        _data: &u32,
+        event: wl_output::Event,
+        data: &u32,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
+        // Track the integer buffer scale so HiDPI outputs get a
+        // physically-sized buffer + viewporter mapping.
+        if let wl_output::Event::Scale { factor } = event {
+            let output_name = *data;
+            if let Some(entry) = state.outputs.get_mut(&output_name) {
+                entry.scale = factor.max(1);
+                if let Some(binding) = entry.binding.as_ref() {
+                    binding
+                        .scale
+                        .store(factor.max(1), Ordering::SeqCst);
+                }
+            }
+        }
         // Output metadata (Name/Geometry/Mode/Done) is informational;
         // the layer_surface's own Configure event is authoritative.
     }
@@ -422,12 +474,37 @@ impl Dispatch<ZwlrLayerSurfaceV1, u32> for App {
                         qh: qh.clone(),
                         output_name,
                         configured_size: Mutex::new(None),
+                        logical_size: Mutex::new(None),
+                        scale: std::sync::atomic::AtomicI32::new(entry.scale.max(1)),
+                        viewport: entry.viewport.clone(),
                         closed: AtomicBool::new(false),
                         stream: RwLock::new(None),
                         frame_pending: AtomicBool::new(false),
                     })
                 });
-                *binding.configured_size.lock().unwrap() = Some((width, height));
+                // `width` / `height` from `configure` are in *logical*
+                // (surface-local) coordinates. For 1:1 rendering on
+                // HiDPI we ask the daemon to produce a buffer of
+                // `logical × integer_scale` physical pixels and then
+                // map that full buffer back down to the logical surface
+                // extent via `wp_viewporter`.
+                let scale = entry.scale.max(1);
+                binding
+                    .scale
+                    .store(scale, Ordering::SeqCst);
+                let physical = (
+                    width.saturating_mul(scale as u32),
+                    height.saturating_mul(scale as u32),
+                );
+                *binding.logical_size.lock().unwrap() = Some((width, height));
+                *binding.configured_size.lock().unwrap() = Some(physical);
+                if scale > 1 {
+                    log::info!(
+                        "output {output_name}: logical {width}x{height} × scale {scale} → physical {}x{}",
+                        physical.0,
+                        physical.1
+                    );
+                }
                 // NOTE: `entry` borrows state.outputs mutably; drop it
                 // before re-entering App via maybe_spawn_worker.
                 let _ = binding;
@@ -473,6 +550,32 @@ impl Dispatch<ZwpLinuxBufferParamsV1, ()> for App {
         if let zwp_linux_buffer_params_v1::Event::Failed = event {
             log::error!("zwp_linux_buffer_params_v1 Failed: dmabuf import rejected");
         }
+    }
+}
+
+impl Dispatch<WpViewporter, ()> for App {
+    fn event(
+        _state: &mut Self,
+        _p: &WpViewporter,
+        _e: wp_viewporter::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        // wp_viewporter has no events.
+    }
+}
+
+impl Dispatch<WpViewport, u32> for App {
+    fn event(
+        _state: &mut Self,
+        _p: &WpViewport,
+        _e: wp_viewport::Event,
+        _data: &u32,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        // wp_viewport has no events.
     }
 }
 
@@ -582,6 +685,15 @@ fn run_uds_session(sock: &Path, binding: &OutputBinding) -> Result<()> {
     let mut buf_width: u32 = width;
     let mut buf_height: u32 = height;
     let mut frames_presented: u64 = 0;
+    // Latest SetConfig values, applied on each FrameReady commit.
+    // Units are buffer pixels (source) / surface logical pixels (dest) /
+    // wl_output::Transform enum index (transform).
+    let mut cfg_source: Option<(f32, f32, f32, f32)> = None;
+    let mut cfg_dest_size: Option<(f32, f32)> = None;
+    let mut cfg_transform: u32 = 0;
+    // Set once on first SetConfig (or first FrameReady with defaults)
+    // so we only call `set_buffer_transform` when it actually changes.
+    let mut transform_dirty: bool = true;
 
     loop {
         let (evt, fds) = codec::recv_event(&stream).map_err(|e| anyhow!("recv event: {e}"))?;
@@ -641,9 +753,29 @@ fn run_uds_session(sock: &Path, binding: &OutputBinding) -> Result<()> {
                     fourcc
                 );
             }
-            ProtoEvent::SetConfig { .. } => {
-                // source/dest rect + transform: not yet honored; we
-                // always present the full buffer at surface size.
+            ProtoEvent::SetConfig {
+                source_rect,
+                dest_rect,
+                transform,
+                ..
+            } => {
+                cfg_source = Some((source_rect.x, source_rect.y, source_rect.w, source_rect.h));
+                cfg_dest_size = Some((dest_rect.w, dest_rect.h));
+                if cfg_transform != transform {
+                    cfg_transform = transform;
+                    transform_dirty = true;
+                }
+                log::debug!(
+                    "[{}] set_config src=({:.0},{:.0} {:.0}x{:.0}) dest_size=({:.0}x{:.0}) xform={}",
+                    binding.display_name,
+                    source_rect.x,
+                    source_rect.y,
+                    source_rect.w,
+                    source_rect.h,
+                    dest_rect.w,
+                    dest_rect.h,
+                    transform
+                );
             }
             ProtoEvent::FrameReady {
                 buffer_generation: g,
@@ -672,6 +804,51 @@ fn run_uds_session(sock: &Path, binding: &OutputBinding) -> Result<()> {
                         );
                     } else {
                         binding.surface.attach(Some(buffer), 0, 0);
+
+                        // Map buffer → surface via wp_viewporter when
+                        // available. Source defaults to the full buffer;
+                        // SetConfig can crop. Destination defaults to
+                        // the logical surface size; SetConfig can shrink.
+                        let src = cfg_source.unwrap_or((
+                            0.0,
+                            0.0,
+                            buf_width as f32,
+                            buf_height as f32,
+                        ));
+                        let logical = binding
+                            .logical_size
+                            .lock()
+                            .unwrap()
+                            .unwrap_or((buf_width, buf_height));
+                        let dest = cfg_dest_size
+                            .unwrap_or((logical.0 as f32, logical.1 as f32));
+
+                        if let Some(vp) = binding.viewport.as_ref() {
+                            // wayland-scanner maps `fixed` args to f64.
+                            vp.set_source(
+                                src.0 as f64,
+                                src.1 as f64,
+                                src.2 as f64,
+                                src.3 as f64,
+                            );
+                            vp.set_destination(dest.0 as i32, dest.1 as i32);
+                        } else {
+                            // Fallback: tell the compositor the buffer
+                            // is scale× larger than the surface.
+                            let scale = binding.scale.load(Ordering::SeqCst);
+                            if scale > 1 {
+                                binding.surface.set_buffer_scale(scale);
+                            }
+                        }
+
+                        // Transform — only re-emit when changed.
+                        if transform_dirty {
+                            binding
+                                .surface
+                                .set_buffer_transform(map_transform(cfg_transform));
+                            transform_dirty = false;
+                        }
+
                         binding
                             .surface
                             .damage_buffer(0, 0, buf_width as i32, buf_height as i32);
@@ -731,6 +908,25 @@ fn run_uds_session(sock: &Path, binding: &OutputBinding) -> Result<()> {
 
 /// Turn daemon-supplied DMA-BUF fds + per-plane metadata into a pool of
 /// `wl_buffer`s via `zwp_linux_buffer_params_v1::create_immed`.
+/// Map the daemon's `transform` u32 (matching `wl_output::transform`
+/// semantics per `protocol/waywallen_display_v1.xml`) to the
+/// wayland-client enum. Unknown values fall back to `Normal` rather
+/// than erroring — the daemon owns the protocol and invalid values
+/// would break far bigger things.
+fn map_transform(t: u32) -> Transform {
+    match t {
+        0 => Transform::Normal,
+        1 => Transform::_90,
+        2 => Transform::_180,
+        3 => Transform::_270,
+        4 => Transform::Flipped,
+        5 => Transform::Flipped90,
+        6 => Transform::Flipped180,
+        7 => Transform::Flipped270,
+        _ => Transform::Normal,
+    }
+}
+
 fn import_dmabufs(
     binding: &OutputBinding,
     count: u32,
@@ -822,6 +1018,14 @@ fn main() -> Result<()> {
                     (),
                 ));
             }
+            "wp_viewporter" => {
+                app.viewporter = Some(globals.registry().bind::<WpViewporter, _, _>(
+                    g.name,
+                    g.version.min(1),
+                    &qh,
+                    (),
+                ));
+            }
             "wl_output" => {
                 let wl_output = globals.registry().bind::<WlOutput, _, _>(
                     g.name,
@@ -835,8 +1039,10 @@ fn main() -> Result<()> {
                         wl_output,
                         surface: None,
                         layer_surface: None,
+                        viewport: None,
                         binding: None,
                         worker_started: false,
+                        scale: 1,
                     },
                 );
             }
@@ -860,9 +1066,19 @@ fn main() -> Result<()> {
         bail!("no wl_output available");
     }
     log::info!(
-        "bound globals: compositor + layer_shell + dmabuf + {} output(s)",
+        "bound globals: compositor + layer_shell + dmabuf + viewporter:{} + {} output(s)",
+        app.viewporter.is_some(),
         app.outputs.len()
     );
+
+    // Roundtrip once so every `wl_output` has delivered its initial
+    // metadata (Scale / Geometry / Mode / Done) before we create
+    // layer-surfaces. Without this, outputs on HiDPI compositors
+    // would configure us at logical size with `scale=1` and we'd
+    // advertise the wrong physical size to the daemon.
+    queue
+        .roundtrip(&mut app)
+        .context("initial wl_output metadata roundtrip")?;
 
     // Create the per-output layer_surfaces up-front. The compositor will
     // emit a Configure event for each, which kicks off its UDS worker.
