@@ -60,6 +60,7 @@ set(SOURCES_NO_MOC
   src/daemon_dbus.cpp
   src/display.cpp
   src/library.cpp
+  src/notify.cpp
   src/renderer.cpp
   src/query/query.cpp
   src/query/wallpaper_query.cpp
@@ -80,6 +81,7 @@ set(MOC_SOURCE_FILES
   src/daemon_dbus.cppm
   src/display.cppm
   src/library.cppm
+  src/notify.cppm
   src/renderer.cppm
   src/query/query.cppm
   src/query/wallpaper_query.cppm

@@ -198,6 +198,69 @@ pub async fn rescan(app: &Arc<AppState>) -> Result<usize> {
     refresh_sources(app).await
 }
 
+/// Run every source plugin's `auto_detect(ctx)` against well-known
+/// locations and register whatever exists as a library. Duplicates
+/// (paths already registered for the same plugin) are silently
+/// skipped. Emits `LibraryUpsert` events and kicks off a full
+/// rescan so the newly-detected libraries immediately show up in the
+/// UI. Returns the snapshots that were actually added.
+pub async fn auto_detect_libraries(
+    app: &Arc<AppState>,
+) -> Result<Vec<crate::routing::LibrarySnapshot>> {
+    use crate::routing::LibrarySnapshot;
+
+    let detected = {
+        let sm = app.source_manager.lock().await;
+        sm.auto_detect_all()?
+    };
+    if detected.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut added: Vec<LibrarySnapshot> = Vec::new();
+    for (plugin_name, paths) in detected {
+        let plugin = match repo::find_plugin_by_name(&app.db, &plugin_name).await? {
+            Some(p) => p,
+            None => {
+                log::warn!("auto_detect: plugin '{plugin_name}' not registered in DB, skipping");
+                continue;
+            }
+        };
+        for path in paths {
+            match repo::find_library(&app.db, plugin.id, &path).await {
+                Ok(Some(_)) => continue,
+                Ok(None) => {}
+                Err(e) => {
+                    log::warn!("auto_detect: find_library({path}): {e:#}");
+                    continue;
+                }
+            }
+            match repo::add_library(&app.db, plugin.id, &path).await {
+                Ok(lib) => {
+                    let snap = LibrarySnapshot {
+                        id: lib.id,
+                        path: lib.path,
+                        plugin_name: plugin_name.clone(),
+                    };
+                    app.router.upsert_library(snap.clone());
+                    added.push(snap);
+                }
+                Err(e) => log::warn!("auto_detect: add_library({path}): {e:#}"),
+            }
+        }
+    }
+
+    if !added.is_empty() {
+        let app_clone = app.clone();
+        tokio::spawn(async move {
+            if let Err(e) = refresh_sources(&app_clone).await {
+                log::warn!("rescan after auto_detect failed: {e:#}");
+            }
+        });
+    }
+    Ok(added)
+}
+
 /// Pull every library row out of the DB and rehydrate it into the
 /// router-wire `LibrarySnapshot` shape (path + plugin_name). Used by
 /// the `LibraryList` query and the initial snapshot sent to WS

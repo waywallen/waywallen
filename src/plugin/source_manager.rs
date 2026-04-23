@@ -243,6 +243,14 @@ impl SourceManager {
         // ctx.basename(path) -> string|nil (same as filename on dirs)
         ctx.set("basename", filename_fn)?;
 
+        // ctx.env(name) -> string|nil. Intentionally kept available for
+        // auto-detect probing of well-known paths (e.g. $HOME). Not a
+        // cache — resolves on every call.
+        let env_fn = self.lua.create_function(|_, name: String| {
+            Ok(std::env::var(&name).ok())
+        })?;
+        ctx.set("env", env_fn)?;
+
         // ctx.libraries() -> list of absolute library paths registered
         // for this plugin in the daemon DB. Replaces the old
         // config/env-based directory discovery: libraries are now a
@@ -294,6 +302,40 @@ impl SourceManager {
 
     pub fn get(&self, id: &str) -> Option<&WallpaperEntry> {
         self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// Ask every plugin that exports `auto_detect(ctx)` to probe
+    /// well-known filesystem locations and report any that exist.
+    /// Returns `(plugin_name -> [paths])`. Plugins without an
+    /// `auto_detect` export are silently skipped. Each plugin's ctx
+    /// sees an empty `libraries()` because auto-detect runs *before*
+    /// any libraries are registered.
+    pub fn auto_detect_all(&self) -> Result<HashMap<String, Vec<String>>> {
+        let mut out: HashMap<String, Vec<String>> = HashMap::new();
+        let empty: [String; 0] = [];
+        for (name, key) in &self.plugins {
+            let module: LuaTable = self.lua.registry_value(key)?;
+            let auto_fn: LuaFunction = match module.get("auto_detect") {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
+            let ctx = self.build_ctx(&empty)?;
+            let results: LuaTable = match auto_fn.call(ctx) {
+                Ok(t) => t,
+                Err(e) => {
+                    log::warn!("auto_detect plugin {name}: {e}");
+                    continue;
+                }
+            };
+            let paths: Vec<String> = results
+                .sequence_values::<String>()
+                .filter_map(|v| v.ok())
+                .collect();
+            if !paths.is_empty() {
+                out.insert(name.clone(), paths);
+            }
+        }
+        Ok(out)
     }
 
     pub fn plugins(&self) -> Result<Vec<SourcePluginInfo>> {

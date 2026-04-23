@@ -5,5 +5,6 @@ export import :backend;
 export import :daemon_dbus;
 export import :display;
 export import :library;
+export import :notify;
 export import :renderer;
 export import :query;

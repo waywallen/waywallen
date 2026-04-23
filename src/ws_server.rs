@@ -663,6 +663,16 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
             }
         }
 
+        Req::LibraryAutoDetect(_) => match control::auto_detect_libraries(&state).await {
+            Ok(added) => ok(
+                rid,
+                Res::LibraryAutoDetect(pb::LibraryAutoDetectResponse {
+                    added: added.into_iter().map(library_instance_to_pb).collect(),
+                }),
+            ),
+            Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
+        },
+
         Req::LibraryRemove(r) => match repo::remove_library(&state.db, r.id).await {
             Ok(_) => {
                 state.router.remove_library(r.id);
