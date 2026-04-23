@@ -3,8 +3,6 @@ use std::sync::Arc;
 
 use anyhow::Context;
 
-use crate::model::repo;
-
 mod control;
 mod control_proto;
 mod dbus_iface;
@@ -212,7 +210,7 @@ async fn async_main() -> anyhow::Result<()> {
     // of synchronous filesystem work; keeping it on the startup hot
     // path means UDS/WS/DBus/layer-shell spawn all wait on it.
     let source_mgr = Arc::new(tokio::sync::Mutex::new(
-        plugin::source_manager::SourceManager::new(std::collections::HashMap::new())
+        plugin::source_manager::SourceManager::new()
             .expect("failed to create source manager"),
     ));
 
@@ -243,119 +241,44 @@ async fn async_main() -> anyhow::Result<()> {
         tasks: task_mgr.clone(),
     });
 
-    // Populate router with libraries from DB immediately.
-    {
-        let db = db.clone();
-        let router = router.clone();
-        tokio::spawn(async move {
-            match repo::list_libraries(&db).await {
-                Ok(libs) => {
-                    for lib in libs {
-                        let plugin_name = match repo::find_plugin_by_id(&db, lib.plugin_id).await {
-                            Ok(Some(p)) => p.name,
-                            _ => "unknown".to_string(),
-                        };
-                        router
-                            .upsert_library(routing::LibrarySnapshot {
-                                id: lib.id,
-                                path: lib.path,
-                                plugin_name,
-                            })
-                            .await;
-                    }
-                }
-                Err(e) => log::warn!("failed to list libraries for router init: {e:#}"),
-            }
-        });
-    }
-
     // Off-load source-plugin loading + scanning + DB sync + initial
     // playlist seed onto the TaskManager. `async_main` proceeds
     // immediately to bind UDS/WS/DBus; the UI will see an empty
     // playlist until the task completes and populates it.
     {
         let source_mgr = source_mgr.clone();
-        let db_for_task = db.clone();
         let plugin_dirs = cli.plugin_dirs.clone();
         let state_for_task = state.clone();
         state.tasks.spawn_async(tasks::TaskKind::Startup, "startup/sources", async move {
-            // Step 1 — load + scan. The Lua plugins run synchronous
-            // filesystem globs and stat(2) in large loops, so this
-            // part goes to the blocking pool.
-            let source_mgr_blocking = source_mgr.clone();
-            let snapshot: Vec<crate::wallpaper_type::WallpaperEntry> =
-                tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
-                    let mut sm = source_mgr_blocking.blocking_lock();
-                    for dir in plugin::renderer_registry::standard_plugin_dirs("sources") {
-                        if dir.is_dir() {
-                            if let Err(e) = sm.load_all(&dir) {
-                                log::warn!("load sources {}: {e:#}", dir.display());
-                            }
+            // Step 1 — load Lua plugins off the blocking pool.
+            tokio::task::spawn_blocking(move || {
+                let mut sm = source_mgr.blocking_lock();
+                for dir in plugin::renderer_registry::standard_plugin_dirs("sources") {
+                    if dir.is_dir() {
+                        if let Err(e) = sm.load_all(&dir) {
+                            log::warn!("load sources {}: {e:#}", dir.display());
                         }
                     }
-                    for plugin_dir in &plugin_dirs {
-                        let sources_dir = plugin_dir.join("sources");
-                        if sources_dir.is_dir() {
-                            if let Err(e) = sm.load_all(&sources_dir) {
-                                log::warn!("load sources {}: {e:#}", sources_dir.display());
-                            }
+                }
+                for plugin_dir in &plugin_dirs {
+                    let sources_dir = plugin_dir.join("sources");
+                    if sources_dir.is_dir() {
+                        if let Err(e) = sm.load_all(&sources_dir) {
+                            log::warn!("load sources {}: {e:#}", sources_dir.display());
                         }
                     }
-                    sm.scan_all()?;
-                    Ok(sm.list().to_vec())
-                })
-                .await
-                .map_err(|e| anyhow::anyhow!("source scan join: {e}"))??;
+                }
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("plugin load join: {e}"))?;
 
-            // Step 2 — persist scan to DB (async, needs the runtime).
-            let plugins = {
-                let sm = source_mgr.lock().await;
-                match sm.plugins() {
-                    Ok(p) => p,
-                    Err(e) => {
-                        log::warn!("list plugins for sync failed: {e:#}");
-                        Vec::new()
-                    }
-                }
-            };
-            for info in &plugins {
-                let entries: Vec<_> = snapshot
-                    .iter()
-                    .filter(|e| e.plugin_name == info.name)
-                    .cloned()
-                    .collect();
-                match model::sync::sync_plugin_entries(
-                    &db_for_task,
-                    model::sync::PluginRef {
-                        name: &info.name,
-                        version: &info.version,
-                    },
-                    &entries,
-                )
-                .await
-                {
-                    Ok((summary, plugin_model)) => {
-                        log::info!(
-                            "sync plugin={} v{}: +{} / -{} items, -{} libraries, {} dropped",
-                            info.name,
-                            info.version,
-                            summary.items_upserted,
-                            summary.items_deleted,
-                            summary.libraries_deleted,
-                            summary.dropped,
-                        );
-                        let mut sm = source_mgr.lock().await;
-                        sm.set_plugin_id(&plugin_model.name, plugin_model.id);
-                    }
-                    Err(e) => log::warn!("sync plugin={} failed: {e:#}", info.name),
-                }
+            // Step 2 — scan against DB-driven libraries + sync results
+            // + seed the playlist.
+            if let Err(e) = control::refresh_sources(&state_for_task).await {
+                log::warn!("initial source refresh failed: {e:#}");
             }
 
-            // Step 3 — seed the playlist from the fresh snapshot.
-            let ids: Vec<String> = snapshot.iter().map(|e| e.id.clone()).collect();
-            state_for_task.playlist.lock().await.refresh(ids);
-
-            // Step 4 — optional restore of last applied wallpaper.
+            // Step 3 — optional restore of last applied wallpaper.
             if cli.restore_last {
                 if let Some(last_id) = state_for_task.settings.global().last_wallpaper {
                     log::info!("restoring last wallpaper: {last_id}");

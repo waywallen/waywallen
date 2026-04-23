@@ -11,7 +11,6 @@ use crate::wallpaper_type::{WallpaperEntry, WallpaperType};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SourcePluginInfo {
-    pub id: i64,
     pub name: String,
     pub types: Vec<WallpaperType>,
     pub version: String,
@@ -25,14 +24,10 @@ pub struct SourceManager {
     lua: Lua,
     /// plugin name → registry key for the loaded module table.
     plugins: HashMap<String, LuaRegistryKey>,
-    /// plugin name → database id.
-    plugin_ids: HashMap<String, i64>,
     /// Flattened scan results from all plugins.
     entries: Vec<WallpaperEntry>,
     /// Index: wp_type → indices into `entries`.
     by_type: HashMap<WallpaperType, Vec<usize>>,
-    /// Daemon config exposed to Lua via `ctx.config(key)`.
-    config: HashMap<String, String>,
 }
 
 // mlua with the `send` feature makes Lua: Send.
@@ -45,15 +40,13 @@ const _: () = {
 };
 
 impl SourceManager {
-    pub fn new(config: HashMap<String, String>) -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let lua = Lua::new();
         Ok(Self {
             lua,
             plugins: HashMap::new(),
-            plugin_ids: HashMap::new(),
             entries: Vec::new(),
             by_type: HashMap::new(),
-            config,
         })
     }
 
@@ -105,21 +98,34 @@ impl SourceManager {
     }
 
     /// Run `scan(ctx)` on all loaded plugins and merge results.
-    pub fn scan_all(&mut self) -> Result<()> {
+    /// `libs_by_plugin` is the per-plugin library list pulled from the
+    /// DB; each plugin sees its own slice via `ctx.libraries()`. A
+    /// plugin missing from the map (or with an empty list) is scanned
+    /// with no libraries — Lua plugins should emit zero entries in
+    /// that case rather than fall back to defaults.
+    pub fn scan_all(
+        &mut self,
+        libs_by_plugin: &HashMap<String, Vec<String>>,
+    ) -> Result<()> {
         self.entries.clear();
         self.by_type.clear();
 
         let plugin_names: Vec<String> = self.plugins.keys().cloned().collect();
         for name in &plugin_names {
-            if let Err(e) = self.scan_plugin(name) {
+            let libs = libs_by_plugin
+                .get(name)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[]);
+            if let Err(e) = self.scan_plugin(name, libs) {
                 log::warn!("scan plugin {name} failed: {e}");
             }
         }
         Ok(())
     }
 
-    /// Run `scan(ctx)` on a single plugin by name.
-    fn scan_plugin(&mut self, name: &str) -> Result<()> {
+    /// Run `scan(ctx)` on a single plugin by name with the supplied
+    /// library list exposed as `ctx.libraries()`.
+    fn scan_plugin(&mut self, name: &str, libraries: &[String]) -> Result<()> {
         let key = self
             .plugins
             .get(name)
@@ -129,7 +135,7 @@ impl SourceManager {
             .get("scan")
             .map_err(|e| anyhow::anyhow!("plugin must export scan(ctx): {e}"))?;
 
-        let ctx = self.build_ctx()?;
+        let ctx = self.build_ctx(libraries)?;
         let results: LuaTable = scan_fn.call(ctx)?;
 
         for pair in results.sequence_values::<LuaTable>() {
@@ -157,8 +163,10 @@ impl SourceManager {
         Ok(())
     }
 
-    /// Build the `ctx` table passed to Lua `scan(ctx)`.
-    fn build_ctx(&self) -> Result<LuaTable> {
+    /// Build the `ctx` table passed to Lua `scan(ctx)`. `libraries` is
+    /// the per-plugin DB-driven library list exposed as
+    /// `ctx.libraries()`.
+    fn build_ctx(&self, libraries: &[String]) -> Result<LuaTable> {
         let ctx = self.lua.create_table()?;
 
         // ctx.glob(pattern) -> list of file paths
@@ -235,18 +243,20 @@ impl SourceManager {
         // ctx.basename(path) -> string|nil (same as filename on dirs)
         ctx.set("basename", filename_fn)?;
 
-        // ctx.env(name) -> string|nil
-        let env_fn = self.lua.create_function(|_, name: String| {
-            Ok(std::env::var(&name).ok())
+        // ctx.libraries() -> list of absolute library paths registered
+        // for this plugin in the daemon DB. Replaces the old
+        // config/env-based directory discovery: libraries are now a
+        // user-managed first-class concept owned by the daemon, and
+        // Lua plugins only see what the DB authorizes for them.
+        let libs_for_closure: Vec<String> = libraries.to_vec();
+        let libraries_fn = self.lua.create_function(move |lua, ()| {
+            let tbl = lua.create_table()?;
+            for (i, lib) in libs_for_closure.iter().enumerate() {
+                tbl.set(i + 1, lib.clone())?;
+            }
+            Ok(tbl)
         })?;
-        ctx.set("env", env_fn)?;
-
-        // ctx.config(key) -> string|nil
-        let config = self.config.clone();
-        let config_fn = self.lua.create_function(move |_, key: String| {
-            Ok(config.get(&key).cloned())
-        })?;
-        ctx.set("config", config_fn)?;
+        ctx.set("libraries", libraries_fn)?;
 
         // ctx.json_parse(str) -> table|nil
         let json_parse_fn = self.lua.create_function(|lua, s: String| {
@@ -286,19 +296,6 @@ impl SourceManager {
         self.entries.iter().find(|e| e.id == id)
     }
 
-    pub fn set_plugin_id(&mut self, name: &str, id: i64) {
-        self.plugin_ids.insert(name.to_string(), id);
-    }
-
-    pub fn find_plugin_by_name(&self, name: &str) -> Result<Option<SourcePluginInfo>> {
-        for p in self.plugins()? {
-            if p.name == name {
-                return Ok(Some(p));
-            }
-        }
-        Ok(None)
-    }
-
     pub fn plugins(&self) -> Result<Vec<SourcePluginInfo>> {
         let mut out = Vec::new();
         for (name, key) in &self.plugins {
@@ -314,9 +311,7 @@ impl SourceManager {
                 })
                 .unwrap_or_default();
             let version: String = info.get("version").unwrap_or_else(|_| "0.0.0".into());
-            let id = self.plugin_ids.get(name).copied().unwrap_or(0);
             out.push(SourcePluginInfo {
-                id,
                 name: name.clone(),
                 types,
                 version,
@@ -405,11 +400,11 @@ return M
         )
         .unwrap();
 
-        let mut mgr = SourceManager::new(HashMap::new()).unwrap();
+        let mut mgr = SourceManager::new().unwrap();
         let name = mgr.load_plugin(&plugin_path).unwrap();
         assert_eq!(name, "test");
 
-        mgr.scan_all().unwrap();
+        mgr.scan_all(&HashMap::new()).unwrap();
         assert_eq!(mgr.list().len(), 1);
         assert_eq!(mgr.list()[0].id, "w1");
         assert_eq!(mgr.list()[0].wp_type, "image");

@@ -27,38 +27,18 @@ local function strip_ext(name)
     return name:match("(.+)%.[^.]+$") or name
 end
 
-local function push_split(list, seen, s)
-    if not s or s == "" then return end
-    for d in string.gmatch(s, "[^:]+") do
-        if d ~= "" and not seen[d] then
-            seen[d] = true
-            table.insert(list, d)
-        end
-    end
-end
-
-local function gather_dirs(ctx)
-    -- Opt-in only: users must set `image_dir` in daemon config or the
-    -- `WAYWALLEN_IMAGE_DIR` env var. No implicit ~/Pictures fallback —
-    -- an unconfigured image plugin reports zero entries so no library
-    -- row is ever created. Each source may be colon-separated
-    -- (PATH-style) to enumerate multiple folders in one setting.
-    local dirs, seen = {}, {}
-    push_split(dirs, seen, ctx.config("image_dir"))
-    push_split(dirs, seen, ctx.env("WAYWALLEN_IMAGE_DIR"))
-
-    local kept = {}
-    for _, d in ipairs(dirs) do
-        if ctx.file_exists(d) then table.insert(kept, d) end
-    end
-    return kept
-end
-
 function M.scan(ctx)
     local entries = {}
-    local dirs = gather_dirs(ctx)
+    -- Libraries are owned by the daemon DB and pushed in via
+    -- ctx.libraries(); the plugin no longer reads config or env vars.
+    -- An unconfigured image plugin sees an empty list and emits zero
+    -- entries.
+    local dirs = {}
+    for _, d in ipairs(ctx.libraries()) do
+        if ctx.file_exists(d) then table.insert(dirs, d) end
+    end
     if #dirs == 0 then
-        ctx.log("image: no image directories found")
+        ctx.log("image: no image libraries configured")
         return entries
     end
 

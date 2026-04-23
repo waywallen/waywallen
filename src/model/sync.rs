@@ -37,10 +37,18 @@ pub struct SyncSummary {
 }
 
 /// Persist the full state of one plugin. Idempotent; reports counts.
+///
+/// `protected_libraries` lists library paths that must not be deleted
+/// even if the scan returned no entries for them. Use this to feed in
+/// the user-managed library set from the DB so an empty (or
+/// momentarily-failing) scan does not nuke the user's configured
+/// folders. Pass `&[]` for the legacy "scan owns the library set"
+/// behaviour, e.g. in tests.
 pub async fn sync_plugin_entries(
     db: &DatabaseConnection,
     plugin: PluginRef<'_>,
     entries: &[WallpaperEntry],
+    protected_libraries: &[String],
 ) -> Result<(SyncSummary, super::entities::source_plugin::Model)> {
     let plugin_model = repo::upsert_plugin(db, plugin.name, plugin.version)
         .await
@@ -140,6 +148,12 @@ pub async fn sync_plugin_entries(
         summary.items_deleted += repo::delete_items_missing(db, lib_model.id, &keep_items).await?;
     }
 
+    // Protect user-managed libraries from being swept up by the
+    // missing-library deletion: even if the scan emitted no entries
+    // for them this round, they still belong to the user.
+    for path in protected_libraries {
+        keep_lib_paths.insert(path.clone());
+    }
     summary.libraries_deleted +=
         repo::delete_libraries_missing(db, plugin_model.id, &keep_lib_paths).await?;
 
@@ -201,6 +215,7 @@ mod tests {
             &db,
             PluginRef { name: "image", version: "0.1" },
             &entries,
+            &[],
         )
         .await
         .unwrap();
@@ -220,7 +235,7 @@ mod tests {
         let db = mem_db().await;
         let mut e = entry("p", "/ws", "/ws/12345/scene.pkg", "scene");
         e.preview = Some("/ws/12345/preview.gif".into());
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[])
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -234,7 +249,7 @@ mod tests {
         let db = mem_db().await;
         let mut e = entry("p", "/root", "/root/a.png", "image");
         e.preview = Some("/elsewhere/thumb.png".into());
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[])
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -249,7 +264,7 @@ mod tests {
             entry("p", "/root", "/root/ok.png", "image"),
             entry("p", "/root", "/elsewhere/bad.png", "image"),
         ];
-        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries)
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[])
                 .await
                 .unwrap();
         assert_eq!(summary.items_upserted, 1);
@@ -260,7 +275,7 @@ mod tests {
     async fn type_is_normalized_lowercase() {
         let db = mem_db().await;
         let entries = [entry("p", "/r", "/r/a.png", "Scene")];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries)
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[])
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -289,6 +304,7 @@ mod tests {
             &db,
             PluginRef { name: "wallpaper_engine", version: "0.2.0" },
             &[we],
+            &[],
         )
         .await
         .unwrap();
@@ -315,7 +331,7 @@ mod tests {
             e
         };
         let entries = [mk("a.png", "Anime"), mk("b.png", "anime"), mk("c.png", "ANIME")];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries)
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[])
             .await
             .unwrap();
         assert_eq!(repo::list_tags(&db).await.unwrap().len(), 1);
@@ -326,13 +342,13 @@ mod tests {
         let db = mem_db().await;
         let mut first = entry("p", "/r", "/r/a.png", "image");
         first.tags = vec!["Anime".into(), "Nature".into()];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[first])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[first], &[])
             .await
             .unwrap();
 
         let mut second = entry("p", "/r", "/r/a.png", "image");
         second.tags = vec!["Game".into()];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[second])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[second], &[])
             .await
             .unwrap();
 
@@ -351,12 +367,12 @@ mod tests {
             entry("p", "/a", "/a/y.png", "image"),
             entry("p", "/b", "/b/z.png", "image"),
         ];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &first)
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &first, &[])
             .await
             .unwrap();
 
         let second = [entry("p", "/a", "/a/x.png", "image")];
-        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &second)
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &second, &[])
                 .await
                 .unwrap();
         assert_eq!(summary.items_upserted, 1);
@@ -371,10 +387,11 @@ mod tests {
             &db,
             PluginRef { name: "p", version: "" },
             &[entry("p", "/one", "/one/x.png", "image")],
+            &[],
         )
         .await
         .unwrap();
-        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[])
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[], &[])
                 .await
                 .unwrap();
         assert_eq!(summary.libraries_deleted, 1);

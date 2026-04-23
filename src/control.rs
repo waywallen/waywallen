@@ -7,11 +7,13 @@
 //! on identical semantics (spawn-before-kill, router relink, playlist
 //! cursor tracking).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 
 use crate::ipc::proto::ControlMsg;
+use crate::model::{repo, sync};
 use crate::renderer_manager;
 use crate::wallpaper_type::WallpaperEntry;
 use crate::AppState;
@@ -193,12 +195,117 @@ async fn send_all(app: &Arc<AppState>, msg: ControlMsg) -> Result<()> {
 }
 
 pub async fn rescan(app: &Arc<AppState>) -> Result<usize> {
-    let (count, ids) = {
-        let mut mgr = app.source_manager.lock().await;
-        mgr.scan_all()?;
-        let ids: Vec<String> = mgr.list().iter().map(|e| e.id.clone()).collect();
-        (mgr.list().len(), ids)
+    refresh_sources(app).await
+}
+
+/// Pull every library row out of the DB and rehydrate it into the
+/// router-wire `LibrarySnapshot` shape (path + plugin_name). Used by
+/// the `LibraryList` query and the initial snapshot sent to WS
+/// subscribers; the router no longer caches these — DB is authoritative.
+pub async fn list_library_snapshots(
+    db: &sea_orm::DatabaseConnection,
+) -> Vec<crate::routing::LibrarySnapshot> {
+    let libs = match repo::list_libraries(db).await {
+        Ok(v) => v,
+        Err(e) => {
+            log::warn!("list_libraries: {e:#}");
+            return Vec::new();
+        }
     };
+    let mut out = Vec::with_capacity(libs.len());
+    for lib in libs {
+        let plugin_name = repo::find_plugin_by_id(db, lib.plugin_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|p| p.name)
+            .unwrap_or_default();
+        out.push(crate::routing::LibrarySnapshot {
+            id: lib.id,
+            path: lib.path,
+            plugin_name,
+        });
+    }
+    out.sort_by_key(|l| l.id);
+    out
+}
+
+/// Query the DB for every registered library, grouped by the plugin
+/// name that owns it. Feeds per-plugin library paths into Lua's
+/// `ctx.libraries()` and seeds `protected_libraries` on sync so an
+/// empty scan doesn't nuke user-configured folders.
+pub async fn libraries_by_plugin_name(
+    db: &sea_orm::DatabaseConnection,
+) -> Result<HashMap<String, Vec<String>>> {
+    let libs = repo::list_libraries(db).await?;
+    let mut by_plugin_id: HashMap<i64, Vec<String>> = HashMap::new();
+    for lib in libs {
+        by_plugin_id.entry(lib.plugin_id).or_default().push(lib.path);
+    }
+    let mut by_name: HashMap<String, Vec<String>> = HashMap::new();
+    for (pid, paths) in by_plugin_id {
+        if let Ok(Some(p)) = repo::find_plugin_by_id(db, pid).await {
+            by_name.insert(p.name, paths);
+        }
+    }
+    Ok(by_name)
+}
+
+/// Re-scan every loaded source plugin against the current DB library
+/// set and persist the resulting entries. Returns the playlist size.
+/// Called from startup after plugins load, from manual `rescan`, and
+/// from `LibraryAdd` / `LibraryRemove` so the in-memory snapshot and
+/// DB stay consistent with the user-managed library list.
+pub async fn refresh_sources(app: &Arc<AppState>) -> Result<usize> {
+    let libs_by_plugin = libraries_by_plugin_name(&app.db).await?;
+
+    let source_mgr = app.source_manager.clone();
+    let libs_for_scan = libs_by_plugin.clone();
+    let snapshot: Vec<WallpaperEntry> = tokio::task::spawn_blocking(move || {
+        let mut sm = source_mgr.blocking_lock();
+        sm.scan_all(&libs_for_scan)?;
+        Ok::<_, anyhow::Error>(sm.list().to_vec())
+    })
+    .await
+    .map_err(|e| anyhow!("source scan join: {e}"))??;
+
+    let plugins = {
+        let sm = app.source_manager.lock().await;
+        sm.plugins().unwrap_or_default()
+    };
+    for info in &plugins {
+        let entries: Vec<_> = snapshot
+            .iter()
+            .filter(|e| e.plugin_name == info.name)
+            .cloned()
+            .collect();
+        let protected = libs_by_plugin
+            .get(&info.name)
+            .cloned()
+            .unwrap_or_default();
+        match sync::sync_plugin_entries(
+            &app.db,
+            sync::PluginRef { name: &info.name, version: &info.version },
+            &entries,
+            &protected,
+        )
+        .await
+        {
+            Ok((summary, _)) => log::info!(
+                "sync plugin={} v{}: +{} / -{} items, -{} libraries, {} dropped",
+                info.name,
+                info.version,
+                summary.items_upserted,
+                summary.items_deleted,
+                summary.libraries_deleted,
+                summary.dropped,
+            ),
+            Err(e) => log::warn!("sync plugin={} failed: {e:#}", info.name),
+        }
+    }
+
+    let ids: Vec<String> = snapshot.iter().map(|e| e.id.clone()).collect();
+    let count = ids.len();
     app.playlist.lock().await.refresh(ids);
     Ok(count)
 }

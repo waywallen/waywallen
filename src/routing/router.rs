@@ -188,7 +188,6 @@ struct Inner {
     /// Timestamp of the Pause transition for each paused renderer.
     /// Consumed by the reaper task to enforce `IDLE_KILL_TIMEOUT`.
     paused_since: HashMap<RendererId, Instant>,
-    libraries: HashMap<i64, LibrarySnapshot>,
     next_display_id: u64,
     next_config_generation: u64,
 }
@@ -213,7 +212,6 @@ impl Router {
                 renderer_tasks: HashMap::new(),
                 paused_renderers: std::collections::HashSet::new(),
                 paused_since: HashMap::new(),
-                libraries: HashMap::new(),
                 next_display_id: 0,
                 next_config_generation: 0,
             }),
@@ -574,26 +572,15 @@ impl Router {
             .collect()
     }
 
-    pub async fn snapshot_libraries(self: &Arc<Self>) -> Vec<LibrarySnapshot> {
-        let inner = self.inner.lock().await;
-        let mut out: Vec<LibrarySnapshot> = inner.libraries.values().cloned().collect();
-        out.sort_by_key(|l| l.id);
-        out
-    }
-
-    pub async fn upsert_library(self: &Arc<Self>, snap: LibrarySnapshot) {
-        {
-            let mut inner = self.inner.lock().await;
-            inner.libraries.insert(snap.id, snap.clone());
-        }
+    /// Emit a `LibraryUpsert` event so subscribers (UI) refresh their
+    /// view. The router no longer caches libraries — the DB is the
+    /// source of truth; callers query it directly when they need the
+    /// full list (see `control::list_library_snapshots`).
+    pub fn upsert_library(self: &Arc<Self>, snap: LibrarySnapshot) {
         self.emit(RouterEvent::LibraryUpsert(snap));
     }
 
-    pub async fn remove_library(self: &Arc<Self>, id: i64) {
-        {
-            let mut inner = self.inner.lock().await;
-            inner.libraries.remove(&id);
-        }
+    pub fn remove_library(self: &Arc<Self>, id: i64) {
         self.emit(RouterEvent::LibraryRemoved(id));
     }
 

@@ -12,6 +12,7 @@ use prost::Message as _;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_tungstenite::tungstenite::protocol::Message;
 
+use crate::control;
 use crate::control_proto as pb;
 use crate::ipc::proto::ControlMsg;
 use crate::model::repo;
@@ -71,7 +72,7 @@ async fn handle_conn(
     }
 
     {
-        let snap = state.router.snapshot_libraries().await;
+        let snap = control::list_library_snapshots(&state.db).await;
         let evt = libraries_replace_event(snap);
         sink.send(Message::Binary(wrap_event(evt).encode_to_vec())).await?;
     }
@@ -256,7 +257,7 @@ fn router_event_to_pb(e: RouterEvent) -> pb::Event {
 // Dispatch
 // ---------------------------------------------------------------------------
 
-async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
+async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
     let rid = req.request_id;
     let Some(payload) = req.payload else {
         return error_response(rid, pb::Status::InvalidArgument, "empty request payload".into());
@@ -411,16 +412,13 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
             )
         }
 
-        Req::WallpaperScan(_) => {
-            let mut mgr = state.source_manager.lock().await;
-            match mgr.scan_all() {
-                Ok(()) => {
-                    let count = mgr.list().len() as u32;
-                    ok(rid, Res::WallpaperScan(pb::WallpaperScanResponse { count }))
-                }
-                Err(e) => error_response(rid, pb::Status::Internal, format!("scan failed: {e}")),
-            }
-        }
+        Req::WallpaperScan(_) => match control::refresh_sources(&state).await {
+            Ok(count) => ok(
+                rid,
+                Res::WallpaperScan(pb::WallpaperScanResponse { count: count as u32 }),
+            ),
+            Err(e) => error_response(rid, pb::Status::Internal, format!("scan failed: {e}")),
+        },
 
         Req::SourceList(_) => {
             let mgr = state.source_manager.lock().await;
@@ -621,7 +619,7 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
         }
 
         Req::LibraryList(_) => {
-            let snap = state.router.snapshot_libraries().await;
+            let snap = control::list_library_snapshots(&state.db).await;
             ok(
                 rid,
                 Res::LibraryList(pb::LibraryListResponse {
@@ -631,19 +629,16 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
         }
 
         Req::LibraryAdd(r) => {
-            let plugin_id = {
-                let mgr = state.source_manager.lock().await;
-                match mgr.find_plugin_by_name(&r.plugin_name) {
-                    Ok(Some(p)) => p.id,
-                    Ok(None) => {
-                        return error_response(
-                            rid,
-                            pb::Status::NotFound,
-                            format!("source plugin '{}' not found", r.plugin_name),
-                        )
-                    }
-                    Err(e) => return error_response(rid, pb::Status::Internal, e.to_string()),
+            let plugin_id = match repo::find_plugin_by_name(&state.db, &r.plugin_name).await {
+                Ok(Some(p)) => p.id,
+                Ok(None) => {
+                    return error_response(
+                        rid,
+                        pb::Status::NotFound,
+                        format!("source plugin '{}' not found", r.plugin_name),
+                    )
                 }
+                Err(e) => return error_response(rid, pb::Status::Internal, e.to_string()),
             };
             match repo::add_library(&state.db, plugin_id, &r.path).await {
                 Ok(lib) => {
@@ -652,7 +647,16 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
                         path: lib.path,
                         plugin_name: r.plugin_name,
                     };
-                    state.router.upsert_library(snap).await;
+                    state.router.upsert_library(snap);
+                    // Rescan so the new library's items flow into the
+                    // in-memory snapshot + DB without waiting for the
+                    // next daemon restart.
+                    let rescan_state = state.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = control::refresh_sources(&rescan_state).await {
+                            log::warn!("rescan after LibraryAdd failed: {e:#}");
+                        }
+                    });
                     ok(rid, Res::LibraryAdd(pb::Empty {}))
                 }
                 Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
@@ -661,7 +665,13 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
 
         Req::LibraryRemove(r) => match repo::remove_library(&state.db, r.id).await {
             Ok(_) => {
-                state.router.remove_library(r.id).await;
+                state.router.remove_library(r.id);
+                let rescan_state = state.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = control::refresh_sources(&rescan_state).await {
+                        log::warn!("rescan after LibraryRemove failed: {e:#}");
+                    }
+                });
                 ok(rid, Res::LibraryRemove(pb::Empty {}))
             }
             Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),

@@ -22,6 +22,7 @@ MD.Page {
             width: parent.width
             model: W.App.libraryManager.libraries
             expand: true
+            spacing: 8
 
             leftMargin: 12
             rightMargin: 12

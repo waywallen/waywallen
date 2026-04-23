@@ -16,10 +16,8 @@ MD.Page {
 
     W.LibraryAddQuery {
         id: addQuery
-        onStatusChanged: {
-            if (status === 3) {
-                root.parent.parent.close();
-            }
+        onFinished: {
+            MD.Util.closePopup(root)
         }
     }
 
@@ -69,11 +67,8 @@ MD.Page {
                 }
             }
 
-            MD.Divider { Layout.fillWidth: true }
-
-            MD.Text {
-                text: "Library Path"
-                typescale: MD.Token.typescale.title_small
+            MD.Divider {
+                Layout.fillWidth: true
             }
 
             RowLayout {
@@ -83,7 +78,7 @@ MD.Page {
                 MD.TextField {
                     id: pathInput
                     Layout.fillWidth: true
-                    placeholderText: "e.g. /home/user/Pictures/Wallpapers"
+                    placeholderText: "Library Path"
                 }
 
                 MD.IconButton {
@@ -93,7 +88,9 @@ MD.Page {
                 }
             }
 
-            Item { Layout.fillHeight: true }
+            Item {
+                Layout.fillHeight: true
+            }
 
             MD.BusyButton {
                 Layout.fillWidth: true
