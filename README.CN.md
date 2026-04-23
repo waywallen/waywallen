@@ -42,6 +42,6 @@ Waywallen 是一个为 Linux 桌面打造的动态壁纸方案
 | 项目 | 现状 |
 |------|------|
 | 图片壁纸 | ✅ |
-| 场景壁纸 | ✅ open-wallpaper-engine |
+| 场景壁纸 | ✅ [open-wallpaper-engine](https://github.com/waywallen/open-wallpaper-engine) |
 | 视频壁纸 | ✅ mpv |
 | 网页壁纸 | ⚠️ 规划中 |
