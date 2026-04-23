@@ -74,7 +74,6 @@ private:
 class DisplayManager : public QObject {
     Q_OBJECT
     QML_ELEMENT
-    QML_SINGLETON
 
     Q_PROPERTY(QVariantList displays READ displays NOTIFY displaysChanged FINAL)
     Q_PROPERTY(int count READ count NOTIFY displaysChanged FINAL)
@@ -84,10 +83,6 @@ public:
     ~DisplayManager() override;
 
     static auto instance() -> DisplayManager*;
-    static auto create(QQmlEngine*, QJSEngine*) -> DisplayManager*;
-
-    // make qml prefer create
-    DisplayManager(const DisplayManager&) = delete;
 
     /// Snapshot of all displays (ordered by ascending id) as a list of
     /// `Display*`, suitable for QML `Repeater { model: DisplayManager.displays }`.

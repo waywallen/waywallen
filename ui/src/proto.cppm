@@ -52,4 +52,13 @@ using proto::DisplayInfo;
 using proto::DisplayLinkInfo;
 using proto::DisplayListRequest;
 using proto::DisplayListResponse;
+
+using proto::LibraryInstance;
+using proto::LibraryListRequest;
+using proto::LibraryListResponse;
+using proto::LibraryAddRequest;
+using proto::LibraryRemoveRequest;
+using proto::LibrarySnapshot;
+using proto::LibraryChanged;
+using proto::LibraryRemoved;
 } // namespace waywallen::control::v1

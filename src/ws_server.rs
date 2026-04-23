@@ -14,8 +14,9 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::control_proto as pb;
 use crate::ipc::proto::ControlMsg;
+use crate::model::repo;
 use crate::renderer_manager;
-use crate::routing::{DisplaySnapshot, RendererSnapshot, RouterEvent};
+use crate::routing::{DisplaySnapshot, LibrarySnapshot, RendererSnapshot, RouterEvent};
 use crate::AppState;
 
 /// Bind the WebSocket control plane and return the actual local address
@@ -66,6 +67,12 @@ async fn handle_conn(
     {
         let snap = state.router.snapshot_renderers().await;
         let evt = renderers_replace_event(snap);
+        sink.send(Message::Binary(wrap_event(evt).encode_to_vec())).await?;
+    }
+
+    {
+        let snap = state.router.snapshot_libraries().await;
+        let evt = libraries_replace_event(snap);
         sink.send(Message::Binary(wrap_event(evt).encode_to_vec())).await?;
     }
 
@@ -193,6 +200,22 @@ fn renderers_replace_event(snap: Vec<RendererSnapshot>) -> pb::Event {
     }
 }
 
+fn library_instance_to_pb(s: LibrarySnapshot) -> pb::LibraryInstance {
+    pb::LibraryInstance {
+        id: s.id,
+        path: s.path,
+        plugin_name: s.plugin_name,
+    }
+}
+
+fn libraries_replace_event(snap: Vec<LibrarySnapshot>) -> pb::Event {
+    pb::Event {
+        payload: Some(pb::event::Payload::LibrarySnapshot(pb::LibrarySnapshot {
+            libraries: snap.into_iter().map(library_instance_to_pb).collect(),
+        })),
+    }
+}
+
 fn router_event_to_pb(e: RouterEvent) -> pb::Event {
     match e {
         RouterEvent::DisplayUpsert(s) => pb::Event {
@@ -217,6 +240,15 @@ fn router_event_to_pb(e: RouterEvent) -> pb::Event {
             })),
         },
         RouterEvent::RenderersReplace(list) => renderers_replace_event(list),
+        RouterEvent::LibraryUpsert(s) => pb::Event {
+            payload: Some(pb::event::Payload::LibraryChanged(pb::LibraryChanged {
+                library: Some(library_instance_to_pb(s)),
+            })),
+        },
+        RouterEvent::LibraryRemoved(id) => pb::Event {
+            payload: Some(pb::event::Payload::LibraryRemoved(pb::LibraryRemoved { id })),
+        },
+        RouterEvent::LibrariesReplace(list) => libraries_replace_event(list),
     }
 }
 
@@ -587,6 +619,53 @@ async fn dispatch(state: &AppState, req: pb::Request) -> pb::Response {
             });
             ok(rid, Res::SettingsSet(pb::Empty {}))
         }
+
+        Req::LibraryList(_) => {
+            let snap = state.router.snapshot_libraries().await;
+            ok(
+                rid,
+                Res::LibraryList(pb::LibraryListResponse {
+                    libraries: snap.into_iter().map(library_instance_to_pb).collect(),
+                }),
+            )
+        }
+
+        Req::LibraryAdd(r) => {
+            let plugin_id = {
+                let mgr = state.source_manager.lock().await;
+                match mgr.find_plugin_by_name(&r.plugin_name) {
+                    Ok(Some(p)) => p.id,
+                    Ok(None) => {
+                        return error_response(
+                            rid,
+                            pb::Status::NotFound,
+                            format!("source plugin '{}' not found", r.plugin_name),
+                        )
+                    }
+                    Err(e) => return error_response(rid, pb::Status::Internal, e.to_string()),
+                }
+            };
+            match repo::add_library(&state.db, plugin_id, &r.path).await {
+                Ok(lib) => {
+                    let snap = LibrarySnapshot {
+                        id: lib.id,
+                        path: lib.path,
+                        plugin_name: r.plugin_name,
+                    };
+                    state.router.upsert_library(snap).await;
+                    ok(rid, Res::LibraryAdd(pb::Empty {}))
+                }
+                Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
+            }
+        }
+
+        Req::LibraryRemove(r) => match repo::remove_library(&state.db, r.id).await {
+            Ok(_) => {
+                state.router.remove_library(r.id).await;
+                ok(rid, Res::LibraryRemove(pb::Empty {}))
+            }
+            Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
+        },
     }
 }
 

@@ -59,6 +59,7 @@ set(SOURCES_NO_MOC
   src/app.cpp
   src/daemon_dbus.cpp
   src/display.cpp
+  src/library.cpp
   src/renderer.cpp
   src/query/query.cpp
   src/query/wallpaper_query.cpp
@@ -66,6 +67,7 @@ set(SOURCES_NO_MOC
   src/query/source_query.cpp
   src/query/health_query.cpp
   src/query/display_query.cpp
+  src/query/library_query.cpp
 )
 
 set(SOURCES
@@ -77,6 +79,7 @@ set(MOC_SOURCE_FILES
   src/backend.cppm
   src/daemon_dbus.cppm
   src/display.cppm
+  src/library.cppm
   src/renderer.cppm
   src/query/query.cppm
   src/query/wallpaper_query.cppm
@@ -84,6 +87,7 @@ set(MOC_SOURCE_FILES
   src/query/source_query.cppm
   src/query/health_query.cppm
   src/query/display_query.cppm
+  src/query/library_query.cppm
 )
 set(MODULES
     src/mod.cppm
@@ -100,6 +104,7 @@ set(QML_FILES
   qml/page/StatusPage.qml
   qml/page/DisplaysPage.qml
   qml/page/SourceManagePage.qml
+  qml/page/AddLibraryPage.qml
 )
 set(RESOURCES)
 

@@ -70,13 +70,6 @@ RendererManager::~RendererManager() {
 
 auto RendererManager::instance() -> RendererManager* { return rm_instance(); }
 
-auto RendererManager::create(QQmlEngine*, QJSEngine*) -> RendererManager* {
-    auto* m = rm_instance();
-    assert(m != nullptr, "RendererManager must be constructed by App before QML loads");
-    QJSEngine::setObjectOwnership(m, QJSEngine::CppOwnership);
-    return m;
-}
-
 auto RendererManager::renderers() const -> QVariantList {
     QVariantList out;
     out.reserve(m_ordered.size());

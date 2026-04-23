@@ -89,10 +89,6 @@ Backend::Backend(quint16 port)
             if (auto it = m_handlers.find(rsp.requestId()); it != m_handlers.end()) {
                 it->second(asio::error_code {}, std::move(rsp));
                 m_handlers.erase(it);
-            } else {
-                qDebug("ws: unmatched response id=%llu status=%d",
-                       (unsigned long long)rsp.requestId(),
-                       (int)rsp.status());
             }
         } else if (frame.hasEvent()) {
             Q_EMIT this->eventReceived(frame.event());
@@ -111,12 +107,6 @@ Backend::Backend(quint16 port)
         connect(this, &Backend::connected, this, &Backend::on_connected);
         connect(this, &Backend::error, this, &Backend::on_error);
     }
-
-    {
-        asio::post(m_context->get_executor(), [] {
-            // name the ws thread for debugging
-        });
-    }
 }
 
 Backend::~Backend() {
@@ -127,11 +117,9 @@ Backend::~Backend() {
 
 void Backend::connectTo() {
     if (m_port == 0) {
-        qDebug("backend: port is 0, skipping connect (waiting for daemon)");
         return;
     }
     m_reconnect_delay = 1000;
-    qDebug("connecting to ws://127.0.0.1:%d", (int)m_port);
     m_client->connect(std::format("ws://127.0.0.1:{}", m_port));
 }
 
@@ -147,12 +135,9 @@ void Backend::disconnect() {
     if (m_reconnect_timer) {
         m_reconnect_timer->stop();
     }
-    // Dropping port signals "no daemon"; the ws client will surface an error
-    // on its own when the TCP connection drops.
 }
 
 void Backend::on_connected() {
-    qDebug("ws connected to port %d", (int)m_port);
     m_reconnect_delay = 1000;
     if (m_reconnect_timer) {
         m_reconnect_timer->stop();
@@ -176,7 +161,6 @@ void Backend::on_error(QString msg) {
         m_reconnect_timer->setSingleShot(true);
         connect(m_reconnect_timer, &QTimer::timeout, this, &Backend::on_retry);
     }
-    qDebug("reconnecting in %d ms", m_reconnect_delay);
     m_reconnect_timer->start(m_reconnect_delay);
     m_reconnect_delay = std::min(m_reconnect_delay * 2, kMaxReconnectDelay);
 }

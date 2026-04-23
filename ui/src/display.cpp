@@ -89,13 +89,6 @@ DisplayManager::~DisplayManager() {
 
 auto DisplayManager::instance() -> DisplayManager* { return dm_instance(); }
 
-auto DisplayManager::create(QQmlEngine*, QJSEngine*) -> DisplayManager* {
-    auto* m = dm_instance();
-    assert(m != nullptr, "DisplayManager must be constructed by App before QML loads");
-    QJSEngine::setObjectOwnership(m, QJSEngine::CppOwnership);
-    return m;
-}
-
 auto DisplayManager::displays() const -> QVariantList {
     QVariantList out;
     out.reserve(m_ordered.size());

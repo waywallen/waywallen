@@ -109,6 +109,20 @@ pub enum RouterEvent {
     /// A batch mutation affected many renderers — send the whole list
     /// as a single replace.
     RenderersReplace(Vec<RendererSnapshot>),
+    /// A single library was added or its fields changed.
+    LibraryUpsert(LibrarySnapshot),
+    /// A library was removed.
+    LibraryRemoved(i64),
+    /// A batch mutation affected many libraries.
+    LibrariesReplace(Vec<LibrarySnapshot>),
+}
+
+/// Read-only view of a registered library.
+#[derive(Debug, Clone)]
+pub struct LibrarySnapshot {
+    pub id: i64,
+    pub path: String,
+    pub plugin_name: String,
 }
 
 /// Lifecycle state of a renderer as seen by the router.
@@ -174,6 +188,7 @@ struct Inner {
     /// Timestamp of the Pause transition for each paused renderer.
     /// Consumed by the reaper task to enforce `IDLE_KILL_TIMEOUT`.
     paused_since: HashMap<RendererId, Instant>,
+    libraries: HashMap<i64, LibrarySnapshot>,
     next_display_id: u64,
     next_config_generation: u64,
 }
@@ -198,6 +213,7 @@ impl Router {
                 renderer_tasks: HashMap::new(),
                 paused_renderers: std::collections::HashSet::new(),
                 paused_since: HashMap::new(),
+                libraries: HashMap::new(),
                 next_display_id: 0,
                 next_config_generation: 0,
             }),
@@ -447,7 +463,7 @@ impl Router {
 
     /// Fire an event to all subscribers. Send errors (no subscribers)
     /// are downgraded to debug logs.
-    fn emit(&self, evt: RouterEvent) {
+    pub fn emit(&self, evt: RouterEvent) {
         if let Err(e) = self.events_tx.send(evt) {
             log::debug!("router: no event subscribers ({e})");
         }
@@ -556,6 +572,29 @@ impl Router {
                 })
             })
             .collect()
+    }
+
+    pub async fn snapshot_libraries(self: &Arc<Self>) -> Vec<LibrarySnapshot> {
+        let inner = self.inner.lock().await;
+        let mut out: Vec<LibrarySnapshot> = inner.libraries.values().cloned().collect();
+        out.sort_by_key(|l| l.id);
+        out
+    }
+
+    pub async fn upsert_library(self: &Arc<Self>, snap: LibrarySnapshot) {
+        {
+            let mut inner = self.inner.lock().await;
+            inner.libraries.insert(snap.id, snap.clone());
+        }
+        self.emit(RouterEvent::LibraryUpsert(snap));
+    }
+
+    pub async fn remove_library(self: &Arc<Self>, id: i64) {
+        {
+            let mut inner = self.inner.lock().await;
+            inner.libraries.remove(&id);
+        }
+        self.emit(RouterEvent::LibraryRemoved(id));
     }
 
     // ---------------------------------------------------------------

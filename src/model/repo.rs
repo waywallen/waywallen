@@ -68,6 +68,16 @@ pub async fn find_plugin_by_name(
         .with_context(|| format!("select plugin name={name}"))
 }
 
+pub async fn find_plugin_by_id(
+    db: &DatabaseConnection,
+    id: i64,
+) -> Result<Option<source_plugin::Model>> {
+    source_plugin::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .with_context(|| format!("select plugin id={id}"))
+}
+
 pub async fn remove_plugin(db: &DatabaseConnection, id: i64) -> Result<u64> {
     let res = source_plugin::Entity::delete_by_id(id)
         .exec(db)

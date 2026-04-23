@@ -11,6 +11,7 @@ use crate::wallpaper_type::{WallpaperEntry, WallpaperType};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SourcePluginInfo {
+    pub id: i64,
     pub name: String,
     pub types: Vec<WallpaperType>,
     pub version: String,
@@ -24,6 +25,8 @@ pub struct SourceManager {
     lua: Lua,
     /// plugin name → registry key for the loaded module table.
     plugins: HashMap<String, LuaRegistryKey>,
+    /// plugin name → database id.
+    plugin_ids: HashMap<String, i64>,
     /// Flattened scan results from all plugins.
     entries: Vec<WallpaperEntry>,
     /// Index: wp_type → indices into `entries`.
@@ -47,6 +50,7 @@ impl SourceManager {
         Ok(Self {
             lua,
             plugins: HashMap::new(),
+            plugin_ids: HashMap::new(),
             entries: Vec::new(),
             by_type: HashMap::new(),
             config,
@@ -282,6 +286,19 @@ impl SourceManager {
         self.entries.iter().find(|e| e.id == id)
     }
 
+    pub fn set_plugin_id(&mut self, name: &str, id: i64) {
+        self.plugin_ids.insert(name.to_string(), id);
+    }
+
+    pub fn find_plugin_by_name(&self, name: &str) -> Result<Option<SourcePluginInfo>> {
+        for p in self.plugins()? {
+            if p.name == name {
+                return Ok(Some(p));
+            }
+        }
+        Ok(None)
+    }
+
     pub fn plugins(&self) -> Result<Vec<SourcePluginInfo>> {
         let mut out = Vec::new();
         for (name, key) in &self.plugins {
@@ -297,7 +314,9 @@ impl SourceManager {
                 })
                 .unwrap_or_default();
             let version: String = info.get("version").unwrap_or_else(|_| "0.0.0".into());
+            let id = self.plugin_ids.get(name).copied().unwrap_or(0);
             out.push(SourcePluginInfo {
+                id,
                 name: name.clone(),
                 types,
                 version,

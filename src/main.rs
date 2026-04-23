@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 
+use crate::model::repo;
+
 mod control;
 mod control_proto;
 mod dbus_iface;
@@ -239,6 +241,32 @@ async fn async_main() -> anyhow::Result<()> {
         tasks: task_mgr.clone(),
     });
 
+    // Populate router with libraries from DB immediately.
+    {
+        let db = db.clone();
+        let router = router.clone();
+        tokio::spawn(async move {
+            match repo::list_libraries(&db).await {
+                Ok(libs) => {
+                    for lib in libs {
+                        let plugin_name = match repo::find_plugin_by_id(&db, lib.plugin_id).await {
+                            Ok(Some(p)) => p.name,
+                            _ => "unknown".to_string(),
+                        };
+                        router
+                            .upsert_library(routing::LibrarySnapshot {
+                                id: lib.id,
+                                path: lib.path,
+                                plugin_name,
+                            })
+                            .await;
+                    }
+                }
+                Err(e) => log::warn!("failed to list libraries for router init: {e:#}"),
+            }
+        });
+    }
+
     // Off-load source-plugin loading + scanning + DB sync + initial
     // playlist seed onto the TaskManager. `async_main` proceeds
     // immediately to bind UDS/WS/DBus; the UI will see an empty
@@ -304,15 +332,19 @@ async fn async_main() -> anyhow::Result<()> {
                 )
                 .await
                 {
-                    Ok(summary) => log::info!(
-                        "sync plugin={} v{}: +{} / -{} items, -{} libraries, {} dropped",
-                        info.name,
-                        info.version,
-                        summary.items_upserted,
-                        summary.items_deleted,
-                        summary.libraries_deleted,
-                        summary.dropped,
-                    ),
+                    Ok((summary, plugin_model)) => {
+                        log::info!(
+                            "sync plugin={} v{}: +{} / -{} items, -{} libraries, {} dropped",
+                            info.name,
+                            info.version,
+                            summary.items_upserted,
+                            summary.items_deleted,
+                            summary.libraries_deleted,
+                            summary.dropped,
+                        );
+                        let mut sm = source_mgr.lock().await;
+                        sm.set_plugin_id(&plugin_model.name, plugin_model.id);
+                    }
                     Err(e) => log::warn!("sync plugin={} failed: {e:#}", info.name),
                 }
             }

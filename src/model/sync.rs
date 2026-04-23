@@ -41,7 +41,7 @@ pub async fn sync_plugin_entries(
     db: &DatabaseConnection,
     plugin: PluginRef<'_>,
     entries: &[WallpaperEntry],
-) -> Result<SyncSummary> {
+) -> Result<(SyncSummary, super::entities::source_plugin::Model)> {
     let plugin_model = repo::upsert_plugin(db, plugin.name, plugin.version)
         .await
         .with_context(|| format!("upsert plugin={}", plugin.name))?;
@@ -143,7 +143,7 @@ pub async fn sync_plugin_entries(
     summary.libraries_deleted +=
         repo::delete_libraries_missing(db, plugin_model.id, &keep_lib_paths).await?;
 
-    Ok(summary)
+    Ok((summary, plugin_model))
 }
 
 fn relative_under_root(root: &str, resource: &str) -> Option<String> {
@@ -197,7 +197,7 @@ mod tests {
             ),
             entry("image", "/other/root", "/other/root/z.png", "image"),
         ];
-        let summary = sync_plugin_entries(
+        let (summary, _) = sync_plugin_entries(
             &db,
             PluginRef { name: "image", version: "0.1" },
             &entries,
@@ -220,7 +220,7 @@ mod tests {
         let db = mem_db().await;
         let mut e = entry("p", "/ws", "/ws/12345/scene.pkg", "scene");
         e.preview = Some("/ws/12345/preview.gif".into());
-        sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e])
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -234,7 +234,7 @@ mod tests {
         let db = mem_db().await;
         let mut e = entry("p", "/root", "/root/a.png", "image");
         e.preview = Some("/elsewhere/thumb.png".into());
-        sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e])
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -249,8 +249,7 @@ mod tests {
             entry("p", "/root", "/root/ok.png", "image"),
             entry("p", "/root", "/elsewhere/bad.png", "image"),
         ];
-        let summary =
-            sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries)
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries)
                 .await
                 .unwrap();
         assert_eq!(summary.items_upserted, 1);
@@ -261,7 +260,7 @@ mod tests {
     async fn type_is_normalized_lowercase() {
         let db = mem_db().await;
         let entries = [entry("p", "/r", "/r/a.png", "Scene")];
-        sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries)
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries)
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -286,7 +285,7 @@ mod tests {
             tags: vec!["Nature".to_owned(), "relaxing".to_owned()],
             external_id: Some("12345".to_owned()),
         };
-        sync_plugin_entries(
+        let _ = sync_plugin_entries(
             &db,
             PluginRef { name: "wallpaper_engine", version: "0.2.0" },
             &[we],
@@ -316,7 +315,7 @@ mod tests {
             e
         };
         let entries = [mk("a.png", "Anime"), mk("b.png", "anime"), mk("c.png", "ANIME")];
-        sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries)
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries)
             .await
             .unwrap();
         assert_eq!(repo::list_tags(&db).await.unwrap().len(), 1);
@@ -327,13 +326,13 @@ mod tests {
         let db = mem_db().await;
         let mut first = entry("p", "/r", "/r/a.png", "image");
         first.tags = vec!["Anime".into(), "Nature".into()];
-        sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[first])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[first])
             .await
             .unwrap();
 
         let mut second = entry("p", "/r", "/r/a.png", "image");
         second.tags = vec!["Game".into()];
-        sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[second])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[second])
             .await
             .unwrap();
 
@@ -352,13 +351,12 @@ mod tests {
             entry("p", "/a", "/a/y.png", "image"),
             entry("p", "/b", "/b/z.png", "image"),
         ];
-        sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &first)
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &first)
             .await
             .unwrap();
 
         let second = [entry("p", "/a", "/a/x.png", "image")];
-        let summary =
-            sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &second)
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &second)
                 .await
                 .unwrap();
         assert_eq!(summary.items_upserted, 1);
@@ -369,15 +367,14 @@ mod tests {
     #[tokio::test]
     async fn empty_snapshot_prunes_all_libraries() {
         let db = mem_db().await;
-        sync_plugin_entries(
+        let _ = sync_plugin_entries(
             &db,
             PluginRef { name: "p", version: "" },
             &[entry("p", "/one", "/one/x.png", "image")],
         )
         .await
         .unwrap();
-        let summary =
-            sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[])
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[])
                 .await
                 .unwrap();
         assert_eq!(summary.libraries_deleted, 1);

@@ -299,7 +299,20 @@ MD.Page {
 
                 // --- Source Plugins ---
                 SectionDivider {}
-                SectionTitle { text: "Source Plugins" }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.rightMargin: 16
+                    SectionTitle {
+                        text: "Source Plugins"
+                        Layout.fillWidth: true
+                    }
+                    MD.IconButton {
+                        icon.name: MD.Token.icon.settings
+                        onClicked: MD.Util.showPopup('waywallen.ui/PagePopup', {
+                            source: 'waywallen.ui/SourceManagePage'
+                        }, root)
+                    }
+                }
 
                 SectionHint {
                     visible: !sourceQuery.sources || sourceQuery.sources.length === 0

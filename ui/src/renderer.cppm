@@ -69,7 +69,6 @@ private:
 class RendererManager : public QObject {
     Q_OBJECT
     QML_ELEMENT
-    QML_SINGLETON
 
     Q_PROPERTY(QVariantList renderers READ renderers NOTIFY renderersChanged FINAL)
     Q_PROPERTY(int count READ count NOTIFY renderersChanged FINAL)
@@ -79,10 +78,6 @@ public:
     ~RendererManager() override;
 
     static auto instance() -> RendererManager*;
-    static auto create(QQmlEngine*, QJSEngine*) -> RendererManager*;
-
-    // make qml prefer create
-    RendererManager(const RendererManager&) = delete;
 
     /// Snapshot of all renderers (ordered by ascending id) as a list of
     /// `Renderer*`, suitable for QML `Repeater { model: RendererManager.renderers }`.

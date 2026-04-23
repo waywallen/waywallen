@@ -41,6 +41,9 @@ message Request {
     DisplayListRequest        display_list = 23;
     SettingsGetRequest        settings_get = 24;
     SettingsSetRequest        settings_set = 25;
+    LibraryListRequest        library_list = 26;
+    LibraryAddRequest         library_add = 27;
+    LibraryRemoveRequest      library_remove = 28;
   }
 }
 
@@ -65,6 +68,9 @@ message Response {
     DisplayListResponse        display_list = 23;
     SettingsGetResponse        settings_get = 24;
     Empty                      settings_set = 25;
+    LibraryListResponse        library_list = 26;
+    Empty                      library_add = 27;
+    Empty                      library_remove = 28;
   }
 }
 
@@ -225,6 +231,30 @@ message DisplayListResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Libraries
+// ---------------------------------------------------------------------------
+
+message LibraryInstance {
+  int64 id = 1;
+  string path = 2;
+  string plugin_name = 3;
+}
+
+message LibraryListRequest {}
+message LibraryListResponse {
+  repeated LibraryInstance libraries = 1;
+}
+
+message LibraryAddRequest {
+  string path = 1;
+  string plugin_name = 2;
+}
+
+message LibraryRemoveRequest {
+  int64 id = 1;
+}
+
+// ---------------------------------------------------------------------------
 // Server-initiated events (no request_id, carried in `ServerFrame.event`)
 // ---------------------------------------------------------------------------
 
@@ -236,6 +266,9 @@ message Event {
     RendererSnapshot renderer_snapshot = 4;
     RendererChanged  renderer_changed  = 5;
     RendererRemoved  renderer_removed  = 6;
+    LibrarySnapshot  library_snapshot  = 7;
+    LibraryChanged   library_changed   = 8;
+    LibraryRemoved   library_removed   = 9;
   }
 }
 
@@ -272,6 +305,21 @@ message RendererChanged {
 // A renderer was unregistered. Receivers should drop the entry.
 message RendererRemoved {
   string renderer_id = 1;
+}
+
+// Full replacement for the library list. Sent once on WS handshake.
+message LibrarySnapshot {
+  repeated LibraryInstance libraries = 1;
+}
+
+// A single library was added or its fields changed.
+message LibraryChanged {
+  LibraryInstance library = 1;
+}
+
+// A library was removed.
+message LibraryRemoved {
+  int64 id = 1;
 }
 
 // ---------------------------------------------------------------------------

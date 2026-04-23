@@ -30,6 +30,7 @@ public:
           m_backend(Box<Backend>::make(port)),
           m_display_mgr(Box<DisplayManager>::make()),
           m_renderer_mgr(Box<RendererManager>::make()),
+          m_library_mgr(Box<LibraryManager>::make()),
           m_gui_context(Box<QtExecutionContext>::make(
               QThread::currentThread(),
               (QEvent::Type)QEvent::registerEventType())),
@@ -48,6 +49,7 @@ public:
     Box<Backend>               m_backend;
     Box<DisplayManager>        m_display_mgr;
     Box<RendererManager>       m_renderer_mgr;
+    Box<LibraryManager>        m_library_mgr;
     Box<QtExecutionContext>    m_gui_context;
     asio::thread_pool          m_pool;
     quint16                    m_port;
@@ -118,6 +120,7 @@ void App::init() {
 
     d->m_display_mgr->attachTo(d->m_backend.get());
     d->m_renderer_mgr->attachTo(d->m_backend.get());
+    d->m_library_mgr->attachTo(d->m_backend.get());
 
     // Perform full sync on every connection (initial and reconnect).
     connect(d->m_backend.get(), &Backend::connected, this, [d]() {
@@ -128,6 +131,8 @@ void App::init() {
         dq->reload();
         auto* rq = new RendererListQuery(d->m_renderer_mgr.get());
         rq->reload();
+        auto* lq = new LibraryListQuery(d->m_library_mgr.get());
+        lq->reload();
     });
 
     // Connect to the daemon's WebSocket (no-op if port is still 0).
@@ -154,6 +159,21 @@ auto App::engine() const -> QQmlApplicationEngine* {
 auto App::backend() const -> Backend* {
     Q_D(const App);
     return d->m_backend.as_mut_ptr();
+}
+
+auto App::displayManager() const -> DisplayManager* {
+    Q_D(const App);
+    return d->m_display_mgr.as_mut_ptr();
+}
+
+auto App::rendererManager() const -> RendererManager* {
+    Q_D(const App);
+    return d->m_renderer_mgr.as_mut_ptr();
+}
+
+auto App::libraryManager() const -> LibraryManager* {
+    Q_D(const App);
+    return d->m_library_mgr.as_mut_ptr();
 }
 
 void App::load_settings() {}

@@ -270,7 +270,7 @@ MD.Page {
                                 }
 
                                 Repeater {
-                                    model: W.DisplayManager.displays
+                                    model: W.App.displayManager.displays
 
                                     MD.FilterChip {
                                         required property var modelData

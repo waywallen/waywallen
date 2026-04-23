@@ -7,6 +7,9 @@ module;
 
 export module waywallen:app;
 export import :backend;
+export import :display;
+export import :renderer;
+export import :library;
 export import qextra;
 
 class AppPrivate;
@@ -17,6 +20,10 @@ export class App : public QObject {
     Q_OBJECT
     QML_ELEMENT
     QML_SINGLETON
+
+    Q_PROPERTY(DisplayManager* displayManager READ displayManager CONSTANT FINAL)
+    Q_PROPERTY(RendererManager* rendererManager READ rendererManager CONSTANT FINAL)
+    Q_PROPERTY(LibraryManager* libraryManager READ libraryManager CONSTANT FINAL)
 
 public:
     App(quint16 port, rstd::empty);
@@ -29,6 +36,11 @@ public:
     void init();
 
     static auto instance() -> App*;
+
+    auto        displayManager() const -> DisplayManager*;
+    auto        rendererManager() const -> RendererManager*;
+    auto        libraryManager() const -> LibraryManager*;
+
     auto        engine() const -> QQmlApplicationEngine*;
     auto        backend() const -> Backend*;
 
