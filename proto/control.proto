@@ -44,6 +44,7 @@ message Request {
     LibraryListRequest        library_list = 26;
     LibraryAddRequest         library_add = 27;
     LibraryRemoveRequest      library_remove = 28;
+    LibraryAutoDetectRequest  library_auto_detect = 29;
   }
 }
 
@@ -71,6 +72,7 @@ message Response {
     LibraryListResponse        library_list = 26;
     Empty                      library_add = 27;
     Empty                      library_remove = 28;
+    LibraryAutoDetectResponse  library_auto_detect = 29;
   }
 }
 
@@ -252,6 +254,15 @@ message LibraryAddRequest {
 
 message LibraryRemoveRequest {
   int64 id = 1;
+}
+
+// Ask every source plugin to look in well-known locations (Pictures,
+// Steam workshop, etc.) and auto-register anything it finds as a new
+// library. Returns the paths that were actually added (already-known
+// paths are silently skipped).
+message LibraryAutoDetectRequest {}
+message LibraryAutoDetectResponse {
+  repeated LibraryInstance added = 1;
 }
 
 // ---------------------------------------------------------------------------

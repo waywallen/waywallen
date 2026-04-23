@@ -58,6 +58,8 @@ using proto::LibraryListRequest;
 using proto::LibraryListResponse;
 using proto::LibraryAddRequest;
 using proto::LibraryRemoveRequest;
+using proto::LibraryAutoDetectRequest;
+using proto::LibraryAutoDetectResponse;
 using proto::LibrarySnapshot;
 using proto::LibraryChanged;
 using proto::LibraryRemoved;

@@ -27,6 +27,25 @@ local function strip_ext(name)
     return name:match("(.+)%.[^.]+$") or name
 end
 
+function M.auto_detect(ctx)
+    -- Probe XDG/home defaults; return paths that actually exist so
+    -- the daemon can register them as libraries.
+    local candidates = {}
+    local xdg = ctx.env("XDG_PICTURES_DIR")
+    if xdg and xdg ~= "" then table.insert(candidates, xdg) end
+    local home = ctx.env("HOME")
+    if home and home ~= "" then table.insert(candidates, home .. "/Pictures/Wallpapers") end
+
+    local found, seen = {}, {}
+    for _, p in ipairs(candidates) do
+        if not seen[p] and ctx.file_exists(p) then
+            seen[p] = true
+            table.insert(found, p)
+        end
+    end
+    return found
+end
+
 function M.scan(ctx)
     local entries = {}
     -- Libraries are owned by the daemon DB and pushed in via

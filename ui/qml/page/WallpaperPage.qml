@@ -21,6 +21,16 @@ MD.Page {
         id: applyQuery
     }
 
+    W.LibraryAutoDetectQuery {
+        id: autoDetectQuery
+        onStatusChanged: {
+            if (status === 3) {
+                scanQuery.reload();
+                wallpaperQuery.reload();
+            }
+        }
+    }
+
     property string typeFilter: ""
     property var filteredWallpapers: {
         const all = wallpaperQuery.wallpapers;
@@ -126,42 +136,69 @@ MD.Page {
                     }
                 }
 
-                // Grid via ListView + WidthProvider
-                MD.VerticalListView {
-                    id: m_grid_view
+                // Grid + centered empty-state overlay
+                Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    clip: true
-                    cacheBuffer: 300
-                    displayMarginBeginning: 300
-                    displayMarginEnd: 300
-                    topMargin: 8
-                    bottomMargin: 8
 
-                    MD.WidthProvider {
-                        id: m_wp
-                        total: m_grid_view.width
-                        minimum: 150
-                        spacing: 12
-                        leftMargin: 8
-                        rightMargin: 8
+                    MD.VerticalListView {
+                        id: m_grid_view
+                        anchors.fill: parent
+                        clip: true
+                        cacheBuffer: 300
+                        displayMarginBeginning: 300
+                        displayMarginEnd: 300
+                        topMargin: 8
+                        bottomMargin: 8
+                        visible: root.filteredWallpapers && root.filteredWallpapers.length > 0
+
+                        MD.WidthProvider {
+                            id: m_wp
+                            total: m_grid_view.width
+                            minimum: 150
+                            spacing: 12
+                            leftMargin: 8
+                            rightMargin: 8
+                        }
+
+                        model: root.filteredWallpapers
+
+                        delegate: WallpaperCard {
+                            widthProvider: m_wp
+                            onClicked: root.selectedWallpaper = wallpaper
+                        }
                     }
 
-                    model: root.filteredWallpapers
+                    ColumnLayout {
+                        anchors.centerIn: parent
+                        spacing: 16
+                        visible: !root.filteredWallpapers || root.filteredWallpapers.length === 0
 
-                    delegate: WallpaperCard {
-                        widthProvider: m_wp
-                        onClicked: root.selectedWallpaper = wallpaper
+                        MD.CircularIndicator {
+                            Layout.alignment: Qt.AlignHCenter
+                            visible: wallpaperQuery.querying
+                            running: visible
+                        }
+
+                        MD.Text {
+                            Layout.alignment: Qt.AlignHCenter
+                            visible: !wallpaperQuery.querying
+                            text: "No wallpapers found"
+                            typescale: MD.Token.typescale.body_large
+                            color: MD.Token.color.on_surface_variant
+                        }
+
+                        MD.BusyButton {
+                            Layout.alignment: Qt.AlignHCenter
+                            visible: !wallpaperQuery.querying
+                            text: "Auto detect libraries"
+                            busy: autoDetectQuery.querying
+                            mdState.type: MD.Enum.BtFilledTonal
+                            onClicked: {
+                                if (!busy) autoDetectQuery.reload();
+                            }
+                        }
                     }
-                }
-
-                // Empty state
-                MD.Text {
-                    Layout.alignment: Qt.AlignCenter
-                    visible: !root.filteredWallpapers || root.filteredWallpapers.length === 0
-                    text: wallpaperQuery.querying ? "Loading…" : "No wallpapers found"
-                    typescale: MD.Token.typescale.body_large
-                    color: MD.Token.color.on_surface_variant
                 }
             }
         }

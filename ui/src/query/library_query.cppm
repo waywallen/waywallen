@@ -47,6 +47,25 @@ private:
     QString m_plugin_name;
 };
 
+export class LibraryAutoDetectQuery : public Query {
+    Q_OBJECT
+    QML_ELEMENT
+
+    Q_PROPERTY(qint32 addedCount READ addedCount NOTIFY addedCountChanged)
+
+public:
+    LibraryAutoDetectQuery(QObject* parent = nullptr);
+
+    auto addedCount() const -> qint32;
+
+    void reload() override;
+
+    Q_SIGNAL void addedCountChanged();
+
+private:
+    qint32 m_added_count = 0;
+};
+
 export class LibraryRemoveQuery : public Query {
     Q_OBJECT
     QML_ELEMENT

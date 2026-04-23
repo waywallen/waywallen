@@ -99,6 +99,42 @@ void LibraryAddQuery::reload() {
 }
 
 // ---------------------------------------------------------------------------
+// LibraryAutoDetectQuery
+// ---------------------------------------------------------------------------
+
+LibraryAutoDetectQuery::LibraryAutoDetectQuery(QObject* parent): Query(parent) {}
+
+auto LibraryAutoDetectQuery::addedCount() const -> qint32 { return m_added_count; }
+
+void LibraryAutoDetectQuery::reload() {
+    setStatus(Status::Querying);
+    auto backend = App::instance()->backend();
+
+    auto req = proto::Request {};
+    req.setLibraryAutoDetect(proto::LibraryAutoDetectRequest {});
+
+    auto self = QWatcher { this };
+    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+        auto result = co_await backend->send(std::move(req));
+        co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
+
+        if (! result) {
+            self->setError(result.unwrap_err());
+            co_return;
+        }
+        auto  rsp   = result.unwrap();
+        auto& inner = rsp.libraryAutoDetect();
+        auto  added = static_cast<qint32>(inner.added().size());
+        if (self->m_added_count != added) {
+            self->m_added_count = added;
+            Q_EMIT self->addedCountChanged();
+        }
+        self->setStatus(Status::Finished);
+        co_return;
+    });
+}
+
+// ---------------------------------------------------------------------------
 // LibraryRemoveQuery
 // ---------------------------------------------------------------------------
 
