@@ -13,20 +13,25 @@ MD.Page {
         id: removeQuery
     }
 
-    contentItem: ColumnLayout {
-        spacing: 0
+    contentItem: Item {
+        implicitHeight: children[0].implicitHeight + m_fab.implicitHeight + 16 * 2
+        implicitWidth: children[0].implicitWidth
 
-        ListView {
+        MD.VerticalListView {
             id: m_view
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            clip: true
+            width: parent.width
             model: W.App.libraryManager.libraries
+            expand: true
+
+            leftMargin: 12
+            rightMargin: 12
 
             delegate: MD.ListItem {
                 required property var modelData
-                width: m_view.width
+                width: m_view.contentWidth
                 radius: 8
+
+                mdState.backgroundColor: MD.Token.color.surface_container
 
                 text: modelData.path
                 supportText: "Plugin: " + modelData.pluginName
@@ -44,21 +49,15 @@ MD.Page {
                     }
                 }
             }
+        }
 
-            footer: Item {
-                width: parent.width
-                height: 80
-            }
+        MD.FAB {
+            id: m_fab
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.margins: 16
+            icon.name: MD.Token.icon.add
+            onClicked: root.MD.MProp.page.pushItem('waywallen.ui/AddLibraryPage')
         }
     }
-
-    // MD.FAB {
-    //     anchors.right: parent.right
-    //     anchors.bottom: parent.bottom
-    //     anchors.margins: 16
-    //     icon.name: MD.Token.icon.add
-    //     onClicked: MD.Util.showPopup('waywallen.ui/PagePopup', {
-    //         source: 'waywallen.ui/AddLibraryPage'
-    //     }, root)
-    // }
 }

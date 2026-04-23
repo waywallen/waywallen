@@ -1,7 +1,7 @@
 pragma ValueTypeBehavior: Assertable
 import QtQuick
+import QtQuick.Dialogs
 import QtQuick.Layouts
-import QtQuick.Controls as T
 import Qcm.Material as MD
 import waywallen.ui as W
 
@@ -18,14 +18,30 @@ MD.Page {
         id: addQuery
         onStatusChanged: {
             if (status === 3) {
-                // Success: close popup
                 root.parent.parent.close();
             }
         }
     }
 
+    MD.ButtonGroup {
+        id: pluginGroup
+        exclusive: true
+        property string selectedPlugin: ""
+    }
+
+    FolderDialog {
+        id: folderDialog
+        title: "Choose Library Folder"
+        onAccepted: {
+            pathInput.text = selectedFolder.toString().replace(/^file:\/\//, "");
+        }
+    }
+
     contentItem: MD.Flickable {
+        implicitHeight: contentHeight
         contentHeight: contentCol.implicitHeight
+        leftMargin: 12
+        rightMargin: 12
 
         ColumnLayout {
             id: contentCol
@@ -38,24 +54,18 @@ MD.Page {
                 typescale: MD.Token.typescale.title_small
             }
 
-            ListView {
-                id: pluginList
+            Flow {
                 Layout.fillWidth: true
-                implicitHeight: contentHeight
-                model: sourceQuery.sources
-                interactive: false
-                spacing: 4
+                spacing: 8
 
-                property string selectedPlugin: ""
-
-                delegate: MD.ListItem {
-                    required property var modelData
-                    width: pluginList.width
-                    radius: 8
-                    text: modelData.name
-                    supportText: modelData.types.join(", ")
-                    checked: pluginList.selectedPlugin === modelData.name
-                    onClicked: pluginList.selectedPlugin = modelData.name
+                Repeater {
+                    model: sourceQuery.sources
+                    delegate: MD.FilterChip {
+                        required property var modelData
+                        MD.ButtonGroup.group: pluginGroup
+                        text: modelData.name
+                        onClicked: pluginGroup.selectedPlugin = checked ? modelData.name : ""
+                    }
                 }
             }
 
@@ -66,33 +76,20 @@ MD.Page {
                 typescale: MD.Token.typescale.title_small
             }
 
-            // Using a simple Rectangle + TextInput as a fallback for TextField
-            Rectangle {
+            RowLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 48
-                radius: 8
-                color: MD.Token.color.surface_container_highest
-                border.color: pathInput.activeFocus ? MD.Token.color.primary : "transparent"
-                border.width: 2
+                spacing: 8
 
-                TextInput {
+                MD.TextField {
                     id: pathInput
-                    anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    verticalAlignment: TextInput.AlignVCenter
-                    color: MD.Token.color.on_surface
-                    font.pixelSize: 16
-                    clip: true
+                    Layout.fillWidth: true
+                    placeholderText: "e.g. /home/user/Pictures/Wallpapers"
+                }
 
-                    property string placeholder: "e.g. /home/user/Pictures/Wallpapers"
-                    Text {
-                        text: pathInput.placeholder
-                        color: MD.Token.color.on_surface_variant
-                        visible: !pathInput.text && !pathInput.activeFocus
-                        anchors.fill: parent
-                        verticalAlignment: Text.AlignVCenter
-                    }
+                MD.IconButton {
+                    Layout.alignment: Qt.AlignVCenter
+                    icon.name: MD.Token.icon.folder
+                    onClicked: folderDialog.open()
                 }
             }
 
@@ -102,10 +99,10 @@ MD.Page {
                 Layout.fillWidth: true
                 text: "Add Library"
                 busy: addQuery.querying
-                enabled: pluginList.selectedPlugin !== "" && pathInput.text !== ""
+                enabled: pluginGroup.selectedPlugin !== "" && pathInput.text !== ""
                 mdState.type: MD.Enum.BtFilled
                 onClicked: {
-                    addQuery.pluginName = pluginList.selectedPlugin;
+                    addQuery.pluginName = pluginGroup.selectedPlugin;
                     addQuery.path = pathInput.text;
                     addQuery.reload();
                 }
