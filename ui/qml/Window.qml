@@ -53,14 +53,26 @@ MD.ApplicationWindow {
         }
     ]
 
+    readonly property var drawerModel: pageModel.concat([
+        {
+            icon: MD.Token.icon.info,
+            name: "About"
+        }
+    ])
+
     readonly property var pageComponents: [
-        "qrc:/waywallen/ui/qml/page/WallpaperPage.qml",
-        "qrc:/waywallen/ui/qml/page/DisplaysPage.qml",
-        "qrc:/waywallen/ui/qml/page/StatusPage.qml"
+        "qrc:/waywallen/ui/qml/page/WallpaperPage.qml", 
+        "qrc:/waywallen/ui/qml/page/DisplaysPage.qml", 
+        "qrc:/waywallen/ui/qml/page/StatusPage.qml",
+        "qrc:/waywallen/ui/qml/page/AboutPage.qml",
     ]
 
     onCurrentPageChanged: {
-        m_content.replace(m_content.currentItem, pageComponents[currentPage], {});
+        if (currentPage > pageComponents.length) {
+            MD.Util.showPopup();
+        } else {
+            m_content.replace(m_content.currentItem, pageComponents[currentPage], {});
+        }
     }
 
     Component.onCompleted: {
@@ -108,7 +120,7 @@ MD.ApplicationWindow {
                 visible: active
 
                 sourceComponent: MD.StandardDrawer {
-                    model: win.pageModel
+                    model: win.drawerModel
                     currentIndex: win.currentPage
                     showDivider: false
 

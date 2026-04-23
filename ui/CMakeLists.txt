@@ -105,8 +105,11 @@ set(QML_FILES
   qml/page/DisplaysPage.qml
   qml/page/SourceManagePage.qml
   qml/page/AddLibraryPage.qml
+  qml/page/AboutPage.qml
 )
-set(RESOURCES)
+set(RESOURCES
+  assets/waywallen-ui.svg
+)
 
 #set_source_files_properties(qml/Global.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
@@ -130,6 +133,7 @@ qt_add_qml_module(
   QtCore
   QtQuick
   QtQuick.Shapes
+  QtQuick.Dialogs
   Qcm.Material
   waywallen.control
   RESOURCE_PREFIX
@@ -140,8 +144,8 @@ qt_add_qml_module(
   ${QML_FILES}
   SOURCES
   ${SOURCES}
-  #RESOURCES
-  #${RESOURCES}
+  RESOURCES
+  ${RESOURCES}
   NO_PLUGIN_OPTIONAL)
 
 target_sources(waywallen-qml PUBLIC FILE_SET CXX_MODULES FILES ${MODULES} ${MOC_SOURCE_FILES})
