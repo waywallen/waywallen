@@ -157,7 +157,7 @@ fn write_framed(
     };
 
     loop {
-        match sendmsg::<()>(sock.as_raw_fd(), &iov, cmsgs, MsgFlags::empty(), None) {
+        match sendmsg::<()>(sock.as_raw_fd(), &iov, cmsgs, MsgFlags::MSG_NOSIGNAL, None) {
             Ok(n) if n == framed.len() => return Ok(()),
             Ok(n) => {
                 return Err(CodecError::ShortWrite {
