@@ -110,7 +110,7 @@ MD.ApplicationWindow {
                 sourceComponent: MD.StandardDrawer {
                     model: win.pageModel
                     currentIndex: win.currentPage
-                    showDivider: false
+                    // showDivider: false
 
                     Behavior on implicitWidth {
                         NumberAnimation {
@@ -149,7 +149,7 @@ MD.ApplicationWindow {
                             }
                         }
 
-                        MD.DrawerDivider {
+                        MD.Divider {
                             Layout.fillWidth: true
                         }
                     }
@@ -157,7 +157,7 @@ MD.ApplicationWindow {
                     drawerContent: ColumnLayout {
                         spacing: 0
 
-                        MD.DrawerDivider {
+                        MD.Divider {
                             Layout.fillWidth: true
                         }
 
