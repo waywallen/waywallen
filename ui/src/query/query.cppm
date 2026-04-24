@@ -7,9 +7,13 @@ module;
 
 export module waywallen:query.query;
 export import qextra;
+import :proto;
 
 namespace waywallen
 {
+
+export template<typename Self>
+using QueryExtra = QAsyncResultExtra<control::v1::Response, Self>;
 
 export class Query : public QAsyncResult {
     Q_OBJECT

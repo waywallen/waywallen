@@ -11,7 +11,7 @@ export import :query.query;
 namespace waywallen
 {
 
-export class DisplayListQuery : public Query {
+export class DisplayListQuery : public Query, public QueryExtra<DisplayListQuery> {
     Q_OBJECT
     QML_ELEMENT
 

@@ -11,7 +11,7 @@ export import :query.query;
 namespace waywallen
 {
 
-export class WallpaperListQuery : public Query {
+export class WallpaperListQuery : public Query, public QueryExtra<WallpaperListQuery> {
     Q_OBJECT
     QML_ELEMENT
 
@@ -36,7 +36,7 @@ private:
     QVariantList m_wallpapers;
 };
 
-export class WallpaperScanQuery : public Query {
+export class WallpaperScanQuery : public Query, public QueryExtra<WallpaperScanQuery> {
     Q_OBJECT
     QML_ELEMENT
 
@@ -55,7 +55,7 @@ private:
     quint32 m_count { 0 };
 };
 
-export class WallpaperApplyQuery : public Query {
+export class WallpaperApplyQuery : public Query, public QueryExtra<WallpaperApplyQuery> {
     Q_OBJECT
     QML_ELEMENT
 

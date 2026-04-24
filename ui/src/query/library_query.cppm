@@ -11,7 +11,7 @@ export import :query.query;
 namespace waywallen
 {
 
-export class LibraryListQuery : public Query {
+export class LibraryListQuery : public Query, public QueryExtra<LibraryListQuery> {
     Q_OBJECT
     QML_ELEMENT
 
@@ -21,7 +21,7 @@ public:
     void reload() override;
 };
 
-export class LibraryAddQuery : public Query {
+export class LibraryAddQuery : public Query, public QueryExtra<LibraryAddQuery> {
     Q_OBJECT
     QML_ELEMENT
 
@@ -47,7 +47,7 @@ private:
     QString m_plugin_name;
 };
 
-export class LibraryAutoDetectQuery : public Query {
+export class LibraryAutoDetectQuery : public Query, public QueryExtra<LibraryAutoDetectQuery> {
     Q_OBJECT
     QML_ELEMENT
 
@@ -66,7 +66,7 @@ private:
     qint32 m_added_count = 0;
 };
 
-export class LibraryRemoveQuery : public Query {
+export class LibraryRemoveQuery : public Query, public QueryExtra<LibraryRemoveQuery> {
     Q_OBJECT
     QML_ELEMENT
 
