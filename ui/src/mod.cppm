@@ -1,5 +1,6 @@
 export module waywallen;
 export import :proto;
+export import :action;
 export import :app;
 export import :backend;
 export import :daemon_dbus;

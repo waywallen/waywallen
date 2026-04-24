@@ -67,6 +67,19 @@ MD.ApplicationWindow {
         currentPageChanged();
     }
 
+    MD.SnakeView {
+        id: m_snake
+        parent: T.Overlay.overlay
+        anchors.fill: parent
+    }
+
+    Connections {
+        target: W.Action
+        function onToast(text, duration, flags, action) {
+            m_snake.show(text, duration, flags, action);
+        }
+    }
+
     MD.Popup {
         id: m_disconnect_overlay
         visible: !W.DaemonDBusClient.daemonAvailable
