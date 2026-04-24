@@ -30,16 +30,12 @@ void HealthQuery::reload() {
         auto result = co_await backend->send(std::move(req));
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
-        if (! result) {
-            self->setError(result.unwrap_err());
-            co_return;
-        }
-        auto rsp = result.unwrap();
-        self->m_service = rsp.health().service();
-        self->m_state   = rsp.health().state();
-        Q_EMIT self->serviceChanged();
-        Q_EMIT self->stateChanged();
-        self->setStatus(Status::Finished);
+        self->inspect_set(result, [self](const proto::Response& rsp) {
+            self->m_service = rsp.health().service();
+            self->m_state   = rsp.health().state();
+            Q_EMIT self->serviceChanged();
+            Q_EMIT self->stateChanged();
+        });
         co_return;
     });
 }

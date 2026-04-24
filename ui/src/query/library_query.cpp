@@ -34,18 +34,11 @@ void LibraryListQuery::reload() {
         auto result = co_await backend->send(std::move(req));
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
-        if (! result) {
-            self->setError(result.unwrap_err());
-            co_return;
-        }
-        auto  rsp      = result.unwrap();
-        auto& list_rsp = rsp.libraryList();
-
-        if (auto* lm = LibraryManager::instance()) {
-            lm->replaceAll(list_rsp.libraries());
-        }
-
-        self->setStatus(Status::Finished);
+        self->inspect_set(result, [](const proto::Response& rsp) {
+            if (auto* lm = LibraryManager::instance()) {
+                lm->replaceAll(rsp.libraryList().libraries());
+            }
+        });
         co_return;
     });
 }
@@ -89,11 +82,7 @@ void LibraryAddQuery::reload() {
         auto result = co_await backend->send(std::move(req));
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
-        if (! result) {
-            self->setError(result.unwrap_err());
-            co_return;
-        }
-        self->setStatus(Status::Finished);
+        self->inspect_set(result, [](const proto::Response&) {});
         co_return;
     });
 }
@@ -118,18 +107,13 @@ void LibraryAutoDetectQuery::reload() {
         auto result = co_await backend->send(std::move(req));
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
-        if (! result) {
-            self->setError(result.unwrap_err());
-            co_return;
-        }
-        auto  rsp   = result.unwrap();
-        auto& inner = rsp.libraryAutoDetect();
-        auto  added = static_cast<qint32>(inner.added().size());
-        if (self->m_added_count != added) {
-            self->m_added_count = added;
-            Q_EMIT self->addedCountChanged();
-        }
-        self->setStatus(Status::Finished);
+        self->inspect_set(result, [self](const proto::Response& rsp) {
+            auto added = static_cast<qint32>(rsp.libraryAutoDetect().added().size());
+            if (self->m_added_count != added) {
+                self->m_added_count = added;
+                Q_EMIT self->addedCountChanged();
+            }
+        });
         co_return;
     });
 }
@@ -164,11 +148,7 @@ void LibraryRemoveQuery::reload() {
         auto result = co_await backend->send(std::move(req));
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
-        if (! result) {
-            self->setError(result.unwrap_err());
-            co_return;
-        }
-        self->setStatus(Status::Finished);
+        self->inspect_set(result, [](const proto::Response&) {});
         co_return;
     });
 }

@@ -32,42 +32,38 @@ void DisplayListQuery::reload() {
         auto result = co_await backend->send(std::move(req));
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
-        if (! result) {
-            self->setError(result.unwrap_err());
-            co_return;
-        }
-        auto  rsp      = result.unwrap();
-        auto& list_rsp = rsp.displayList();
+        self->inspect_set(result, [self](const proto::Response& rsp) {
+            auto& list_rsp = rsp.displayList();
 
-        // Sync the global DisplayManager first so any consumer pulling
-        // from the manager sees the freshly-fetched rows before this
-        // query's own `displaysChanged` fires.
-        if (auto* dm = DisplayManager::instance()) {
-            dm->replaceAll(list_rsp.displays());
-        }
-
-        QVariantList items;
-        for (const auto& d : list_rsp.displays()) {
-            QVariantMap m;
-            m[u"id"_s]         = QVariant::fromValue<quint64>(d.displayId());
-            m[u"name"_s]       = d.name();
-            m[u"width"_s]      = d.width();
-            m[u"height"_s]     = d.height();
-            m[u"refreshMhz"_s] = d.refreshMhz();
-
-            QVariantList links;
-            for (const auto& l : d.links()) {
-                QVariantMap lm;
-                lm[u"rendererId"_s] = l.rendererId();
-                lm[u"zOrder"_s]     = static_cast<int>(l.zOrder());
-                links.append(lm);
+            // Sync the global DisplayManager first so any consumer pulling
+            // from the manager sees the freshly-fetched rows before this
+            // query's own `displaysChanged` fires.
+            if (auto* dm = DisplayManager::instance()) {
+                dm->replaceAll(list_rsp.displays());
             }
-            m[u"links"_s] = links;
-            items.append(m);
-        }
-        self->m_displays = std::move(items);
-        Q_EMIT self->displaysChanged();
-        self->setStatus(Status::Finished);
+
+            QVariantList items;
+            for (const auto& d : list_rsp.displays()) {
+                QVariantMap m;
+                m[u"id"_s]         = QVariant::fromValue<quint64>(d.displayId());
+                m[u"name"_s]       = d.name();
+                m[u"width"_s]      = d.width();
+                m[u"height"_s]     = d.height();
+                m[u"refreshMhz"_s] = d.refreshMhz();
+
+                QVariantList links;
+                for (const auto& l : d.links()) {
+                    QVariantMap lm;
+                    lm[u"rendererId"_s] = l.rendererId();
+                    lm[u"zOrder"_s]     = static_cast<int>(l.zOrder());
+                    links.append(lm);
+                }
+                m[u"links"_s] = links;
+                items.append(m);
+            }
+            self->m_displays = std::move(items);
+            Q_EMIT self->displaysChanged();
+        });
         co_return;
     });
 }

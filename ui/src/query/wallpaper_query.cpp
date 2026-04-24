@@ -48,25 +48,21 @@ void WallpaperListQuery::reload() {
         auto result = co_await backend->send(std::move(req));
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
-        if (! result) {
-            self->setError(result.unwrap_err());
-            co_return;
-        }
-        auto rsp = result.unwrap();
-        auto& list_rsp = rsp.wallpaperList();
-        QVariantList items;
-        for (const auto& wp : list_rsp.wallpapers()) {
-            QVariantMap m;
-            m[u"id"_s]       = wp.id_proto();
-            m[u"name"_s]     = wp.name();
-            m[u"wpType"_s]   = wp.wpType();
-            m[u"resource"_s] = wp.resource();
-            m[u"preview"_s]  = wp.preview();
-            items.append(m);
-        }
-        self->m_wallpapers = std::move(items);
-        Q_EMIT self->wallpapersChanged();
-        self->setStatus(Status::Finished);
+        self->inspect_set(result, [self](const proto::Response& rsp) {
+            auto&        list_rsp = rsp.wallpaperList();
+            QVariantList items;
+            for (const auto& wp : list_rsp.wallpapers()) {
+                QVariantMap m;
+                m[u"id"_s]       = wp.id_proto();
+                m[u"name"_s]     = wp.name();
+                m[u"wpType"_s]   = wp.wpType();
+                m[u"resource"_s] = wp.resource();
+                m[u"preview"_s]  = wp.preview();
+                items.append(m);
+            }
+            self->m_wallpapers = std::move(items);
+            Q_EMIT self->wallpapersChanged();
+        });
         co_return;
     });
 }
@@ -91,14 +87,10 @@ void WallpaperScanQuery::reload() {
         auto result = co_await backend->send(std::move(req));
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
-        if (! result) {
-            self->setError(result.unwrap_err());
-            co_return;
-        }
-        auto rsp = result.unwrap();
-        self->m_count = rsp.wallpaperScan().count();
-        Q_EMIT self->countChanged();
-        self->setStatus(Status::Finished);
+        self->inspect_set(result, [self](const proto::Response& rsp) {
+            self->m_count = rsp.wallpaperScan().count();
+            Q_EMIT self->countChanged();
+        });
         co_return;
     });
 }
@@ -153,14 +145,10 @@ void WallpaperApplyQuery::reload() {
         auto result = co_await backend->send(std::move(req));
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
-        if (! result) {
-            self->setError(result.unwrap_err());
-            co_return;
-        }
-        auto rsp = result.unwrap();
-        self->m_renderer_id = rsp.wallpaperApply().rendererId();
-        Q_EMIT self->rendererIdChanged();
-        self->setStatus(Status::Finished);
+        self->inspect_set(result, [self](const proto::Response& rsp) {
+            self->m_renderer_id = rsp.wallpaperApply().rendererId();
+            Q_EMIT self->rendererIdChanged();
+        });
         co_return;
     });
 }
