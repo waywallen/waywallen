@@ -53,26 +53,14 @@ MD.ApplicationWindow {
         }
     ]
 
-    readonly property var drawerModel: pageModel.concat([
-        {
-            icon: MD.Token.icon.info,
-            name: "About"
-        }
-    ])
-
     readonly property var pageComponents: [
-        "qrc:/waywallen/ui/qml/page/WallpaperPage.qml", 
-        "qrc:/waywallen/ui/qml/page/DisplaysPage.qml", 
+        "qrc:/waywallen/ui/qml/page/WallpaperPage.qml",
+        "qrc:/waywallen/ui/qml/page/DisplaysPage.qml",
         "qrc:/waywallen/ui/qml/page/StatusPage.qml",
-        "qrc:/waywallen/ui/qml/page/AboutPage.qml",
     ]
 
     onCurrentPageChanged: {
-        if (currentPage > pageComponents.length) {
-            MD.Util.showPopup();
-        } else {
-            m_content.replace(m_content.currentItem, pageComponents[currentPage], {});
-        }
+        m_content.replace(m_content.currentItem, pageComponents[currentPage], {});
     }
 
     Component.onCompleted: {
@@ -120,7 +108,7 @@ MD.ApplicationWindow {
                 visible: active
 
                 sourceComponent: MD.StandardDrawer {
-                    model: win.drawerModel
+                    model: win.pageModel
                     currentIndex: win.currentPage
                     showDivider: false
 
@@ -134,11 +122,54 @@ MD.ApplicationWindow {
                         win.currentPage = model.index;
                     }
 
+                    drawerHeader: ColumnLayout {
+                        spacing: 0
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 16
+                            Layout.rightMargin: 16
+                            Layout.topMargin: 16
+                            Layout.bottomMargin: 8
+                            spacing: 12
+
+                            Image {
+                                Layout.preferredWidth: 32
+                                Layout.preferredHeight: 32
+                                source: "qrc:/waywallen/ui/assets/waywallen-ui.svg"
+                                fillMode: Image.PreserveAspectFit
+                                sourceSize.width: 64
+                                sourceSize.height: 64
+                            }
+
+                            MD.Label {
+                                Layout.fillWidth: true
+                                text: "waywallen"
+                                typescale: MD.Token.typescale.title_large
+                            }
+                        }
+
+                        MD.DrawerDivider {
+                            Layout.fillWidth: true
+                        }
+                    }
+
                     drawerContent: ColumnLayout {
                         spacing: 0
 
-                        Item {
-                            Layout.fillHeight: true
+                        MD.DrawerDivider {
+                            Layout.fillWidth: true
+                        }
+
+                        MD.DrawerItem {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 16
+                            Layout.rightMargin: 16
+                            icon.name: MD.Token.icon.info
+                            text: "About"
+                            onClicked: MD.Util.showPopup('waywallen.ui/PagePopup', {
+                                source: 'waywallen.ui/AboutPage'
+                            }, win)
                         }
                     }
                 }
