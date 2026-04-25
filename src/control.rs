@@ -14,33 +14,15 @@ use anyhow::{anyhow, Result};
 
 use crate::ipc::proto::ControlMsg;
 use crate::model::{repo, sync};
+use crate::playlist::rotator::RotationConfig;
+use crate::playlist::Mode;
 use crate::renderer_manager;
 use crate::wallpaper_type::WallpaperEntry;
 use crate::AppState;
 
-#[derive(Default)]
-pub struct PlaylistState {
-    pub ids: Vec<String>,
-    pub cursor: usize,
-    pub current: Option<String>,
-}
-
-impl PlaylistState {
-    pub fn refresh(&mut self, ids: Vec<String>) {
-        self.ids = ids;
-        if self.ids.is_empty() {
-            self.cursor = 0;
-        } else if self.cursor >= self.ids.len() {
-            self.cursor = 0;
-        }
-    }
-
-    pub fn locate(&mut self, id: &str) {
-        if let Some(pos) = self.ids.iter().position(|x| x == id) {
-            self.cursor = pos;
-        }
-    }
-}
+/// Re-export so callers that already wrote `control::PlaylistState`
+/// don't have to chase the move into the `playlist` module.
+pub use crate::playlist::PlaylistState;
 
 pub struct ApplyResult {
     pub renderer_id: String,
@@ -146,34 +128,220 @@ async fn apply_wallpaper_inner(
 }
 
 /// Advance the playlist cursor by `delta` and apply the result.
+///
+/// For the "All" pseudo-playlist (`active_id = None`) and curated
+/// playlists where membership is already cached on the state, this is
+/// a thin step over the in-memory cursor. Smart playlists also work
+/// here as long as `refresh_sources` has populated `ids` from the
+/// filter; the rotator (P5) calls this on every interval tick.
 pub async fn step(app: &Arc<AppState>, delta: i32) -> Result<String> {
-    let ids: Vec<String> = {
-        let mgr = app.source_manager.lock().await;
-        mgr.list().iter().map(|e| e.id.clone()).collect()
-    };
-
-    if ids.is_empty() {
-        return Err(anyhow!("playlist is empty"));
-    }
-
+    // For All, refresh from source on every step so newly-imported
+    // wallpapers join the rotation without waiting for an explicit
+    // rescan. For curated/smart playlists, ids are already pinned —
+    // do not regenerate them here.
     let next_id = {
         let mut playlist = app.playlist.lock().await;
-        let current = playlist.current.clone();
-        playlist.refresh(ids);
-        if let Some(cur) = current.as_deref() {
-            playlist.locate(cur);
+        if playlist.active_id.is_none() {
+            let snapshot: Vec<String> = {
+                let mgr = app.source_manager.lock().await;
+                mgr.list().iter().map(|e| e.id.clone()).collect()
+            };
+            playlist.refresh(snapshot);
         }
-        let len = playlist.ids.len() as i32;
-        let mut next = (playlist.cursor as i32 + delta) % len;
-        if next < 0 {
-            next += len;
+        if playlist.ids.is_empty() {
+            return Err(anyhow!("playlist is empty"));
         }
-        playlist.cursor = next as usize;
-        playlist.ids[playlist.cursor].clone()
+        playlist
+            .step(delta)
+            .ok_or_else(|| anyhow!("playlist is empty"))?
     };
-
     apply_wallpaper_by_id(app, &next_id, 0, 0, 0).await?;
+    // Reset the rotator deadline so the user gets the full quiet
+    // window after a manual advance instead of being walked over by
+    // the next auto tick.
+    app.rotation.kick();
     Ok(next_id)
+}
+
+/// Set the rotation mode on the active playlist. Pure in-memory; the
+/// caller is responsible for persistence (settings + DB) when the
+/// active playlist is a real DB row.
+pub async fn set_mode(app: &Arc<AppState>, mode: Mode) {
+    app.playlist.lock().await.set_mode(mode);
+    app.settings.update(|s| {
+        s.global.playlist_mode = mode.as_str().to_owned();
+    });
+}
+
+/// Set the auto-rotation interval (seconds; `0` disables). Updates
+/// the live rotator via the watch handle and persists the value to
+/// settings so a daemon restart resumes the same cadence.
+pub async fn set_rotation_interval(app: &Arc<AppState>, secs: u32) {
+    app.rotation.set_interval(secs);
+    app.settings.update(|s| {
+        s.global.rotation_secs = secs;
+    });
+}
+
+/// Convenience: flip shuffle on/off without exposing the [`Mode`]
+/// enum to D-Bus / WS callers. `true` → Shuffle, `false` → Sequential.
+pub async fn set_shuffle(app: &Arc<AppState>, on: bool) {
+    let mode = if on { Mode::Shuffle } else { Mode::Sequential };
+    set_mode(app, mode).await;
+}
+
+/// Summary row used by `ListPlaylists`. Stays string-typed so the
+/// D-Bus signature `a(isxs)` (id, name, source_kind, item_count)
+/// stays human-readable.
+#[derive(Debug, Clone)]
+pub struct PlaylistSummary {
+    pub id: i64,
+    pub name: String,
+    pub source_kind: String,
+    pub mode: String,
+    pub interval_secs: i32,
+    pub item_count: u32,
+}
+
+pub async fn list_playlists(app: &Arc<AppState>) -> Result<Vec<PlaylistSummary>> {
+    let rows = repo::list_playlists(&app.db).await?;
+    let mut out = Vec::with_capacity(rows.len());
+    for r in rows {
+        // Curated count = playlist_item rows. Smart count is left at
+        // 0 here since computing it would require resolving against
+        // the snapshot — `PlaylistStatus` (active playlist only) is
+        // the right place for that, not a list summary.
+        let item_count = if r.source_kind == repo::PLAYLIST_KIND_CURATED {
+            repo::list_playlist_item_ids(&app.db, r.id)
+                .await
+                .unwrap_or_default()
+                .len() as u32
+        } else {
+            0
+        };
+        out.push(PlaylistSummary {
+            id: r.id,
+            name: r.name,
+            source_kind: r.source_kind,
+            mode: r.mode,
+            interval_secs: r.interval_secs,
+            item_count,
+        });
+    }
+    Ok(out)
+}
+
+/// Snapshot of the live playlist state for status reporting.
+#[derive(Debug, Clone)]
+pub struct PlaylistStatus {
+    pub active_id: Option<i64>,
+    pub mode: String,
+    pub interval_secs: u32,
+    pub current: Option<String>,
+    pub position: Option<u32>,
+    pub count: u32,
+    pub is_smart: bool,
+}
+
+pub async fn playlist_status(app: &Arc<AppState>) -> PlaylistStatus {
+    let g = app.playlist.lock().await;
+    PlaylistStatus {
+        active_id: g.active_id,
+        mode: g.mode.as_str().to_owned(),
+        interval_secs: app.rotation.interval(),
+        current: g.current.clone(),
+        position: g.position().map(|p| p as u32),
+        count: g.count() as u32,
+        is_smart: g.filter.is_some(),
+    }
+}
+
+/// Activate a persisted playlist. Loads its row, installs the
+/// associated mode/filter/seed, and resolves member ids against the
+/// current source-manager snapshot. After this returns, `step()`
+/// walks the activated playlist instead of the All pseudo-list.
+/// Persists `active_playlist_id` to settings so a daemon restart
+/// re-enters the same playlist.
+pub async fn activate_playlist(app: &Arc<AppState>, id: i64) -> Result<()> {
+    let snapshot: Vec<WallpaperEntry> = {
+        let mgr = app.source_manager.lock().await;
+        mgr.list().to_vec()
+    };
+    {
+        let mut state = app.playlist.lock().await;
+        crate::playlist::resolve::activate(&app.db, &snapshot, &mut state, id).await?;
+    }
+    app.settings.update(|s| {
+        s.global.active_playlist_id = Some(id);
+    });
+    Ok(())
+}
+
+/// Switch back to the All pseudo-playlist. Membership is recomputed
+/// against the current snapshot so the cursor stays usable
+/// immediately, no rescan required.
+pub async fn deactivate_playlist(app: &Arc<AppState>) -> Result<()> {
+    let snapshot: Vec<WallpaperEntry> = {
+        let mgr = app.source_manager.lock().await;
+        mgr.list().to_vec()
+    };
+    {
+        let mut state = app.playlist.lock().await;
+        crate::playlist::resolve::deactivate(&mut state);
+        let ids: Vec<String> = snapshot.iter().map(|e| e.id.clone()).collect();
+        state.refresh(ids);
+    }
+    app.settings.update(|s| {
+        s.global.active_playlist_id = None;
+    });
+    Ok(())
+}
+
+/// Auto-rotation task body. Lives here (not in `playlist::rotator`)
+/// because it depends on `AppState` + `control::step`, both private
+/// to the binary. Reads the live `RotationConfig` from a watch and
+/// either parks (interval = 0) or fires `step(+1)` every
+/// `interval_secs`. Any config edit (new interval, manual kick)
+/// resets the deadline.
+pub async fn run_rotator(
+    app: Arc<AppState>,
+    mut rx: tokio::sync::watch::Receiver<RotationConfig>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    log::info!("playlist rotator started");
+    loop {
+        let cfg = *rx.borrow();
+        if cfg.interval_secs == 0 {
+            tokio::select! {
+                _ = rx.changed() => continue,
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() { break; }
+                }
+            }
+        } else {
+            let dur = std::time::Duration::from_secs(cfg.interval_secs as u64);
+            tokio::select! {
+                _ = tokio::time::sleep(dur) => {
+                    if rx.borrow().interval_secs == 0 {
+                        continue;
+                    }
+                    if let Err(e) = step(&app, 1).await {
+                        log::warn!("rotator tick step failed: {e:#}");
+                    }
+                    // step() calls rotation.kick() on success which
+                    // emits a watch change; the next iteration's
+                    // rx.changed arm wakes immediately and we re-arm
+                    // the sleep — the user-pressed-Next branch is
+                    // identical, so manual + auto share one code path.
+                }
+                _ = rx.changed() => continue,
+                changed = shutdown.changed() => {
+                    if changed.is_err() || *shutdown.borrow() { break; }
+                }
+            }
+        }
+    }
+    log::info!("playlist rotator exited");
 }
 
 pub async fn pause_all(app: &Arc<AppState>) -> Result<()> {
@@ -367,9 +535,16 @@ pub async fn refresh_sources(app: &Arc<AppState>) -> Result<usize> {
         }
     }
 
-    let ids: Vec<String> = snapshot.iter().map(|e| e.id.clone()).collect();
-    let count = ids.len();
-    app.playlist.lock().await.refresh(ids);
+    let count = snapshot.len();
+    // Re-resolve the active playlist against the fresh snapshot. For
+    // the All pseudo-playlist this just clones the snapshot ids;
+    // smart playlists re-run their filter; curated playlists prune
+    // members that no longer exist on disk.
+    if let Err(e) =
+        crate::playlist::resolve::rebind_locked(&app.db, &snapshot, &app.playlist).await
+    {
+        log::warn!("playlist rebind after refresh failed: {e:#}");
+    }
 
     // Kick a one-shot probe drain so newly-imported items don't have
     // to wait for the next scheduler tick. `spawn_async_unique` collapses

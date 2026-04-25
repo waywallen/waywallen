@@ -3,6 +3,7 @@ pub mod display_proto;
 pub mod ipc;
 pub mod media_probe;
 pub mod model;
+pub mod playlist;
 pub mod plugin;
 pub mod probe_task;
 pub mod renderer_manager;

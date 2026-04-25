@@ -16,6 +16,7 @@ use crate::control;
 use crate::control_proto as pb;
 use crate::ipc::proto::ControlMsg;
 use crate::model::repo;
+use crate::playlist;
 use crate::renderer_manager;
 use crate::routing::{DisplaySnapshot, LibrarySnapshot, RendererSnapshot, RouterEvent};
 use crate::AppState;
@@ -724,6 +725,180 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
             }
             Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
         },
+
+        // ---- playlists ----------------------------------------------------
+
+        Req::PlaylistList(_) => {
+            match control::list_playlists(&state).await {
+                Ok(rows) => {
+                    let playlists = rows
+                        .into_iter()
+                        .map(|s| pb::PlaylistSummary {
+                            id: s.id,
+                            name: s.name,
+                            source_kind: s.source_kind,
+                            mode: mode_str_to_pb(&s.mode) as i32,
+                            interval_secs: s.interval_secs.max(0) as u32,
+                            item_count: s.item_count,
+                        })
+                        .collect();
+                    ok(rid, Res::PlaylistList(pb::PlaylistListResponse { playlists }))
+                }
+                Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
+            }
+        }
+
+        Req::PlaylistCreate(r) => {
+            let mode = pb_mode_to_enum(r.mode);
+            let args = repo::PlaylistCreateArgs {
+                name: &r.name,
+                source_kind: repo::PLAYLIST_KIND_CURATED,
+                filter_json: None,
+                mode: mode.as_str(),
+                interval_secs: r.interval_secs as i32,
+                shuffle_seed: 0,
+            };
+            match repo::create_playlist(&state.db, args).await {
+                Ok(p) => {
+                    if !r.item_ids.is_empty() {
+                        if let Err(e) =
+                            repo::set_playlist_items(&state.db, p.id, &r.item_ids).await
+                        {
+                            // Best-effort cleanup so we don't leave an
+                            // empty stub the user didn't ask for.
+                            let _ = repo::delete_playlist(&state.db, p.id).await;
+                            return error_response(rid, pb::Status::Internal, e.to_string());
+                        }
+                    }
+                    ok(rid, Res::PlaylistCreate(pb::PlaylistCreateResponse { id: p.id }))
+                }
+                Err(e) => error_response(rid, pb::Status::InvalidArgument, e.to_string()),
+            }
+        }
+
+        Req::PlaylistDelete(r) => match repo::delete_playlist(&state.db, r.id).await {
+            Ok(_) => {
+                // If the deleted playlist was active, fall back to All
+                // so the rotator + step path don't keep walking a
+                // dangling cursor.
+                let active = state.playlist.lock().await.active_id;
+                if active == Some(r.id) {
+                    if let Err(e) = control::deactivate_playlist(&state).await {
+                        log::warn!("auto-deactivate after delete failed: {e:#}");
+                    }
+                }
+                ok(rid, Res::PlaylistDelete(pb::Empty {}))
+            }
+            Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
+        },
+
+        Req::PlaylistRename(r) => match repo::rename_playlist(&state.db, r.id, &r.name).await {
+            Ok(_) => ok(rid, Res::PlaylistRename(pb::Empty {})),
+            Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
+        },
+
+        Req::PlaylistSetItems(r) => {
+            match repo::set_playlist_items(&state.db, r.id, &r.item_ids).await {
+                Ok(_) => {
+                    // If this playlist is the active one, refresh its
+                    // resolved id list immediately so the cursor sees
+                    // the new membership without waiting for a rescan.
+                    let active = state.playlist.lock().await.active_id;
+                    if active == Some(r.id) {
+                        if let Err(e) = control::activate_playlist(&state, r.id).await {
+                            log::warn!("post-set_items reactivate failed: {e:#}");
+                        }
+                    }
+                    ok(rid, Res::PlaylistSetItems(pb::Empty {}))
+                }
+                Err(e) => error_response(rid, pb::Status::InvalidArgument, e.to_string()),
+            }
+        }
+
+        Req::PlaylistSetMode(r) => {
+            let mode = pb_mode_to_enum(r.mode);
+            match repo::set_playlist_mode(&state.db, r.id, mode.as_str()).await {
+                Ok(_) => {
+                    let active = state.playlist.lock().await.active_id;
+                    if active == Some(r.id) {
+                        control::set_mode(&state, mode).await;
+                    }
+                    ok(rid, Res::PlaylistSetMode(pb::Empty {}))
+                }
+                Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
+            }
+        }
+
+        Req::PlaylistSetInterval(r) => {
+            match repo::set_playlist_interval(&state.db, r.id, r.interval_secs as i32).await {
+                Ok(_) => {
+                    let active = state.playlist.lock().await.active_id;
+                    if active == Some(r.id) {
+                        control::set_rotation_interval(&state, r.interval_secs).await;
+                    }
+                    ok(rid, Res::PlaylistSetInterval(pb::Empty {}))
+                }
+                Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
+            }
+        }
+
+        Req::PlaylistActivate(r) => match control::activate_playlist(&state, r.id).await {
+            Ok(_) => {
+                // Adopt the row's stored interval into the live rotator
+                // so a rotating playlist starts ticking on activate
+                // without a separate set_interval round-trip.
+                if let Some(row) = repo::find_playlist(&state.db, r.id)
+                    .await
+                    .ok()
+                    .flatten()
+                {
+                    control::set_rotation_interval(&state, row.interval_secs.max(0) as u32).await;
+                }
+                ok(rid, Res::PlaylistActivate(pb::Empty {}))
+            }
+            Err(e) => error_response(rid, pb::Status::NotFound, e.to_string()),
+        },
+
+        Req::PlaylistDeactivate(_) => match control::deactivate_playlist(&state).await {
+            Ok(_) => ok(rid, Res::PlaylistDeactivate(pb::Empty {})),
+            Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
+        },
+
+        Req::PlaylistStatus(_) => {
+            let s = control::playlist_status(&state).await;
+            ok(
+                rid,
+                Res::PlaylistStatus(pb::PlaylistStatusResponse {
+                    active_id: s.active_id.unwrap_or(0),
+                    mode: mode_str_to_pb(&s.mode) as i32,
+                    interval_secs: s.interval_secs,
+                    current_id: s.current.unwrap_or_default(),
+                    position: s.position.unwrap_or(0),
+                    count: s.count,
+                    is_smart: s.is_smart,
+                }),
+            )
+        }
+    }
+}
+
+/// Decode the proto enum integer into the internal `playlist::Mode`.
+/// `Unspecified` (0) and any unrecognized variant default to
+/// Sequential — that's what a client that forgot the field meant.
+fn pb_mode_to_enum(v: i32) -> playlist::Mode {
+    match pb::PlaylistMode::try_from(v).unwrap_or(pb::PlaylistMode::Unspecified) {
+        pb::PlaylistMode::Shuffle => playlist::Mode::Shuffle,
+        pb::PlaylistMode::Random => playlist::Mode::Random,
+        _ => playlist::Mode::Sequential,
+    }
+}
+
+fn mode_str_to_pb(s: &str) -> pb::PlaylistMode {
+    match playlist::Mode::from_str(s) {
+        Some(playlist::Mode::Sequential) => pb::PlaylistMode::Sequential,
+        Some(playlist::Mode::Shuffle) => pb::PlaylistMode::Shuffle,
+        Some(playlist::Mode::Random) => pb::PlaylistMode::Random,
+        None => pb::PlaylistMode::Unspecified,
     }
 }
 

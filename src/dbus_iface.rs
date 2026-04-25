@@ -99,6 +99,69 @@ impl Daemon1 {
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
+    /// Toggle shuffle on the active playlist. Persisted to settings so
+    /// it survives restart.
+    async fn set_shuffle(&self, on: bool) {
+        control::set_shuffle(&self.app, on).await;
+    }
+
+    /// Set the auto-rotation interval in seconds. `0` disables.
+    async fn set_rotation_interval(&self, secs: u32) {
+        control::set_rotation_interval(&self.app, secs).await;
+    }
+
+    /// Activate a persisted playlist by id. Loads its mode/filter and
+    /// resolves member ids against the current snapshot.
+    async fn activate_playlist(&self, id: i64) -> zbus::fdo::Result<()> {
+        control::activate_playlist(&self.app, id)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+
+    /// Switch back to the All pseudo-playlist.
+    async fn deactivate_playlist(&self) -> zbus::fdo::Result<()> {
+        control::deactivate_playlist(&self.app)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
+
+    /// Snapshot of every persisted playlist. Tuple shape
+    /// `(id, name, source_kind, mode, interval_secs, item_count)`.
+    async fn list_playlists(&self) -> zbus::fdo::Result<Vec<(i64, String, String, String, u32, u32)>> {
+        let rows = control::list_playlists(&self.app)
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        Ok(rows
+            .into_iter()
+            .map(|s| {
+                (
+                    s.id,
+                    s.name,
+                    s.source_kind,
+                    s.mode,
+                    s.interval_secs.max(0) as u32,
+                    s.item_count,
+                )
+            })
+            .collect())
+    }
+
+    /// Live status of the active playlist. Tuple shape
+    /// `(active_id, mode, interval_secs, current_id, position, count, is_smart)`.
+    /// `active_id = 0` and `current_id = ""` represent absence.
+    async fn playlist_status(&self) -> (i64, String, u32, String, u32, u32, bool) {
+        let s = control::playlist_status(&self.app).await;
+        (
+            s.active_id.unwrap_or(0),
+            s.mode,
+            s.interval_secs,
+            s.current.unwrap_or_default(),
+            s.position.unwrap_or(0),
+            s.count,
+            s.is_smart,
+        )
+    }
+
     fn quit(&self) {
         self.app.shutdown_now();
     }

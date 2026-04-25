@@ -14,6 +14,7 @@ mod display_spawner;
 mod ipc;
 mod media_probe;
 mod model;
+mod playlist;
 mod plugin;
 mod probe_task;
 mod renderer_manager;
@@ -33,6 +34,10 @@ pub struct AppState {
     pub settings: Arc<settings::SettingsStore>,
     pub db: sea_orm::DatabaseConnection,
     pub playlist: tokio::sync::Mutex<control::PlaylistState>,
+    /// Auto-rotation control handle. The rotator task watches the
+    /// matching `watch::Receiver` and re-arms its deadline on every
+    /// edit (interval change OR a manual `kick`).
+    pub rotation: playlist::RotationHandle,
     pub ws_port: std::sync::atomic::AtomicU16,
     pub ui_path: std::sync::Mutex<Option<PathBuf>>,
     /// Daemon-wide shutdown signal. Flips `false` → `true` exactly once.
@@ -239,6 +244,8 @@ async fn async_main() -> anyhow::Result<()> {
     let (shutdown_tx, shutdown_rx_for_tasks) = tokio::sync::watch::channel(false);
     let task_mgr = tasks::TaskManager::spawn(shutdown_rx_for_tasks);
 
+    let (rotation_handle, rotation_rx) = playlist::rotator::make_handle();
+
     let state = Arc::new(AppState {
         renderer_manager: renderer_mgr,
         source_manager: source_mgr.clone(),
@@ -246,12 +253,29 @@ async fn async_main() -> anyhow::Result<()> {
         settings: settings_store,
         db: db.clone(),
         playlist: tokio::sync::Mutex::new(control::PlaylistState::default()),
+        rotation: rotation_handle,
         ws_port: std::sync::atomic::AtomicU16::new(0),
         ui_path: std::sync::Mutex::new(None),
         shutdown: shutdown_tx,
         tasks: task_mgr.clone(),
         probe: probe.clone(),
     });
+
+    // Auto-rotation service. Runs forever (or until shutdown), parked
+    // on a watch channel until the user activates a playlist with a
+    // non-zero `interval_secs` or kicks it via Next/Previous.
+    {
+        let app_for_rot = state.clone();
+        let shutdown_for_rot = state.shutdown_subscribe();
+        state.tasks.spawn_async(
+            tasks::TaskKind::Service,
+            "playlist/rotator",
+            async move {
+                control::run_rotator(app_for_rot, rotation_rx, shutdown_for_rot).await;
+                Ok(())
+            },
+        );
+    }
 
     // Off-load source-plugin loading + scanning + DB sync + initial
     // playlist seed onto the TaskManager. `async_main` proceeds
@@ -300,6 +324,23 @@ async fn async_main() -> anyhow::Result<()> {
                         log::warn!("failed to restore last wallpaper {last_id}: {e:#}");
                     }
                 }
+            }
+
+            // Step 4 — restore playlist state. Order matters: activate
+            // (which resets the live mode) BEFORE applying the saved
+            // mode, so per-playlist DB mode doesn't override the user's
+            // last preference for the All pseudo-list.
+            let g = state_for_task.settings.global();
+            if let Some(pl_id) = g.active_playlist_id {
+                if let Err(e) = control::activate_playlist(&state_for_task, pl_id).await {
+                    log::warn!("failed to activate playlist id={pl_id}: {e:#}");
+                }
+            }
+            if let Some(mode) = crate::playlist::Mode::from_str(&g.playlist_mode) {
+                state_for_task.playlist.lock().await.set_mode(mode);
+            }
+            if g.rotation_secs > 0 {
+                state_for_task.rotation.set_interval(g.rotation_secs);
             }
 
             Ok(())

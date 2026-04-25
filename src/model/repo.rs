@@ -9,7 +9,7 @@ use sea_orm::{
     EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 
-use super::entities::{item, item_tag, library, source_plugin, tag};
+use super::entities::{item, item_tag, library, playlist, playlist_item, source_plugin, tag};
 use crate::media_probe::MediaMetadata;
 use crate::tasks::now_ms;
 use sea_orm::ActiveValue::NotSet;
@@ -523,6 +523,268 @@ pub async fn list_tags_of_item(
         .with_context(|| format!("select tags of item={item_id}"))
 }
 
+// ---------------------------------------------------------------------------
+// playlist / playlist_item
+// ---------------------------------------------------------------------------
+
+/// `'curated'` — explicit member rows in `playlist_item`.
+pub const PLAYLIST_KIND_CURATED: &str = "curated";
+/// `'smart'` — membership derived from `filter_json` at runtime.
+pub const PLAYLIST_KIND_SMART: &str = "smart";
+
+/// Args for [`create_playlist`]. `mode` and `source_kind` are stored
+/// as strings; the [`crate::playlist::Mode`] enum has a matching
+/// `as_str` helper. `filter_json` must be set iff `source_kind == 'smart'`.
+pub struct PlaylistCreateArgs<'a> {
+    pub name: &'a str,
+    pub source_kind: &'a str,
+    pub filter_json: Option<&'a str>,
+    pub mode: &'a str,
+    pub interval_secs: i32,
+    pub shuffle_seed: i64,
+}
+
+impl<'a> PlaylistCreateArgs<'a> {
+    /// Curated default: sequential, no rotation, zero seed.
+    pub fn curated(name: &'a str) -> Self {
+        Self {
+            name,
+            source_kind: PLAYLIST_KIND_CURATED,
+            filter_json: None,
+            mode: "sequential",
+            interval_secs: 0,
+            shuffle_seed: 0,
+        }
+    }
+
+    /// Smart default: sequential, no rotation, zero seed, given filter.
+    pub fn smart(name: &'a str, filter_json: &'a str) -> Self {
+        Self {
+            name,
+            source_kind: PLAYLIST_KIND_SMART,
+            filter_json: Some(filter_json),
+            mode: "sequential",
+            interval_secs: 0,
+            shuffle_seed: 0,
+        }
+    }
+}
+
+pub async fn create_playlist(
+    db: &DatabaseConnection,
+    args: PlaylistCreateArgs<'_>,
+) -> Result<playlist::Model> {
+    if args.source_kind == PLAYLIST_KIND_SMART && args.filter_json.is_none() {
+        anyhow::bail!("smart playlist requires filter_json");
+    }
+    if args.source_kind == PLAYLIST_KIND_CURATED && args.filter_json.is_some() {
+        anyhow::bail!("curated playlist must have filter_json = None");
+    }
+    let now = now_ms();
+    let am = playlist::ActiveModel {
+        name: Set(args.name.to_owned()),
+        source_kind: Set(args.source_kind.to_owned()),
+        filter_json: Set(args.filter_json.map(str::to_owned)),
+        mode: Set(args.mode.to_owned()),
+        interval_secs: Set(args.interval_secs),
+        shuffle_seed: Set(args.shuffle_seed),
+        create_at: Set(now),
+        update_at: Set(now),
+        ..Default::default()
+    };
+    am.insert(db)
+        .await
+        .with_context(|| format!("insert playlist name={}", args.name))
+}
+
+pub async fn delete_playlist(db: &DatabaseConnection, id: i64) -> Result<u64> {
+    let res = playlist::Entity::delete_by_id(id)
+        .exec(db)
+        .await
+        .with_context(|| format!("delete playlist id={id}"))?;
+    Ok(res.rows_affected)
+}
+
+pub async fn list_playlists(db: &DatabaseConnection) -> Result<Vec<playlist::Model>> {
+    playlist::Entity::find()
+        .order_by_asc(playlist::Column::Id)
+        .all(db)
+        .await
+        .context("select playlists")
+}
+
+pub async fn find_playlist(
+    db: &DatabaseConnection,
+    id: i64,
+) -> Result<Option<playlist::Model>> {
+    playlist::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .with_context(|| format!("select playlist id={id}"))
+}
+
+pub async fn rename_playlist(db: &DatabaseConnection, id: i64, name: &str) -> Result<()> {
+    let existing = find_playlist(db, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("playlist id={id} not found"))?;
+    let now = now_ms();
+    let mut am: playlist::ActiveModel = existing.into();
+    am.name = Set(name.to_owned());
+    am.update_at = Set(now);
+    am.update(db)
+        .await
+        .with_context(|| format!("update playlist name id={id}"))?;
+    Ok(())
+}
+
+pub async fn set_playlist_mode(
+    db: &DatabaseConnection,
+    id: i64,
+    mode: &str,
+) -> Result<()> {
+    let existing = find_playlist(db, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("playlist id={id} not found"))?;
+    let now = now_ms();
+    let mut am: playlist::ActiveModel = existing.into();
+    am.mode = Set(mode.to_owned());
+    am.update_at = Set(now);
+    am.update(db)
+        .await
+        .with_context(|| format!("update playlist mode id={id}"))?;
+    Ok(())
+}
+
+pub async fn set_playlist_interval(
+    db: &DatabaseConnection,
+    id: i64,
+    interval_secs: i32,
+) -> Result<()> {
+    let existing = find_playlist(db, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("playlist id={id} not found"))?;
+    let now = now_ms();
+    let mut am: playlist::ActiveModel = existing.into();
+    am.interval_secs = Set(interval_secs);
+    am.update_at = Set(now);
+    am.update(db)
+        .await
+        .with_context(|| format!("update playlist interval id={id}"))?;
+    Ok(())
+}
+
+/// Replace the smart-playlist filter blob. Errors if the playlist is
+/// curated — toggling source kind in-place would leave the
+/// `playlist_item` rows in an inconsistent state.
+pub async fn set_playlist_filter(
+    db: &DatabaseConnection,
+    id: i64,
+    filter_json: &str,
+) -> Result<()> {
+    let existing = find_playlist(db, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("playlist id={id} not found"))?;
+    if existing.source_kind != PLAYLIST_KIND_SMART {
+        anyhow::bail!("playlist id={id} is not smart");
+    }
+    let now = now_ms();
+    let mut am: playlist::ActiveModel = existing.into();
+    am.filter_json = Set(Some(filter_json.to_owned()));
+    am.update_at = Set(now);
+    am.update(db)
+        .await
+        .with_context(|| format!("update playlist filter id={id}"))?;
+    Ok(())
+}
+
+pub async fn set_playlist_shuffle_seed(
+    db: &DatabaseConnection,
+    id: i64,
+    seed: i64,
+) -> Result<()> {
+    let existing = find_playlist(db, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("playlist id={id} not found"))?;
+    let mut am: playlist::ActiveModel = existing.into();
+    am.shuffle_seed = Set(seed);
+    am.update_at = Set(now_ms());
+    am.update(db)
+        .await
+        .with_context(|| format!("update playlist seed id={id}"))?;
+    Ok(())
+}
+
+/// Replace the full ordered member list of a curated playlist.
+/// Position is the input index (0-based). Errors if the playlist is
+/// smart. Atomic via DELETE-then-INSERT inside a single transaction.
+pub async fn set_playlist_items(
+    db: &DatabaseConnection,
+    id: i64,
+    item_ids: &[i64],
+) -> Result<()> {
+    let existing = find_playlist(db, id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("playlist id={id} not found"))?;
+    if existing.source_kind != PLAYLIST_KIND_CURATED {
+        anyhow::bail!("playlist id={id} is not curated");
+    }
+    // Dedup while preserving first-seen order — the unique
+    // (playlist_id, item_id) index would reject dupes anyway and we
+    // want a friendlier failure mode for callers that pass dupes.
+    let mut seen: HashSet<i64> = HashSet::new();
+    let mut ordered: Vec<i64> = Vec::with_capacity(item_ids.len());
+    for &iid in item_ids {
+        if seen.insert(iid) {
+            ordered.push(iid);
+        }
+    }
+    let tx: DatabaseTransaction = db.begin().await.context("begin tx")?;
+    playlist_item::Entity::delete_many()
+        .filter(playlist_item::Column::PlaylistId.eq(id))
+        .exec(&tx)
+        .await
+        .with_context(|| format!("clear playlist_item id={id}"))?;
+    if !ordered.is_empty() {
+        let rows: Vec<playlist_item::ActiveModel> = ordered
+            .into_iter()
+            .enumerate()
+            .map(|(pos, iid)| playlist_item::ActiveModel {
+                playlist_id: Set(id),
+                position: Set(pos as i32),
+                item_id: Set(iid),
+            })
+            .collect();
+        playlist_item::Entity::insert_many(rows)
+            .exec(&tx)
+            .await
+            .with_context(|| format!("insert playlist_item id={id}"))?;
+    }
+    // Bump update_at on the parent row.
+    let now = now_ms();
+    let mut am: playlist::ActiveModel = existing.into();
+    am.update_at = Set(now);
+    am.update(&tx)
+        .await
+        .with_context(|| format!("bump playlist update_at id={id}"))?;
+    tx.commit().await.context("commit tx")?;
+    Ok(())
+}
+
+/// Member item ids for a curated playlist, ordered by `position`.
+/// Smart playlists return `Ok(vec![])`.
+pub async fn list_playlist_item_ids(
+    db: &DatabaseConnection,
+    id: i64,
+) -> Result<Vec<i64>> {
+    let rows = playlist_item::Entity::find()
+        .filter(playlist_item::Column::PlaylistId.eq(id))
+        .order_by_asc(playlist_item::Column::Position)
+        .all(db)
+        .await
+        .with_context(|| format!("select playlist_item id={id}"))?;
+    Ok(rows.into_iter().map(|r| r.item_id).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -828,6 +1090,192 @@ mod tests {
         assert_eq!(deleted, 2);
         assert_eq!(list_items_by_library(&db, l1.id).await.unwrap().len(), 1);
         assert_eq!(list_items_by_library(&db, l2.id).await.unwrap().len(), 1);
+    }
+
+    // ---- playlist ----
+
+    #[tokio::test]
+    async fn create_curated_playlist_roundtrips() {
+        let db = mem_db().await;
+        let p = create_playlist(&db, PlaylistCreateArgs::curated("Favorites"))
+            .await
+            .unwrap();
+        assert!(p.id > 0);
+        assert_eq!(p.source_kind, PLAYLIST_KIND_CURATED);
+        assert!(p.filter_json.is_none());
+        assert_eq!(p.mode, "sequential");
+        let listed = list_playlists(&db).await.unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, p.id);
+    }
+
+    #[tokio::test]
+    async fn create_smart_playlist_stores_filter_json() {
+        let db = mem_db().await;
+        let f = r#"{"wp_types":["video"]}"#;
+        let p = create_playlist(&db, PlaylistCreateArgs::smart("Videos", f))
+            .await
+            .unwrap();
+        assert_eq!(p.source_kind, PLAYLIST_KIND_SMART);
+        assert_eq!(p.filter_json.as_deref(), Some(f));
+    }
+
+    #[tokio::test]
+    async fn create_playlist_rejects_inconsistent_kind_filter() {
+        let db = mem_db().await;
+        let bad = PlaylistCreateArgs {
+            name: "X",
+            source_kind: PLAYLIST_KIND_CURATED,
+            filter_json: Some("{}"),
+            mode: "sequential",
+            interval_secs: 0,
+            shuffle_seed: 0,
+        };
+        assert!(create_playlist(&db, bad).await.is_err());
+
+        let bad = PlaylistCreateArgs {
+            name: "Y",
+            source_kind: PLAYLIST_KIND_SMART,
+            filter_json: None,
+            mode: "sequential",
+            interval_secs: 0,
+            shuffle_seed: 0,
+        };
+        assert!(create_playlist(&db, bad).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn playlist_name_case_insensitive_unique() {
+        let db = mem_db().await;
+        create_playlist(&db, PlaylistCreateArgs::curated("Anime"))
+            .await
+            .unwrap();
+        // SQLite UNIQUE COLLATE NOCASE on name → insertion of any
+        // case-equivalent must fail.
+        assert!(
+            create_playlist(&db, PlaylistCreateArgs::curated("ANIME"))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn playlist_setters_update_fields_and_bump_update_at() {
+        let db = mem_db().await;
+        let p = create_playlist(&db, PlaylistCreateArgs::smart("S", "{}"))
+            .await
+            .unwrap();
+        let original = p.update_at;
+        // Tiny sleep so update_at can move forward; sub-millisecond
+        // clocks are common on test runners.
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+
+        rename_playlist(&db, p.id, "Renamed").await.unwrap();
+        set_playlist_mode(&db, p.id, "shuffle").await.unwrap();
+        set_playlist_interval(&db, p.id, 60).await.unwrap();
+        set_playlist_filter(&db, p.id, r#"{"min_width":1920}"#)
+            .await
+            .unwrap();
+        set_playlist_shuffle_seed(&db, p.id, 42).await.unwrap();
+
+        let after = find_playlist(&db, p.id).await.unwrap().unwrap();
+        assert_eq!(after.name, "Renamed");
+        assert_eq!(after.mode, "shuffle");
+        assert_eq!(after.interval_secs, 60);
+        assert_eq!(after.filter_json.as_deref(), Some(r#"{"min_width":1920}"#));
+        assert_eq!(after.shuffle_seed, 42);
+        assert!(after.update_at > original);
+    }
+
+    #[tokio::test]
+    async fn set_playlist_filter_rejects_curated() {
+        let db = mem_db().await;
+        let p = create_playlist(&db, PlaylistCreateArgs::curated("C"))
+            .await
+            .unwrap();
+        assert!(set_playlist_filter(&db, p.id, "{}").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn set_playlist_items_only_works_on_curated() {
+        let db = mem_db().await;
+        let s = create_playlist(&db, PlaylistCreateArgs::smart("S", "{}"))
+            .await
+            .unwrap();
+        assert!(set_playlist_items(&db, s.id, &[]).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn set_playlist_items_dedupes_and_orders_by_input() {
+        let db = mem_db().await;
+        let plug = upsert_plugin(&db, "p", "").await.unwrap();
+        let lib = add_library(&db, plug.id, "/r").await.unwrap();
+        let mut item_ids = Vec::new();
+        for rel in ["a", "b", "c", "d"] {
+            let it = upsert_item(&db, minimal_args(plug.id, lib.id, rel, "image"))
+                .await
+                .unwrap();
+            item_ids.push(it.id);
+        }
+        let pl = create_playlist(&db, PlaylistCreateArgs::curated("Pl"))
+            .await
+            .unwrap();
+        // Insert with a duplicate to exercise dedup; expect [c, a, b, d].
+        let input = vec![item_ids[2], item_ids[0], item_ids[1], item_ids[2], item_ids[3]];
+        set_playlist_items(&db, pl.id, &input).await.unwrap();
+        let got = list_playlist_item_ids(&db, pl.id).await.unwrap();
+        assert_eq!(got, vec![item_ids[2], item_ids[0], item_ids[1], item_ids[3]]);
+
+        // Replace with a shorter list — old rows must be wiped.
+        set_playlist_items(&db, pl.id, &[item_ids[1]])
+            .await
+            .unwrap();
+        assert_eq!(
+            list_playlist_item_ids(&db, pl.id).await.unwrap(),
+            vec![item_ids[1]]
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_playlist_cascades_to_items() {
+        let db = mem_db().await;
+        let plug = upsert_plugin(&db, "p", "").await.unwrap();
+        let lib = add_library(&db, plug.id, "/r").await.unwrap();
+        let item = upsert_item(&db, minimal_args(plug.id, lib.id, "a", "image"))
+            .await
+            .unwrap();
+        let pl = create_playlist(&db, PlaylistCreateArgs::curated("Pl"))
+            .await
+            .unwrap();
+        set_playlist_items(&db, pl.id, &[item.id]).await.unwrap();
+        assert_eq!(list_playlist_item_ids(&db, pl.id).await.unwrap().len(), 1);
+        delete_playlist(&db, pl.id).await.unwrap();
+        assert!(find_playlist(&db, pl.id).await.unwrap().is_none());
+        // Member rows must be gone too (FK ON DELETE CASCADE).
+        assert!(list_playlist_item_ids(&db, pl.id).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn delete_item_cascades_to_playlist_item() {
+        let db = mem_db().await;
+        let plug = upsert_plugin(&db, "p", "").await.unwrap();
+        let lib = add_library(&db, plug.id, "/r").await.unwrap();
+        let i1 = upsert_item(&db, minimal_args(plug.id, lib.id, "a", "image"))
+            .await
+            .unwrap();
+        let i2 = upsert_item(&db, minimal_args(plug.id, lib.id, "b", "image"))
+            .await
+            .unwrap();
+        let pl = create_playlist(&db, PlaylistCreateArgs::curated("Pl"))
+            .await
+            .unwrap();
+        set_playlist_items(&db, pl.id, &[i1.id, i2.id]).await.unwrap();
+        // Drop the library — both items cascade away, member rows
+        // should follow.
+        remove_library(&db, lib.id).await.unwrap();
+        assert!(list_playlist_item_ids(&db, pl.id).await.unwrap().is_empty());
+        // Parent playlist row stays — it's just empty now.
+        assert!(find_playlist(&db, pl.id).await.unwrap().is_some());
     }
 
     #[tokio::test]

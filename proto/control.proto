@@ -45,6 +45,16 @@ message Request {
     LibraryAddRequest         library_add = 27;
     LibraryRemoveRequest      library_remove = 28;
     LibraryAutoDetectRequest  library_auto_detect = 29;
+    PlaylistListRequest       playlist_list = 30;
+    PlaylistCreateRequest     playlist_create = 31;
+    PlaylistDeleteRequest     playlist_delete = 32;
+    PlaylistRenameRequest     playlist_rename = 33;
+    PlaylistSetItemsRequest   playlist_set_items = 34;
+    PlaylistSetModeRequest    playlist_set_mode = 35;
+    PlaylistSetIntervalRequest playlist_set_interval = 36;
+    PlaylistActivateRequest   playlist_activate = 37;
+    PlaylistDeactivateRequest playlist_deactivate = 38;
+    PlaylistStatusRequest     playlist_status = 39;
   }
 }
 
@@ -73,6 +83,16 @@ message Response {
     Empty                      library_add = 27;
     Empty                      library_remove = 28;
     LibraryAutoDetectResponse  library_auto_detect = 29;
+    PlaylistListResponse       playlist_list = 30;
+    PlaylistCreateResponse     playlist_create = 31;
+    Empty                      playlist_delete = 32;
+    Empty                      playlist_rename = 33;
+    Empty                      playlist_set_items = 34;
+    Empty                      playlist_set_mode = 35;
+    Empty                      playlist_set_interval = 36;
+    Empty                      playlist_activate = 37;
+    Empty                      playlist_deactivate = 38;
+    PlaylistStatusResponse     playlist_status = 39;
   }
 }
 
@@ -372,4 +392,103 @@ message SettingsGetResponse {
 message SettingsSetRequest {
   GlobalSettings global = 1;
   map<string, PluginSettings> plugins = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Playlists
+// ---------------------------------------------------------------------------
+//
+// Filter / smart-playlist messages are intentionally absent in this
+// revision — the filter model will be reworked, so only curated
+// playlists (explicit ordered member list of DB item.id values) are
+// reachable from this surface for now. Smart playlists already
+// persisted in the DB stay activatable via PlaylistActivate; the
+// daemon handles them transparently through the resolve layer.
+
+enum PlaylistMode {
+  PLAYLIST_MODE_UNSPECIFIED = 0;
+  SEQUENTIAL = 1;
+  SHUFFLE    = 2;
+  RANDOM     = 3;
+}
+
+// Compact summary for listing. `item_count` is `0` for smart
+// playlists in this revision (the resolve layer doesn't materialize
+// them outside the active state) — clients should treat it as a hint,
+// not a guarantee.
+message PlaylistSummary {
+  int64  id = 1;
+  string name = 2;
+  // "curated" or "smart". Smart rows are read-only over this surface
+  // until the filter API lands.
+  string source_kind = 3;
+  PlaylistMode mode = 4;
+  uint32 interval_secs = 5;
+  uint32 item_count = 6;
+}
+
+message PlaylistListRequest {}
+message PlaylistListResponse {
+  repeated PlaylistSummary playlists = 1;
+}
+
+// Create a curated playlist. `item_ids` are DB `item.id` values; the
+// caller is responsible for resolving wallpaper.id → item.id (see
+// WallpaperEntry — items expose enough metadata to bridge).
+message PlaylistCreateRequest {
+  string        name = 1;
+  PlaylistMode  mode = 2;
+  uint32        interval_secs = 3;
+  repeated int64 item_ids = 4;
+}
+message PlaylistCreateResponse {
+  int64 id = 1;
+}
+
+message PlaylistDeleteRequest { int64 id = 1; }
+
+message PlaylistRenameRequest {
+  int64  id = 1;
+  string name = 2;
+}
+
+// Replace the full ordered member list of a curated playlist.
+message PlaylistSetItemsRequest {
+  int64          id = 1;
+  repeated int64 item_ids = 2;
+}
+
+message PlaylistSetModeRequest {
+  int64        id = 1;
+  PlaylistMode mode = 2;
+}
+
+message PlaylistSetIntervalRequest {
+  int64  id = 1;
+  uint32 interval_secs = 2;
+}
+
+// Activate a persisted playlist. The daemon loads its mode/seed
+// (and filter, if smart) and resolves member ids against the current
+// snapshot. After this returns, Next/Previous walk the activated
+// playlist instead of the All pseudo-list.
+message PlaylistActivateRequest { int64 id = 1; }
+
+// Switch back to the All pseudo-playlist (every wallpaper the source
+// manager currently knows about).
+message PlaylistDeactivateRequest {}
+
+message PlaylistStatusRequest {}
+message PlaylistStatusResponse {
+  // 0 means "All pseudo-playlist active".
+  int64        active_id = 1;
+  PlaylistMode mode = 2;
+  uint32       interval_secs = 3;
+  // Empty when the playlist hasn't been stepped yet.
+  string       current_id = 4;
+  // 0-indexed position of `current_id` in the resolved id list, or
+  // 0 if no current. `count` is the resolved size.
+  uint32       position = 5;
+  uint32       count = 6;
+  bool         is_smart = 7;
 }

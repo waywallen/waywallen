@@ -47,6 +47,18 @@ pub struct GlobalSettings {
     pub default_width: u32,
     pub default_height: u32,
     pub last_wallpaper: Option<String>,
+    /// DB id of the playlist to activate on startup. `None` (default)
+    /// = the All pseudo-playlist. Set/cleared via the playlist control
+    /// surfaces; persisted so the daemon restarts in the same mode.
+    pub active_playlist_id: Option<i64>,
+    /// `"sequential"` / `"shuffle"` / `"random"`. Carries across
+    /// restart for the All pseudo-playlist; for activated DB
+    /// playlists the row's own `mode` column wins.
+    pub playlist_mode: String,
+    /// Auto-rotation interval in seconds; `0` = disabled. Restored on
+    /// startup so the rotator picks the same cadence the user left
+    /// the daemon in.
+    pub rotation_secs: u32,
 }
 
 impl Default for GlobalSettings {
@@ -55,6 +67,9 @@ impl Default for GlobalSettings {
             default_width: 1920,
             default_height: 1080,
             last_wallpaper: None,
+            active_playlist_id: None,
+            playlist_mode: "sequential".to_string(),
+            rotation_secs: 0,
         }
     }
 }
