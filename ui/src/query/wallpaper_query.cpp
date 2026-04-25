@@ -58,6 +58,10 @@ void WallpaperListQuery::reload() {
                 m[u"wpType"_s]   = wp.wpType();
                 m[u"resource"_s] = wp.resource();
                 m[u"preview"_s]  = wp.preview();
+                m[u"size"_s]     = QVariant::fromValue(wp.size());
+                m[u"width"_s]    = wp.width();
+                m[u"height"_s]   = wp.height();
+                m[u"format"_s]   = wp.format();
                 items.append(m);
             }
             self->m_wallpapers = std::move(items);

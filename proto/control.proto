@@ -168,6 +168,10 @@ message WallpaperEntry {
   string resource = 4;
   string preview = 5;
   map<string, string> metadata = 6;
+  int64 size = 7;
+  uint32 width = 8;
+  uint32 height = 9;
+  string format = 10;
 }
 
 message WallpaperListRequest {

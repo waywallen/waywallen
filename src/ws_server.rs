@@ -394,14 +394,42 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
 
         Req::WallpaperList(r) => {
             let mgr = state.source_manager.lock().await;
-            let entries: Vec<pb::WallpaperEntry> = if r.wp_type.is_empty() {
-                mgr.list().iter().map(entry_to_pb).collect()
-            } else {
-                mgr.list_by_type(&r.wp_type)
+
+            // Build a lookup map: (library.path, item.path) -> item::Model
+            // so we can overlay DB media-meta (size/width/height/format) onto
+            // each WallpaperEntry before sending it to the UI.
+            let db_meta_map: std::collections::HashMap<(String, String), crate::model::entities::item::Model> = {
+                let libs = repo::list_libraries(&state.db).await.unwrap_or_default();
+                let lib_path_by_id: std::collections::HashMap<i64, String> =
+                    libs.into_iter().map(|l| (l.id, l.path)).collect();
+                let items = repo::list_items_all(&state.db).await.unwrap_or_default();
+                items
                     .into_iter()
-                    .map(entry_to_pb)
+                    .filter_map(|it| {
+                        let lib_path = lib_path_by_id.get(&it.library_id)?.clone();
+                        let item_path = it.path.clone();
+                        Some(((lib_path, item_path), it))
+                    })
                     .collect()
             };
+
+            let raw_entries: Vec<&crate::wallpaper_type::WallpaperEntry> = if r.wp_type.is_empty() {
+                mgr.list().iter().collect()
+            } else {
+                mgr.list_by_type(&r.wp_type)
+            };
+
+            let entries: Vec<pb::WallpaperEntry> = raw_entries
+                .into_iter()
+                .map(|e| {
+                    let db_meta = crate::model::sync::relative_under_root(
+                        &e.library_root,
+                        &e.resource,
+                    )
+                    .and_then(|rel| db_meta_map.get(&(e.library_root.clone(), rel)));
+                    entry_to_pb(e, db_meta)
+                })
+                .collect();
             let count = entries.len() as u32;
             ok(
                 rid,
@@ -724,7 +752,31 @@ fn error_response(request_id: u64, status: pb::Status, message: String) -> pb::R
     }
 }
 
-fn entry_to_pb(e: &crate::wallpaper_type::WallpaperEntry) -> pb::WallpaperEntry {
+fn entry_to_pb(
+    e: &crate::wallpaper_type::WallpaperEntry,
+    db_meta: Option<&crate::model::entities::item::Model>,
+) -> pb::WallpaperEntry {
+    // Prefer DB values (freshest, written by the probe task); fall back to
+    // what the Lua plugin may have pre-filled on the in-memory entry.
+    let size = db_meta
+        .and_then(|m| m.size)
+        .or(e.size)
+        .unwrap_or(0);
+    let width = db_meta
+        .and_then(|m| m.width)
+        .map(|v| v as u32)
+        .or(e.width)
+        .unwrap_or(0);
+    let height = db_meta
+        .and_then(|m| m.height)
+        .map(|v| v as u32)
+        .or(e.height)
+        .unwrap_or(0);
+    let format = db_meta
+        .and_then(|m| m.format.clone())
+        .or_else(|| e.format.clone())
+        .unwrap_or_default();
+
     pb::WallpaperEntry {
         id: e.id.clone(),
         name: e.name.clone(),
@@ -732,5 +784,9 @@ fn entry_to_pb(e: &crate::wallpaper_type::WallpaperEntry) -> pb::WallpaperEntry 
         resource: e.resource.clone(),
         preview: e.preview.clone().unwrap_or_default(),
         metadata: e.metadata.clone(),
+        size,
+        width,
+        height,
+        format,
     }
 }

@@ -250,6 +250,8 @@ MD.Page {
                                 typescale: MD.Token.typescale.title_large
                                 color: MD.Token.color.on_surface
                                 wrapMode: Text.Wrap
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
                             }
 
                             MD.IconButton {
@@ -265,16 +267,108 @@ MD.Page {
                             color: MD.Token.color.on_surface_variant
                         }
 
-                        // Resource path — single line, elide head so the
-                        // meaningful tail (workshop id / filename) stays visible.
-                        MD.Text {
+                        // Resource path — show only the last two segments
+                        // (parent dir + filename) under a "Path" label.
+                        // Full path is exposed via the tooltip / hover.
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: root.selectedWallpaper?.resource || ""
-                            typescale: MD.Token.typescale.body_small
-                            color: MD.Token.color.on_surface_variant
-                            elide: Text.ElideLeft
-                            maximumLineCount: 1
-                            wrapMode: Text.NoWrap
+                            spacing: 2
+
+                            function shortPath(p) {
+                                const parts = (p || "").split("/").filter(s => s.length > 0);
+                                return parts.slice(-2).join("/");
+                            }
+
+                            MD.Text {
+                                text: "Path"
+                                typescale: MD.Token.typescale.label_medium
+                                color: MD.Token.color.on_surface_variant
+                            }
+                            MD.Text {
+                                Layout.fillWidth: true
+                                text: parent.shortPath(root.selectedWallpaper?.resource)
+                                typescale: MD.Token.typescale.body_small
+                                color: MD.Token.color.on_surface_variant
+                                elide: Text.ElideMiddle
+                                maximumLineCount: 1
+                                wrapMode: Text.NoWrap
+                            }
+                        }
+
+                        // Media meta block: resolution / size / format.
+                        // Hidden entirely when all three values are unknown.
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            readonly property bool hasResolution: (root.selectedWallpaper?.width ?? 0) !== 0 && (root.selectedWallpaper?.height ?? 0) !== 0
+                            readonly property bool hasSize: (root.selectedWallpaper?.size ?? 0) !== 0
+                            readonly property bool hasFormat: (root.selectedWallpaper?.format ?? "") !== ""
+                            visible: hasResolution || hasSize || hasFormat
+
+                            function formatSize(b) {
+                                if (b <= 0) return "";
+                                const u = ["B", "KB", "MB", "GB", "TB"];
+                                let i = 0;
+                                let v = b;
+                                while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+                                return v.toFixed(i === 0 ? 0 : 1) + " " + u[i];
+                            }
+
+                            MD.Text {
+                                text: "Media"
+                                typescale: MD.Token.typescale.label_medium
+                                color: MD.Token.color.on_surface_variant
+                            }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                columnSpacing: 12
+                                rowSpacing: 2
+
+                                // Resolution row
+                                MD.Text {
+                                    visible: parent.parent.hasResolution
+                                    text: "Resolution"
+                                    typescale: MD.Token.typescale.label_medium
+                                    color: MD.Token.color.on_surface_variant
+                                }
+                                MD.Text {
+                                    visible: parent.parent.hasResolution
+                                    text: (root.selectedWallpaper?.width ?? 0) + "×" + (root.selectedWallpaper?.height ?? 0)
+                                    typescale: MD.Token.typescale.body_medium
+                                    color: MD.Token.color.on_surface
+                                }
+
+                                // Size row
+                                MD.Text {
+                                    visible: parent.parent.hasSize
+                                    text: "Size"
+                                    typescale: MD.Token.typescale.label_medium
+                                    color: MD.Token.color.on_surface_variant
+                                }
+                                MD.Text {
+                                    visible: parent.parent.hasSize
+                                    text: parent.parent.formatSize(root.selectedWallpaper?.size ?? 0)
+                                    typescale: MD.Token.typescale.body_medium
+                                    color: MD.Token.color.on_surface
+                                }
+
+                                // Format row
+                                MD.Text {
+                                    visible: parent.parent.hasFormat
+                                    text: "Format"
+                                    typescale: MD.Token.typescale.label_medium
+                                    color: MD.Token.color.on_surface_variant
+                                }
+                                MD.Text {
+                                    visible: parent.parent.hasFormat
+                                    text: (root.selectedWallpaper?.format ?? "").toLowerCase()
+                                    typescale: MD.Token.typescale.body_medium
+                                    color: MD.Token.color.on_surface
+                                }
+                            }
                         }
 
                         MD.Divider {

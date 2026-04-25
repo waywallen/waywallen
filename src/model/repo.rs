@@ -267,6 +267,15 @@ pub async fn list_items_by_library(
         .with_context(|| format!("select items lib={library_id}"))
 }
 
+pub async fn list_items_all(db: &DatabaseConnection) -> Result<Vec<item::Model>> {
+    item::Entity::find()
+        .order_by_asc(item::Column::LibraryId)
+        .order_by_asc(item::Column::Path)
+        .all(db)
+        .await
+        .context("select all items")
+}
+
 pub async fn list_items_by_plugin(
     db: &DatabaseConnection,
     plugin_id: i64,

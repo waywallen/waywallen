@@ -174,7 +174,7 @@ pub async fn sync_plugin_entries(
     Ok((summary, plugin_model))
 }
 
-fn relative_under_root(root: &str, resource: &str) -> Option<String> {
+pub(crate) fn relative_under_root(root: &str, resource: &str) -> Option<String> {
     let root = root.trim_end_matches('/');
     Path::new(resource)
         .strip_prefix(root)
