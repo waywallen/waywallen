@@ -606,6 +606,26 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
                     .await;
             }
 
+            // Mirror the persistence side-effects that
+            // `control::apply_wallpaper_by_id` performs: locate the
+            // playlist cursor and persist `last_wallpaper` so the
+            // next daemon start can restore. Without this the WS
+            // apply path silently bypasses persistence (D-Bus + the
+            // rotator both go through `control::apply_wallpaper_by_id`
+            // and don't have this hole).
+            {
+                let mut playlist = state.playlist.lock().await;
+                playlist.locate(&entry.id);
+                playlist.current = Some(entry.id.clone());
+            }
+            state.settings.update(|s| {
+                s.global.last_wallpaper = Some(entry.id.clone());
+            });
+            state.settings.flush_now().await;
+            // Reset the rotator deadline so a manual apply gets the
+            // full quiet window before the next auto tick.
+            state.rotation.kick();
+
             ok(
                 rid,
                 Res::WallpaperApply(pb::WallpaperApplyResponse {

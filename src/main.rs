@@ -11,6 +11,7 @@ mod dbus_iface;
 mod display_endpoint;
 mod display_proto;
 mod display_spawner;
+mod events;
 mod ipc;
 mod media_probe;
 mod model;
@@ -38,6 +39,10 @@ pub struct AppState {
     /// matching `watch::Receiver` and re-arms its deadline on every
     /// edit (interval change OR a manual `kick`).
     pub rotation: playlist::RotationHandle,
+    /// Process-wide event bus. Carries phase markers (sources ready,
+    /// display ready) the boot coordinator gates on, plus transient
+    /// notifications about restore success/failure.
+    pub events: events::EventBus,
     pub ws_port: std::sync::atomic::AtomicU16,
     pub ui_path: std::sync::Mutex<Option<PathBuf>>,
     /// Daemon-wide shutdown signal. Flips `false` → `true` exactly once.
@@ -254,6 +259,7 @@ async fn async_main() -> anyhow::Result<()> {
         db: db.clone(),
         playlist: tokio::sync::Mutex::new(control::PlaylistState::default()),
         rotation: rotation_handle,
+        events: events::EventBus::default(),
         ws_port: std::sync::atomic::AtomicU16::new(0),
         ui_path: std::sync::Mutex::new(None),
         shutdown: shutdown_tx,
@@ -314,37 +320,99 @@ async fn async_main() -> anyhow::Result<()> {
                 log::warn!("initial source refresh failed: {e:#}");
             }
 
-            // Step 3 — optional restore of last applied wallpaper.
-            if cli.restore_last {
-                if let Some(last_id) = state_for_task.settings.global().last_wallpaper {
-                    log::info!("restoring last wallpaper: {last_id}");
-                    if let Err(e) =
-                        control::apply_wallpaper_by_id(&state_for_task, &last_id, 0, 0, 0).await
-                    {
-                        log::warn!("failed to restore last wallpaper {last_id}: {e:#}");
-                    }
-                }
-            }
-
-            // Step 4 — restore playlist state. Order matters: activate
-            // (which resets the live mode) BEFORE applying the saved
-            // mode, so per-playlist DB mode doesn't override the user's
-            // last preference for the All pseudo-list.
-            let g = state_for_task.settings.global();
-            if let Some(pl_id) = g.active_playlist_id {
-                if let Err(e) = control::activate_playlist(&state_for_task, pl_id).await {
-                    log::warn!("failed to activate playlist id={pl_id}: {e:#}");
-                }
-            }
-            if let Some(mode) = crate::playlist::Mode::from_str(&g.playlist_mode) {
-                state_for_task.playlist.lock().await.set_mode(mode);
-            }
-            if g.rotation_secs > 0 {
-                state_for_task.rotation.set_interval(g.rotation_secs);
-            }
-
+            // Sources + initial DB sync done. Publish the latched
+            // phase marker; the restore coordinator (separate task)
+            // observes this and the matching DisplayReady marker
+            // before kicking off the actual restore.
+            state_for_task.events.publish(events::GlobalEvent::SourcesReady);
             Ok(())
         });
+    }
+
+    // Display watcher: bridge from `Router` events to the global
+    // event bus. Fires `DisplayReady` exactly once, on the first
+    // display registration. Runs forever (kept simple) but is a
+    // no-op after the latch is set.
+    {
+        let watcher_state = state.clone();
+        state.tasks.spawn_async(
+            tasks::TaskKind::Service,
+            "boot/display-watcher",
+            async move {
+                if !watcher_state.router.snapshot_displays().await.is_empty() {
+                    watcher_state.events.publish(events::GlobalEvent::DisplayReady);
+                    return Ok(());
+                }
+                let mut events_rx = watcher_state.router.subscribe_events();
+                loop {
+                    match events_rx.recv().await {
+                        Ok(routing::RouterEvent::DisplayUpsert(_)) => {
+                            watcher_state
+                                .events
+                                .publish(events::GlobalEvent::DisplayReady);
+                            return Ok(());
+                        }
+                        Ok(routing::RouterEvent::DisplaysReplace(list))
+                            if !list.is_empty() =>
+                        {
+                            watcher_state
+                                .events
+                                .publish(events::GlobalEvent::DisplayReady);
+                            return Ok(());
+                        }
+                        Ok(_) => continue,
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                            // Re-snapshot in case we missed the upsert
+                            // while lagged.
+                            if !watcher_state.router.snapshot_displays().await.is_empty() {
+                                watcher_state
+                                    .events
+                                    .publish(events::GlobalEvent::DisplayReady);
+                                return Ok(());
+                            }
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            return Ok(());
+                        }
+                    }
+                }
+            },
+        );
+    }
+
+    // Restore coordinator: waits on the two latched phase markers,
+    // sleeps a short settle window so the display backend can finish
+    // its own bind handshake, then kicks off the restore as a
+    // tracked task in the TaskManager so its lifecycle is visible
+    // via `ListTasks` / `TaskStatus`.
+    {
+        let coord_state = state.clone();
+        let restore_last = cli.restore_last;
+        state.tasks.spawn_async(
+            tasks::TaskKind::Service,
+            "boot/restore-coordinator",
+            async move {
+                let mut sources_rx = coord_state.events.watch_sources_ready();
+                let mut display_rx = coord_state.events.watch_display_ready();
+
+                let _ = sources_rx.wait_for(|v| *v).await;
+                log::info!("restore coordinator: sources ready");
+
+                let _ = display_rx.wait_for(|v| *v).await;
+                log::info!(
+                    "restore coordinator: display registered, settling 2s before restore"
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+                let restore_state = coord_state.clone();
+                coord_state.tasks.spawn_async(
+                    tasks::TaskKind::Startup,
+                    "startup/restore",
+                    async move { control::run_restore(&restore_state, restore_last).await },
+                );
+                Ok(())
+            },
+        );
     }
 
     // Background media-probe scheduler. Pulls items with NULL media
@@ -511,6 +579,15 @@ async fn async_main() -> anyhow::Result<()> {
         }
     }
 
+    // SIGTERM (default `kill <pid>`, systemd stop) needs an explicit
+    // listener — `tokio::signal::ctrl_c()` only catches SIGINT.
+    // Without this branch the runtime tears down abruptly and the
+    // settings debounced-writer task is dropped mid-sleep, losing any
+    // pending `last_wallpaper` / `active_playlist_id` updates.
+    let mut sigterm = tokio::signal::unix::signal(
+        tokio::signal::unix::SignalKind::terminate(),
+    )?;
+
     tokio::select! {
         res = ws_fut => {
             if let Err(e) = res {
@@ -519,6 +596,9 @@ async fn async_main() -> anyhow::Result<()> {
         }
         _ = tokio::signal::ctrl_c() => {
             log::info!("SIGINT received, shutting down");
+        }
+        _ = sigterm.recv() => {
+            log::info!("SIGTERM received, shutting down");
         }
         _ = async {
             let mut rx = state.shutdown_subscribe();
@@ -533,6 +613,14 @@ async fn async_main() -> anyhow::Result<()> {
     // flag. This is what lets the display endpoint's blocking reader
     // threads be kicked out of `recvmsg`.
     state.shutdown_now();
+
+    // Flush settings synchronously so the in-flight debounced write
+    // (last_wallpaper / rotation_secs / active_playlist_id /
+    // playlist_mode set within the last DEBOUNCE_WRITE seconds) lands
+    // on disk before the runtime tears down. Without this, a SIGTERM
+    // that arrives shortly after a setting change loses the change
+    // and the next daemon start can't restore playback.
+    state.settings.flush_now().await;
 
     if let Some(conn) = dbus_conn.as_ref() {
         if let Err(e) = dbus_iface::emit_shutting_down(conn).await {

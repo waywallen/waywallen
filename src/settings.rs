@@ -22,6 +22,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::RwLock as StdRwLock;
 use std::time::Duration;
@@ -41,7 +42,7 @@ const DEBOUNCE_WRITE: Duration = Duration::from_secs(2);
 /// Note: fps is intentionally NOT here. Frame rate is a per-plugin
 /// concern (different renderer engines have different sane defaults
 /// and capabilities), so it lives in `[plugin.<name>]` tables only.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GlobalSettings {
     pub default_width: u32,
@@ -74,7 +75,7 @@ impl Default for GlobalSettings {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
     #[serde(default)]
     pub global: GlobalSettings,
@@ -122,14 +123,33 @@ pub struct SettingsStore {
     inner: Arc<StdRwLock<Settings>>,
     notify: Arc<Notify>,
     path: PathBuf,
+    /// Serializes concurrent `flush()` calls. Without this the
+    /// debounced writer_loop and `flush_now()` (called on shutdown)
+    /// can both target the same `<name>.tmp` path simultaneously: one
+    /// task's `O_TRUNC` clobbers the other's in-flight write, and
+    /// whichever finishes the rename last installs whatever bytes its
+    /// own tmp ended up with — typically a partial file because the
+    /// other task interleaved a truncate. Held only across the
+    /// in-memory snapshot + write + rename; the in-memory state
+    /// itself is still guarded by `inner`.
+    flush_lock: tokio::sync::Mutex<()>,
+    /// Set when the in-memory state diverges from what's on disk.
+    /// Cleared by a successful `flush()`. `update()` only marks
+    /// dirty when the closure actually changed something
+    /// (PartialEq on `Settings`), so duplicate apply / no-op tweaks
+    /// don't trigger redundant writes.
+    dirty: AtomicBool,
 }
 
 impl SettingsStore {
-    /// Load from `path` if it exists, otherwise fall back to defaults.
-    /// Spawns the debounced-writer task on the current tokio runtime;
-    /// callers should keep the returned `Arc` alive for the lifetime
-    /// of the daemon or the writer exits.
+    /// Load from `path` if it exists, otherwise fall back to defaults
+    /// AND seed the file with the default state so it's visible from
+    /// day-one (handy for hand-editing without having to run the
+    /// daemon first). Spawns the debounced-writer task on the current
+    /// tokio runtime; callers should keep the returned `Arc` alive
+    /// for the lifetime of the daemon or the writer exits.
     pub async fn load_or_default(path: PathBuf) -> Arc<Self> {
+        let mut seed_on_disk = false;
         let initial = match tokio::fs::read_to_string(&path).await {
             Ok(s) => match toml::from_str::<Settings>(&s) {
                 Ok(parsed) => {
@@ -144,8 +164,16 @@ impl SettingsStore {
                     Settings::default()
                 }
             },
-            Err(e) => {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 log::info!(
+                    "settings file {} not found, seeding defaults",
+                    path.display()
+                );
+                seed_on_disk = true;
+                Settings::default()
+            }
+            Err(e) => {
+                log::warn!(
                     "settings file {} not readable ({e}); using defaults",
                     path.display()
                 );
@@ -157,7 +185,16 @@ impl SettingsStore {
             inner: Arc::new(StdRwLock::new(initial)),
             notify: Arc::new(Notify::new()),
             path,
+            flush_lock: tokio::sync::Mutex::new(()),
+            // Mark dirty up-front when there's no on-disk file yet so
+            // the seed flush below actually writes; otherwise dirty
+            // starts clean and `update()` flips it on real changes.
+            dirty: AtomicBool::new(seed_on_disk),
         });
+
+        if seed_on_disk {
+            store.flush().await;
+        }
 
         // Debounced writer task.
         let writer = Arc::clone(&store);
@@ -191,17 +228,25 @@ impl SettingsStore {
             .cloned()
     }
 
-    /// Apply an in-memory mutation and schedule an eventual disk
-    /// flush. Returns as soon as the write lock drops.
+    /// Apply an in-memory mutation. Compares the post-closure state
+    /// against the pre-closure clone; only flips the dirty bit and
+    /// pokes the writer if the closure actually changed something.
+    /// No-op closures (or closures that set fields to their existing
+    /// values) cost a clone + equality check but no disk I/O.
     pub fn update<F>(&self, f: F)
     where
         F: FnOnce(&mut Settings),
     {
-        {
+        let changed = {
             let mut g = self.inner.write().expect("settings poisoned");
+            let before = g.clone();
             f(&mut g);
+            *g != before
+        };
+        if changed {
+            self.dirty.store(true, Ordering::SeqCst);
+            self.notify.notify_one();
         }
-        self.notify.notify_one();
     }
 
     async fn writer_loop(self: Arc<Self>) {
@@ -220,12 +265,34 @@ impl SettingsStore {
         }
     }
 
+    /// Force a synchronous flush of the current settings to disk,
+    /// bypassing the debounce window. Call this on shutdown so the
+    /// last write doesn't get stranded by a SIGTERM that arrives
+    /// inside the debounce period (otherwise `last_wallpaper`,
+    /// `active_playlist_id`, and friends silently fail to persist).
+    pub async fn flush_now(&self) {
+        self.flush().await;
+    }
+
     async fn flush(&self) {
+        // Cheap fast path before grabbing the lock: if nothing has
+        // changed since the last successful flush, skip entirely.
+        if !self.dirty.load(Ordering::SeqCst) {
+            return;
+        }
+        let _g = self.flush_lock.lock().await;
+        // Re-check under the lock — another flush may have just
+        // raced us to the same state.
+        if !self.dirty.swap(false, Ordering::SeqCst) {
+            return;
+        }
+
         let snapshot = self.snapshot();
         let serialized = match toml::to_string_pretty(&snapshot) {
             Ok(s) => s,
             Err(e) => {
                 log::warn!("settings serialize failed: {e}");
+                self.dirty.store(true, Ordering::SeqCst);
                 return;
             }
         };
@@ -236,12 +303,11 @@ impl SettingsStore {
                     "settings create_dir_all {}: {e}",
                     parent.display()
                 );
+                self.dirty.store(true, Ordering::SeqCst);
                 return;
             }
         }
 
-        // Atomic replace: write to `<name>.tmp` then rename. If the
-        // write fails we leave the existing file unchanged.
         let tmp = {
             let mut p = self.path.clone();
             let new_name = match p.file_name() {
@@ -250,13 +316,17 @@ impl SettingsStore {
                     s.push(".tmp");
                     s
                 }
-                None => return,
+                None => {
+                    self.dirty.store(true, Ordering::SeqCst);
+                    return;
+                }
             };
             p.set_file_name(new_name);
             p
         };
         if let Err(e) = tokio::fs::write(&tmp, serialized).await {
             log::warn!("settings write {}: {e}", tmp.display());
+            self.dirty.store(true, Ordering::SeqCst);
             return;
         }
         if let Err(e) = tokio::fs::rename(&tmp, &self.path).await {
@@ -265,9 +335,17 @@ impl SettingsStore {
                 tmp.display(),
                 self.path.display()
             );
+            self.dirty.store(true, Ordering::SeqCst);
             return;
         }
         log::debug!("settings flushed to {}", self.path.display());
+    }
+
+    /// Read-only view of the on-disk path (useful when the settings
+    /// store is constructed before the rest of `AppState`, so callers
+    /// can log the resolved path next to other startup diagnostics).
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
     }
 }
 

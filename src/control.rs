@@ -9,6 +9,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 
@@ -123,6 +124,12 @@ async fn apply_wallpaper_inner(
     app.settings.update(|s| {
         s.global.last_wallpaper = Some(entry.id.clone());
     });
+    // Push the just-applied wallpaper to disk synchronously instead of
+    // waiting on the 2s debounce. A kill / SIGTERM inside the debounce
+    // window would otherwise lose `last_wallpaper`, which is exactly
+    // the value the next start needs to reproduce playback. flush_now
+    // is a cheap no-op when nothing actually changed.
+    app.settings.flush_now().await;
 
     Ok(ApplyResult { renderer_id, entry })
 }
@@ -295,6 +302,93 @@ pub async fn deactivate_playlist(app: &Arc<AppState>) -> Result<()> {
         s.global.active_playlist_id = None;
     });
     Ok(())
+}
+
+/// Restore the persisted wallpaper + playlist state. Idempotent —
+/// callable on demand if a future feature wants to "re-load saved
+/// state" without a full daemon restart. Publishes `RestoreApplied`
+/// or `RestoreFailed` on the global event bus on completion so
+/// observers (logs, integration tests, future UI status) can react.
+pub async fn run_restore(app: &Arc<AppState>, restore_last: bool) -> Result<()> {
+    use crate::events::GlobalEvent;
+
+    let mut applied: Option<String> = None;
+
+    if restore_last {
+        if let Some(last_id) = app.settings.global().last_wallpaper.clone() {
+            log::info!("restoring last wallpaper: {last_id}");
+            match apply_wallpaper_by_id(app, &last_id, 0, 0, 0).await {
+                Ok(_) => applied = Some(last_id),
+                Err(e) => {
+                    log::warn!("failed to restore last wallpaper: {e:#}");
+                    app.events
+                        .publish(GlobalEvent::RestoreFailed(format!("apply: {e:#}")));
+                }
+            }
+        }
+    }
+
+    // Order matters: activate (which sets mode/seed from the DB row)
+    // BEFORE applying the saved in-memory mode preference, so the
+    // user's last All-pseudo-list mode wins when there's no DB row to
+    // override.
+    let g = app.settings.global();
+    if let Some(pl_id) = g.active_playlist_id {
+        if let Err(e) = activate_playlist(app, pl_id).await {
+            log::warn!("failed to activate playlist id={pl_id}: {e:#}");
+            app.events
+                .publish(GlobalEvent::RestoreFailed(format!("activate: {e:#}")));
+        }
+    }
+    if let Some(mode) = crate::playlist::Mode::from_str(&g.playlist_mode) {
+        app.playlist.lock().await.set_mode(mode);
+    }
+    if g.rotation_secs > 0 {
+        app.rotation.set_interval(g.rotation_secs);
+    }
+
+    app.events.publish(GlobalEvent::RestoreApplied(applied));
+    Ok(())
+}
+
+/// Block until at least one display is registered with the router
+/// (or `timeout` elapses, whichever comes first). Returns `true` if
+/// a display is up by the time we return, `false` on timeout.
+///
+/// Used by the startup-restore path so applying the saved wallpaper
+/// doesn't race the display backend's first connect — without this
+/// gate the renderer spawns into a vacuum, the relink-all-displays
+/// step is a no-op (no displays yet), and the wallpaper never
+/// actually shows up on screen.
+pub async fn wait_for_display(app: &Arc<AppState>, timeout: Duration) -> bool {
+    // Fast path: a display is already registered (e.g. KDE wallpaper
+    // plugin connected before the startup task got around to running).
+    if !app.router.snapshot_displays().await.is_empty() {
+        return true;
+    }
+    let mut events = app.router.subscribe_events();
+    let deadline = tokio::time::sleep(timeout);
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            _ = &mut deadline => return false,
+            evt = events.recv() => match evt {
+                Ok(crate::routing::RouterEvent::DisplayUpsert(_)) => return true,
+                Ok(crate::routing::RouterEvent::DisplaysReplace(list)) if !list.is_empty() => {
+                    return true;
+                }
+                Ok(_) => continue,
+                Err(_) => {
+                    // Broadcast lag or channel close — fall back to a
+                    // direct snapshot. Either we missed the upsert
+                    // event (and the snapshot is now non-empty, return
+                    // true) or the router shut down (snapshot empty,
+                    // restore won't help anyway).
+                    return !app.router.snapshot_displays().await.is_empty();
+                }
+            }
+        }
+    }
 }
 
 /// Auto-rotation task body. Lives here (not in `playlist::rotator`)
