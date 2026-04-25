@@ -420,11 +420,11 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
             };
 
             let total = raw_entries.len() as u32;
-            let offset = r.offset as usize;
-            let take = if r.limit == 0 {
-                raw_entries.len().saturating_sub(offset)
+            let page_size = r.page_size as usize;
+            let (offset, take) = if page_size == 0 {
+                (0usize, raw_entries.len())
             } else {
-                r.limit as usize
+                ((r.page as usize) * page_size, page_size)
             };
 
             let entries: Vec<pb::WallpaperEntry> = raw_entries

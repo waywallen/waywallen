@@ -129,11 +129,11 @@ MD.Page {
                             rightMargin: 8
                         }
 
-                        model: wallpaperQuery.model
+                        model: wallpaperQuery.data
 
                         delegate: WallpaperCard {
                             widthProvider: m_wp
-                            onClicked: root.selectedWallpaper = wallpaperQuery.model.item(index)
+                            onClicked: root.selectedWallpaper = wallpaperQuery.data.item(index)
                         }
                     }
 

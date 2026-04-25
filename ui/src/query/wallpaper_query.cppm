@@ -12,14 +12,13 @@ export import :model.list_models;
 namespace waywallen
 {
 
-export class WallpaperListQuery : public Query, public QueryExtra<WallpaperListQuery> {
+export class WallpaperListQuery : public QueryList,
+                                  public ::QueryExtra<model::WallpaperListModel, WallpaperListQuery> {
     Q_OBJECT
     QML_ELEMENT
 
     Q_PROPERTY(QString wpType READ wpType WRITE setWpType NOTIFY wpTypeChanged FINAL)
-    Q_PROPERTY(waywallen::model::WallpaperListModel* model READ model CONSTANT FINAL)
-    Q_PROPERTY(quint32 pageSize READ pageSize WRITE setPageSize NOTIFY pageSizeChanged FINAL)
-    Q_PROPERTY(quint32 total READ total NOTIFY totalChanged FINAL)
+    Q_PROPERTY(qint32 total READ total NOTIFY totalChanged FINAL)
 
 public:
     WallpaperListQuery(QObject* parent = nullptr);
@@ -27,28 +26,17 @@ public:
     auto wpType() const -> const QString&;
     void setWpType(const QString&);
 
-    auto model() const -> model::WallpaperListModel*;
-
-    auto pageSize() const -> quint32;
-    void setPageSize(quint32);
-
-    auto total() const -> quint32;
+    auto total() const -> qint32;
 
     void reload() override;
+    void fetchMore(qint32) override;
 
     Q_SIGNAL void wpTypeChanged();
-    Q_SIGNAL void pageSizeChanged();
     Q_SIGNAL void totalChanged();
 
 private:
-    void fetchPage(quint32 seq);
-
-    QString                    m_wp_type;
-    model::WallpaperListModel* m_model;
-    quint32                    m_page_size    { 60 };
-    quint32                    m_offset       { 0 };
-    quint32                    m_total        { 0 };
-    quint32                    m_request_seq  { 0 };
+    QString m_wp_type;
+    qint32  m_total { 0 };
 };
 
 export class WallpaperScanQuery : public Query, public QueryExtra<WallpaperScanQuery> {
