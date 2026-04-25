@@ -15,6 +15,7 @@ mod ipc;
 mod media_probe;
 mod model;
 mod plugin;
+mod probe_task;
 mod renderer_manager;
 mod routing;
 mod scheduler;
@@ -303,6 +304,23 @@ async fn async_main() -> anyhow::Result<()> {
 
             Ok(())
         });
+    }
+
+    // Background media-probe scheduler. Pulls items with NULL media
+    // metadata + probable extension out of the DB on a tick and fills
+    // them in via libavformat. Decoupled from scan/sync so adding a
+    // big library doesn't stall the source refresh path.
+    {
+        let probe_for_task = probe.clone();
+        let db_for_task = db.clone();
+        let shutdown_for_task = state.shutdown.subscribe();
+        state.tasks.spawn_async(
+            tasks::TaskKind::Service,
+            "probe/scheduler",
+            async move {
+                probe_task::scheduler_loop(db_for_task, probe_for_task, shutdown_for_task).await
+            },
+        );
     }
 
     // Display backend registry + auto-selection. This does not spawn the

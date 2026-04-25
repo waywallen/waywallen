@@ -6,10 +6,13 @@ use anyhow::{Context, Result};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction,
-    EntityTrait, QueryFilter, QueryOrder, Set, TransactionTrait,
+    EntityTrait, QueryFilter, QueryOrder, QuerySelect, Set, TransactionTrait,
 };
 
 use super::entities::{item, item_tag, library, source_plugin, tag};
+use crate::media_probe::MediaMetadata;
+use crate::tasks::now_ms;
+use sea_orm::ActiveValue::NotSet;
 
 // ---------------------------------------------------------------------------
 // source_plugin
@@ -186,13 +189,21 @@ pub struct ItemUpsertArgs<'a> {
 }
 
 /// Upsert an item keyed by `(library_id, path)`. Every non-key column
-/// is refreshed on conflict (new scan is truth). Returns the stored
-/// [`item::Model`] — the caller can use `model.id` for tag linkage.
+/// (except `create_at`) is refreshed on conflict — new scan is truth.
+///
+/// Timestamp semantics:
+/// - `create_at`: set on first INSERT, preserved on every conflict.
+/// - `update_at`: refreshed on every upsert.
+/// - `sync_at`: refreshed on every upsert (counts as "we saw it").
+///
+/// Returns the stored [`item::Model`] — the caller can use `model.id`
+/// for tag linkage.
 pub async fn upsert_item(
     db: &DatabaseConnection,
     args: ItemUpsertArgs<'_>,
 ) -> Result<item::Model> {
     let ty_norm = args.ty.to_lowercase();
+    let now = now_ms();
     let am = item::ActiveModel {
         plugin_id: Set(args.plugin_id),
         library_id: Set(args.library_id),
@@ -206,10 +217,15 @@ pub async fn upsert_item(
         width: Set(args.width),
         height: Set(args.height),
         format: Set(args.format.map(str::to_owned)),
+        create_at: Set(now),
+        update_at: Set(now),
+        sync_at: Set(now),
         ..Default::default()
     };
     item::Entity::insert(am)
         .on_conflict(
+            // CreateAt deliberately omitted from update_columns so the
+            // first-insert value survives every subsequent upsert.
             OnConflict::columns([item::Column::LibraryId, item::Column::Path])
                 .update_columns([
                     item::Column::Ty,
@@ -222,6 +238,8 @@ pub async fn upsert_item(
                     item::Column::Width,
                     item::Column::Height,
                     item::Column::Format,
+                    item::Column::UpdateAt,
+                    item::Column::SyncAt,
                 ])
                 .to_owned(),
         )
@@ -276,6 +294,113 @@ pub async fn delete_items_missing(
         .await
         .with_context(|| format!("delete missing items lib={library_id}"))?;
     Ok(res.rows_affected)
+}
+
+/// Items that still have at least one missing media-meta field, where
+/// either we've never probed them or the last probe attempt was older
+/// than `cooldown_cutoff_ms`. Used by the background probe scheduler
+/// to avoid hammering files that have already been looked at recently
+/// (success or no-op).
+///
+/// `probed_at` (not `sync_at`) gates the cooldown because `sync_at`
+/// also bumps on every scan-sync — using it would lock out every
+/// freshly-imported row from the post-refresh drain.
+///
+/// Returned alongside each item is the absolute `library.path`
+/// (joined with `item.path` in the caller to form the on-disk path).
+pub async fn list_items_pending_probe(
+    db: &DatabaseConnection,
+    cooldown_cutoff_ms: i64,
+    limit: u64,
+) -> Result<Vec<(item::Model, String)>> {
+    use sea_orm::Condition;
+
+    let rows = item::Entity::find()
+        .filter(
+            Condition::any()
+                .add(item::Column::Size.is_null())
+                .add(item::Column::Width.is_null())
+                .add(item::Column::Height.is_null())
+                .add(item::Column::Format.is_null()),
+        )
+        .filter(
+            Condition::any()
+                .add(item::Column::ProbedAt.is_null())
+                .add(item::Column::ProbedAt.lt(cooldown_cutoff_ms)),
+        )
+        // NULLs sort first in SQLite, so never-probed rows come ahead
+        // of long-cooldown ones. That's the desired priority.
+        .order_by_asc(item::Column::ProbedAt)
+        .limit(limit)
+        .find_also_related(library::Entity)
+        .all(db)
+        .await
+        .context("select items pending probe")?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|(it, lib)| lib.map(|l| (it, l.path)))
+        .collect())
+}
+
+/// Apply a probe result to a single item. Always bumps `sync_at` and
+/// `probed_at`. Only fields the probe actually filled overwrite
+/// existing columns; `None` means "unknown — leave whatever was
+/// there alone". `update_at` is bumped only when at least one of
+/// the four media columns actually changed value; a no-op probe
+/// (libavformat unavailable, codec parameters not exposed, etc.)
+/// leaves `update_at` alone but still stamps `probed_at` so the
+/// cooldown filter knows we tried.
+pub async fn update_item_media(
+    db: &DatabaseConnection,
+    id: i64,
+    meta: &MediaMetadata,
+) -> Result<()> {
+    let existing = item::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .with_context(|| format!("reload item id={id}"))?
+        .ok_or_else(|| anyhow::anyhow!("item id={id} disappeared before probe write"))?;
+
+    let new_size = meta.size.or(existing.size);
+    let new_width = meta
+        .width
+        .and_then(|v| i32::try_from(v).ok())
+        .or(existing.width);
+    let new_height = meta
+        .height
+        .and_then(|v| i32::try_from(v).ok())
+        .or(existing.height);
+    let new_format = meta.format.clone().or_else(|| existing.format.clone());
+
+    let changed = new_size != existing.size
+        || new_width != existing.width
+        || new_height != existing.height
+        || new_format != existing.format;
+
+    let now = now_ms();
+    let mut am: item::ActiveModel = existing.into();
+    if changed {
+        am.size = Set(new_size);
+        am.width = Set(new_width);
+        am.height = Set(new_height);
+        am.format = Set(new_format);
+        am.update_at = Set(now);
+    } else {
+        // Explicitly mark unchanged columns as NotSet so SeaORM
+        // doesn't emit them in the UPDATE.
+        am.size = NotSet;
+        am.width = NotSet;
+        am.height = NotSet;
+        am.format = NotSet;
+        am.update_at = NotSet;
+    }
+    am.sync_at = Set(now);
+    am.probed_at = Set(Some(now));
+    am.update(db)
+        .await
+        .with_context(|| format!("update item media id={id}"))?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

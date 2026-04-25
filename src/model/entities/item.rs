@@ -25,6 +25,20 @@ pub struct Model {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub format: Option<String>,
+    /// Milliseconds since UNIX epoch. Set on first INSERT, never
+    /// updated on subsequent upserts of the same `(library_id, path)`.
+    pub create_at: i64,
+    /// Milliseconds since UNIX epoch. Refreshed on every upsert
+    /// (sync) and on every probe pass that actually changed a field.
+    pub update_at: i64,
+    /// Milliseconds since UNIX epoch. Refreshed any time the daemon
+    /// "sees" the item — both scan-sync and probe-task ticks.
+    pub sync_at: i64,
+    /// Milliseconds since UNIX epoch of the last probe attempt
+    /// (success or no-op). `None` means never probed. Drives the
+    /// probe-task cooldown so re-tries don't storm; `sync_at`
+    /// alone can't fill this role because sync also bumps it.
+    pub probed_at: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

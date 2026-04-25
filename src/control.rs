@@ -351,7 +351,6 @@ pub async fn refresh_sources(app: &Arc<AppState>) -> Result<usize> {
             sync::PluginRef { name: &info.name, version: &info.version },
             &entries,
             &protected,
-            &*app.probe,
         )
         .await
         {
@@ -371,5 +370,25 @@ pub async fn refresh_sources(app: &Arc<AppState>) -> Result<usize> {
     let ids: Vec<String> = snapshot.iter().map(|e| e.id.clone()).collect();
     let count = ids.len();
     app.playlist.lock().await.refresh(ids);
+
+    // Kick a one-shot probe drain so newly-imported items don't have
+    // to wait for the next scheduler tick. `spawn_async_unique` collapses
+    // overlapping refresh→probe bursts (e.g. a flurry of LibraryAdd
+    // calls) into a single in-flight pass.
+    let probe = app.probe.clone();
+    let db = app.db.clone();
+    app.tasks.spawn_async_unique(
+        crate::tasks::TaskKind::Generic,
+        "probe/refresh",
+        "probe/post-refresh",
+        async move {
+            // run_pending emits its own info log; we only care about
+            // surfacing the error here.
+            crate::probe_task::run_pending(&db, probe, crate::probe_task::PROBE_REFRESH_BATCH)
+                .await
+                .map(|_| ())
+        },
+    );
+
     Ok(count)
 }

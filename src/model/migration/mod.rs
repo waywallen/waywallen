@@ -2,6 +2,8 @@ use sea_orm_migration::prelude::*;
 
 mod m20260419_000001_init;
 mod m20260425_000001_item_media_meta;
+mod m20260425_000002_item_timestamps;
+mod m20260425_000003_item_probed_at;
 
 pub struct Migrator;
 
@@ -11,6 +13,8 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20260419_000001_init::Migration),
             Box::new(m20260425_000001_item_media_meta::Migration),
+            Box::new(m20260425_000002_item_timestamps::Migration),
+            Box::new(m20260425_000003_item_probed_at::Migration),
         ]
     }
 }

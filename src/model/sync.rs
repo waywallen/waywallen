@@ -18,7 +18,6 @@ use anyhow::{Context, Result};
 use sea_orm::DatabaseConnection;
 
 use super::repo::{self, ItemUpsertArgs};
-use crate::media_probe::MediaProbe;
 use crate::wallpaper_type::WallpaperEntry;
 
 #[derive(Debug, Clone)]
@@ -50,7 +49,6 @@ pub async fn sync_plugin_entries(
     plugin: PluginRef<'_>,
     entries: &[WallpaperEntry],
     protected_libraries: &[String],
-    probe: &dyn MediaProbe,
 ) -> Result<(SyncSummary, super::entities::source_plugin::Model)> {
     let plugin_model = repo::upsert_plugin(db, plugin.name, plugin.version)
         .await
@@ -125,27 +123,14 @@ pub async fn sync_plugin_entries(
                 .and_then(|abs| relative_under_root(lib_path, abs))
                 .filter(|s| !s.is_empty());
 
-            // If plugin supplied any media field, trust it entirely.
-            // Otherwise probe the resource path.
-            let (size, width, height, format_str) =
-                if entry.size.is_some() || entry.width.is_some()
-                    || entry.height.is_some() || entry.format.is_some()
-                {
-                    (
-                        entry.size,
-                        entry.width.and_then(|v| i32::try_from(v).ok()),
-                        entry.height.and_then(|v| i32::try_from(v).ok()),
-                        entry.format.clone(),
-                    )
-                } else {
-                    let md = probe.probe(&entry.resource);
-                    (
-                        md.size,
-                        md.width.and_then(|v| i32::try_from(v).ok()),
-                        md.height.and_then(|v| i32::try_from(v).ok()),
-                        md.format,
-                    )
-                };
+            // Sync only persists what the plugin emitted. Missing
+            // media metadata stays NULL — the daemon's scheduled
+            // probe task is responsible for filling those columns
+            // out-of-band.
+            let size = entry.size;
+            let width = entry.width.and_then(|v| i32::try_from(v).ok());
+            let height = entry.height.and_then(|v| i32::try_from(v).ok());
+            let format_str = entry.format.clone();
 
             let persisted = repo::upsert_item(
                 db,
@@ -200,28 +185,7 @@ fn relative_under_root(root: &str, resource: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::media_probe::MediaMetadata;
     use crate::model::connect_url;
-
-    struct NoOpProbe;
-    impl MediaProbe for NoOpProbe {
-        fn probe(&self, _path: &str) -> MediaMetadata {
-            MediaMetadata::default()
-        }
-    }
-
-    struct FakeProbe {
-        meta: MediaMetadata,
-    }
-    impl MediaProbe for FakeProbe {
-        fn probe(&self, _path: &str) -> MediaMetadata {
-            self.meta.clone()
-        }
-    }
-
-    fn nop() -> NoOpProbe {
-        NoOpProbe
-    }
 
     fn entry(
         plugin_name: &str,
@@ -270,7 +234,6 @@ mod tests {
             PluginRef { name: "image", version: "0.1" },
             &entries,
             &[],
-            &nop(),
         )
         .await
         .unwrap();
@@ -290,7 +253,7 @@ mod tests {
         let db = mem_db().await;
         let mut e = entry("p", "/ws", "/ws/12345/scene.pkg", "scene");
         e.preview = Some("/ws/12345/preview.gif".into());
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[], &nop())
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[])
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -304,7 +267,7 @@ mod tests {
         let db = mem_db().await;
         let mut e = entry("p", "/root", "/root/a.png", "image");
         e.preview = Some("/elsewhere/thumb.png".into());
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[], &nop())
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[])
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -319,7 +282,7 @@ mod tests {
             entry("p", "/root", "/root/ok.png", "image"),
             entry("p", "/root", "/elsewhere/bad.png", "image"),
         ];
-        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[], &nop())
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[])
                 .await
                 .unwrap();
         assert_eq!(summary.items_upserted, 1);
@@ -330,7 +293,7 @@ mod tests {
     async fn type_is_normalized_lowercase() {
         let db = mem_db().await;
         let entries = [entry("p", "/r", "/r/a.png", "Scene")];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[], &nop())
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[])
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -364,7 +327,6 @@ mod tests {
             PluginRef { name: "wallpaper_engine", version: "0.2.0" },
             &[we],
             &[],
-            &nop(),
         )
         .await
         .unwrap();
@@ -391,7 +353,7 @@ mod tests {
             e
         };
         let entries = [mk("a.png", "Anime"), mk("b.png", "anime"), mk("c.png", "ANIME")];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[], &nop())
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[])
             .await
             .unwrap();
         assert_eq!(repo::list_tags(&db).await.unwrap().len(), 1);
@@ -402,13 +364,13 @@ mod tests {
         let db = mem_db().await;
         let mut first = entry("p", "/r", "/r/a.png", "image");
         first.tags = vec!["Anime".into(), "Nature".into()];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[first], &[], &nop())
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[first], &[])
             .await
             .unwrap();
 
         let mut second = entry("p", "/r", "/r/a.png", "image");
         second.tags = vec!["Game".into()];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[second], &[], &nop())
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[second], &[])
             .await
             .unwrap();
 
@@ -427,12 +389,12 @@ mod tests {
             entry("p", "/a", "/a/y.png", "image"),
             entry("p", "/b", "/b/z.png", "image"),
         ];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &first, &[], &nop())
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &first, &[])
             .await
             .unwrap();
 
         let second = [entry("p", "/a", "/a/x.png", "image")];
-        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &second, &[], &nop())
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &second, &[])
                 .await
                 .unwrap();
         assert_eq!(summary.items_upserted, 1);
@@ -448,66 +410,75 @@ mod tests {
             PluginRef { name: "p", version: "" },
             &[entry("p", "/one", "/one/x.png", "image")],
             &[],
-            &nop(),
         )
         .await
         .unwrap();
-        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[], &[], &nop())
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[], &[])
                 .await
                 .unwrap();
         assert_eq!(summary.libraries_deleted, 1);
     }
 
     #[tokio::test]
-    async fn media_meta_probed_when_entry_lacks_it() {
+    async fn media_meta_remains_null_when_entry_lacks_it() {
         let db = mem_db().await;
         let e = entry("p", "/r", "/r/a.mp4", "video");
-        let probe = FakeProbe {
-            meta: MediaMetadata {
-                size: Some(99),
-                width: Some(640),
-                height: Some(480),
-                format: Some("fake".to_owned()),
-            },
-        };
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[], &probe)
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[])
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
         let items = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
         let it = &items[0];
-        assert_eq!(it.size, Some(99));
-        assert_eq!(it.width, Some(640));
-        assert_eq!(it.height, Some(480));
-        assert_eq!(it.format.as_deref(), Some("fake"));
+        // Sync no longer probes — missing fields stay None for the
+        // background probe task to fill in.
+        assert_eq!(it.size, None);
+        assert_eq!(it.width, None);
+        assert_eq!(it.height, None);
+        assert_eq!(it.format, None);
     }
 
     #[tokio::test]
-    async fn plugin_provided_media_meta_preserved() {
+    async fn plugin_provided_media_meta_persisted() {
         let db = mem_db().await;
-        // Entry has width and height set by plugin; size and format absent.
         let mut e = entry("p", "/r", "/r/b.mp4", "video");
+        e.size = Some(42);
         e.width = Some(1920);
         e.height = Some(1080);
-        // Probe would return different values if consulted.
-        let probe = FakeProbe {
-            meta: MediaMetadata {
-                size: Some(42),
-                width: Some(999),
-                height: Some(999),
-                format: Some("FAKE".to_owned()),
-            },
-        };
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[], &probe)
+        e.format = Some("matroska,webm".to_owned());
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[])
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
         let items = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
         let it = &items[0];
-        // Plugin-provided fields preserved exactly; probe not consulted.
+        assert_eq!(it.size, Some(42));
         assert_eq!(it.width, Some(1920));
         assert_eq!(it.height, Some(1080));
-        assert_eq!(it.size, None);
-        assert_eq!(it.format, None);
+        assert_eq!(it.format.as_deref(), Some("matroska,webm"));
+    }
+
+    #[tokio::test]
+    async fn first_insert_stamps_create_at_and_preserves_it_on_conflict() {
+        let db = mem_db().await;
+        let e = entry("p", "/r", "/r/a.png", "image");
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e.clone()], &[])
+            .await
+            .unwrap();
+        let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
+        let items = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
+        let first_create = items[0].create_at;
+        let first_update = items[0].update_at;
+        assert!(first_create > 0);
+        assert_eq!(first_update, first_create);
+        // Force the wall clock to advance so the second upsert sees a
+        // strictly newer now_ms() than the first.
+        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[])
+            .await
+            .unwrap();
+        let items2 = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
+        assert_eq!(items2[0].create_at, first_create, "create_at must be sticky");
+        assert!(items2[0].update_at >= first_update);
+        assert!(items2[0].sync_at >= first_update);
     }
 }

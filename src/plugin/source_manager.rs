@@ -161,10 +161,16 @@ impl SourceManager {
                 description: tbl.get::<String>("description").ok(),
                 tags: tbl.get::<Vec<String>>("tags").unwrap_or_default(),
                 external_id: tbl.get::<String>("external_id").ok(),
-                size: None,
-                width: None,
-                height: None,
-                format: None,
+                // Optional plugin-supplied media meta. Plugins that
+                // know their own metadata (e.g. wallpaper_engine via
+                // project.json + ctx.file_size) can pre-fill these so
+                // the daemon's background probe task has less work.
+                // Missing fields stay `None` and are filled in later
+                // by the probe scheduler.
+                size: tbl.get::<i64>("size").ok(),
+                width: tbl.get::<u32>("width").ok(),
+                height: tbl.get::<u32>("height").ok(),
+                format: tbl.get::<String>("format").ok(),
             };
             let idx = self.entries.len();
             self.by_type
@@ -294,6 +300,17 @@ impl SourceManager {
             Ok(())
         })?;
         ctx.set("log", log_fn)?;
+
+        // ctx.file_size(path) -> integer|nil
+        // Cheap stat-only helper: lets a Lua source plugin pre-fill
+        // `entry.size` without paying for a libavformat probe.
+        let file_size_fn = self.lua.create_function(|_, path: String| {
+            let bytes = std::fs::metadata(&path)
+                .ok()
+                .and_then(|m| i64::try_from(m.len()).ok());
+            Ok(bytes)
+        })?;
+        ctx.set("file_size", file_size_fn)?;
 
         // ctx.probe(path) -> table|nil
         // Returns a table with present media fields, or nil if all fields are None.
