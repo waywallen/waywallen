@@ -29,8 +29,8 @@ MD.ListGridBaseDelegate {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.margins: 0
-                visible: root.wallpaper.preview !== undefined && root.wallpaper.preview !== ""
-                source: root.wallpaper.preview ? "file://" + root.wallpaper.preview : ""
+                visible: !!root.wallpaper?.preview
+                source: root.wallpaper?.preview ? "file://" + root.wallpaper.preview : ""
                 fillMode: Image.PreserveAspectFit
             }
 
@@ -40,7 +40,7 @@ MD.ListGridBaseDelegate {
                 spacing: 2
 
                 MD.Text {
-                    text: root.wallpaper.name || "Untitled"
+                    text: root.wallpaper?.name || "Untitled"
                     typescale: MD.Token.typescale.title_small
                     color: MD.Token.color.on_surface
                     Layout.fillWidth: true
@@ -49,7 +49,7 @@ MD.ListGridBaseDelegate {
                 }
 
                 MD.Text {
-                    text: root.wallpaper.wpType || ""
+                    text: root.wallpaper?.wpType || ""
                     typescale: MD.Token.typescale.label_medium
                     color: MD.Token.color.on_surface_variant
                 }
