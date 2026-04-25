@@ -27,8 +27,6 @@ class WallpaperListModel : public kstore::QGadgetListModel,
 
 public:
     WallpaperListModel(QObject* parent = nullptr);
-
-    Q_INVOKABLE QQmlPropertyMap* extra(qint32 idx) const;
 };
 
 } // namespace waywallen::model

@@ -44,15 +44,6 @@ public:
             }));
         }
     }
-    auto extra() const -> QQmlPropertyMap* {
-        if (auto key = m_item.key()) {
-            if (auto extend = m_item.store().query_extend(*key); extend) {
-                return extend->extra.get();
-            }
-        }
-        return nullptr;
-    }
-
 private:
     void unreg() {
         if (m_handle) {

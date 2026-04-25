@@ -29,13 +29,6 @@ AppStore* AppStore::create(QQmlEngine*, QJSEngine*) {
     return self;
 }
 
-QQmlPropertyMap* AppStore::wallpaperExtra(const QString& id) const {
-    if (auto extend = wallpapers.query_extend(id); extend) {
-        return extend->extra.get();
-    }
-    return nullptr;
-}
-
 } // namespace waywallen
 
 #include "waywallen/msg/store.moc.cpp"

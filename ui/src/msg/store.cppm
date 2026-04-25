@@ -26,8 +26,6 @@ public:
     using wallpaper_store = kstore::ItemTrait<model::Wallpaper>::store_type;
 
     wallpaper_store wallpapers;
-
-    Q_INVOKABLE QQmlPropertyMap* wallpaperExtra(const QString& id) const;
 };
 
 } // namespace waywallen
