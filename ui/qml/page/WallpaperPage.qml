@@ -31,25 +31,6 @@ MD.Page {
         }
     }
 
-    property string typeFilter: ""
-    property var filteredWallpapers: {
-        const all = wallpaperQuery.wallpapers;
-        if (!all || typeFilter === "")
-            return all;
-        return all.filter(wp => wp.wpType === typeFilter);
-    }
-
-    property var availableTypes: {
-        const all = wallpaperQuery.wallpapers;
-        if (!all)
-            return [];
-        const types = new Set();
-        for (const wp of all)
-            if (wp.wpType)
-                types.add(wp.wpType);
-        return ["", ...Array.from(types).sort()];
-    }
-
     property var selectedWallpaper: null
 
     // Target display ids for Apply. Empty set = "All displays".
@@ -97,19 +78,6 @@ MD.Page {
                         color: MD.Token.color.on_surface
                     }
 
-                    // Repeater {
-                    //     model: root.availableTypes
-
-                    //     MD.FilterChip {
-                    //         required property string modelData
-                    //         required property int index
-
-                    //         text: modelData === "" ? "All" : modelData
-                    //         checked: root.typeFilter === modelData
-                    //         onClicked: root.typeFilter = modelData
-                    //     }
-                    // }
-
                     MD.ActionToolBar {
                         Layout.fillWidth: true
                         actions: [
@@ -150,7 +118,7 @@ MD.Page {
                         displayMarginEnd: 300
                         topMargin: 8
                         bottomMargin: 8
-                        visible: root.filteredWallpapers && root.filteredWallpapers.length > 0
+                        visible: m_grid_view.count > 0
 
                         MD.WidthProvider {
                             id: m_wp
@@ -172,7 +140,7 @@ MD.Page {
                     ColumnLayout {
                         anchors.centerIn: parent
                         spacing: 16
-                        visible: !root.filteredWallpapers || root.filteredWallpapers.length === 0
+                        visible: m_grid_view.count === 0
 
                         MD.CircularIndicator {
                             Layout.alignment: Qt.AlignHCenter
@@ -424,7 +392,9 @@ MD.Page {
                                 if (busy)
                                     return;
 
-                                applyQuery.wallpaperId = root.selectedWallpaper?.id_proto || "";
+                                if (!root.selectedWallpaper)
+                                    return;
+                                applyQuery.wallpaper = root.selectedWallpaper;
                                 applyQuery.displayIds = root.applyTargetIds;
                                 applyQuery.reload();
                             }

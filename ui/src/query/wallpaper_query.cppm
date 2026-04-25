@@ -17,7 +17,6 @@ export class WallpaperListQuery : public Query, public QueryExtra<WallpaperListQ
     QML_ELEMENT
 
     Q_PROPERTY(QString wpType READ wpType WRITE setWpType NOTIFY wpTypeChanged FINAL)
-    Q_PROPERTY(QVariantList wallpapers READ wallpapers NOTIFY wallpapersChanged FINAL)
     Q_PROPERTY(waywallen::model::WallpaperListModel* model READ model CONSTANT FINAL)
 
 public:
@@ -26,17 +25,14 @@ public:
     auto wpType() const -> const QString&;
     void setWpType(const QString&);
 
-    auto wallpapers() const -> const QVariantList&;
     auto model() const -> model::WallpaperListModel*;
 
     void reload() override;
 
     Q_SIGNAL void wpTypeChanged();
-    Q_SIGNAL void wallpapersChanged();
 
 private:
     QString                     m_wp_type;
-    QVariantList                m_wallpapers;
     model::WallpaperListModel*  m_model;
 };
 
@@ -63,7 +59,7 @@ export class WallpaperApplyQuery : public Query, public QueryExtra<WallpaperAppl
     Q_OBJECT
     QML_ELEMENT
 
-    Q_PROPERTY(QString wallpaperId READ wallpaperId WRITE setWallpaperId NOTIFY wallpaperIdChanged FINAL)
+    Q_PROPERTY(waywallen::model::Wallpaper wallpaper READ wallpaper WRITE setWallpaper NOTIFY wallpaperChanged FINAL)
     /// Target display ids. Empty list = "apply to all displays" (legacy default).
     Q_PROPERTY(QVariantList displayIds READ displayIds WRITE setDisplayIds NOTIFY displayIdsChanged FINAL)
     Q_PROPERTY(QString rendererId READ rendererId NOTIFY rendererIdChanged FINAL)
@@ -71,8 +67,8 @@ export class WallpaperApplyQuery : public Query, public QueryExtra<WallpaperAppl
 public:
     WallpaperApplyQuery(QObject* parent = nullptr);
 
-    auto wallpaperId() const -> const QString&;
-    void setWallpaperId(const QString&);
+    auto wallpaper() const -> const model::Wallpaper&;
+    void setWallpaper(const model::Wallpaper&);
 
     auto displayIds() const -> const QVariantList&;
     void setDisplayIds(const QVariantList&);
@@ -81,14 +77,14 @@ public:
 
     void reload() override;
 
-    Q_SIGNAL void wallpaperIdChanged();
+    Q_SIGNAL void wallpaperChanged();
     Q_SIGNAL void displayIdsChanged();
     Q_SIGNAL void rendererIdChanged();
 
 private:
-    QString      m_wallpaper_id;
-    QVariantList m_display_ids;
-    QString      m_renderer_id;
+    model::Wallpaper m_wallpaper;
+    QVariantList     m_display_ids;
+    QString          m_renderer_id;
 };
 
 } // namespace waywallen

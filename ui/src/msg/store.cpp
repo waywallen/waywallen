@@ -9,30 +9,22 @@ namespace waywallen
 
 namespace
 {
-auto store_instance(AppStore* in = nullptr) -> AppStore* {
-    static AppStore* instance { in };
-    if (in != nullptr) instance = in;
+auto store_instance() -> AppStore* {
+    static AppStore* instance { new AppStore(App::instance()) };
     return instance;
 }
 } // namespace
 
 AppStore::AppStore(QObject* parent): QObject(parent), wallpapers() {
-    store_instance(this);
 }
 
 AppStore::~AppStore() {
-    if (store_instance() == this) {
-        store_instance(nullptr);
-    }
 }
 
 auto AppStore::instance() -> AppStore* { return store_instance(); }
 
 AppStore* AppStore::create(QQmlEngine*, QJSEngine*) {
     auto self = store_instance();
-    if (self == nullptr) {
-        self = new AppStore();
-    }
     QJSEngine::setObjectOwnership(self, QJSEngine::ObjectOwnership::CppOwnership);
     return self;
 }

@@ -35,7 +35,6 @@ void WallpaperListQuery::setWpType(const QString& v) {
     }
 }
 
-auto WallpaperListQuery::wallpapers() const -> const QVariantList& { return m_wallpapers; }
 auto WallpaperListQuery::model() const -> model::WallpaperListModel* { return m_model; }
 
 void WallpaperListQuery::reload() {
@@ -53,29 +52,13 @@ void WallpaperListQuery::reload() {
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
-            auto&                       list_rsp = rsp.wallpaperList();
+            auto&                         list_rsp = rsp.wallpaperList();
             std::vector<model::Wallpaper> items;
-            QVariantList                legacy;
             items.reserve(list_rsp.wallpapers().size());
-            legacy.reserve(list_rsp.wallpapers().size());
             for (const auto& wp : list_rsp.wallpapers()) {
                 items.push_back(wp);
-
-                QVariantMap m;
-                m[u"id"_s]       = wp.id_proto();
-                m[u"name"_s]     = wp.name();
-                m[u"wpType"_s]   = wp.wpType();
-                m[u"resource"_s] = wp.resource();
-                m[u"preview"_s]  = wp.preview();
-                m[u"size"_s]     = QVariant::fromValue(wp.size());
-                m[u"width"_s]    = wp.width();
-                m[u"height"_s]   = wp.height();
-                m[u"format"_s]   = wp.format();
-                legacy.append(m);
             }
             self->m_model->sync(items);
-            self->m_wallpapers = std::move(legacy);
-            Q_EMIT self->wallpapersChanged();
         });
         co_return;
     });
@@ -115,11 +98,11 @@ void WallpaperScanQuery::reload() {
 
 WallpaperApplyQuery::WallpaperApplyQuery(QObject* parent): Query(parent) {}
 
-auto WallpaperApplyQuery::wallpaperId() const -> const QString& { return m_wallpaper_id; }
-void WallpaperApplyQuery::setWallpaperId(const QString& v) {
-    if (m_wallpaper_id != v) {
-        m_wallpaper_id = v;
-        Q_EMIT wallpaperIdChanged();
+auto WallpaperApplyQuery::wallpaper() const -> const model::Wallpaper& { return m_wallpaper; }
+void WallpaperApplyQuery::setWallpaper(const model::Wallpaper& v) {
+    if (m_wallpaper.id_proto() != v.id_proto()) {
+        m_wallpaper = v;
+        Q_EMIT wallpaperChanged();
     }
 }
 
@@ -134,14 +117,14 @@ void WallpaperApplyQuery::setDisplayIds(const QVariantList& v) {
 auto WallpaperApplyQuery::rendererId() const -> const QString& { return m_renderer_id; }
 
 void WallpaperApplyQuery::reload() {
-    if (m_wallpaper_id.isEmpty()) return;
+    if (m_wallpaper.id_proto().isEmpty()) return;
 
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
     auto req   = proto::Request {};
     auto inner = proto::WallpaperApplyRequest {};
-    inner.setWallpaperId(m_wallpaper_id);
+    inner.setWallpaperId(m_wallpaper.id_proto());
     // Empty list is a legitimate value: daemon treats it as "apply to
     // all displays". Non-empty restricts the relink to named ids.
     QtProtobuf::uint64List ids;
