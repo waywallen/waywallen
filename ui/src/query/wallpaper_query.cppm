@@ -7,6 +7,7 @@ module;
 
 export module waywallen:query.wallpaper;
 export import :query.query;
+export import :model.list_models;
 
 namespace waywallen
 {
@@ -17,6 +18,7 @@ export class WallpaperListQuery : public Query, public QueryExtra<WallpaperListQ
 
     Q_PROPERTY(QString wpType READ wpType WRITE setWpType NOTIFY wpTypeChanged FINAL)
     Q_PROPERTY(QVariantList wallpapers READ wallpapers NOTIFY wallpapersChanged FINAL)
+    Q_PROPERTY(waywallen::model::WallpaperListModel* model READ model CONSTANT FINAL)
 
 public:
     WallpaperListQuery(QObject* parent = nullptr);
@@ -25,6 +27,7 @@ public:
     void setWpType(const QString&);
 
     auto wallpapers() const -> const QVariantList&;
+    auto model() const -> model::WallpaperListModel*;
 
     void reload() override;
 
@@ -32,8 +35,9 @@ public:
     Q_SIGNAL void wallpapersChanged();
 
 private:
-    QString      m_wp_type;
-    QVariantList m_wallpapers;
+    QString                     m_wp_type;
+    QVariantList                m_wallpapers;
+    model::WallpaperListModel*  m_model;
 };
 
 export class WallpaperScanQuery : public Query, public QueryExtra<WallpaperScanQuery> {

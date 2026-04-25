@@ -65,6 +65,7 @@ set(SOURCES_NO_MOC
   src/renderer.cpp
   src/msg/store.cpp
   src/model/store_item.cpp
+  src/model/list_models.cpp
   src/query/query.cpp
   src/query/wallpaper_query.cpp
   src/query/renderer_query.cpp
@@ -89,6 +90,7 @@ set(MOC_SOURCE_FILES
   src/renderer.cppm
   src/msg/store.cppm
   src/model/store_item.cppm
+  src/model/list_models.cppm
   src/query/query.cppm
   src/query/wallpaper_query.cppm
   src/query/renderer_query.cppm

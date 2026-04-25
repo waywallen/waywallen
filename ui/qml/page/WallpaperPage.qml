@@ -161,11 +161,11 @@ MD.Page {
                             rightMargin: 8
                         }
 
-                        model: root.filteredWallpapers
+                        model: wallpaperQuery.model
 
                         delegate: WallpaperCard {
                             widthProvider: m_wp
-                            onClicked: root.selectedWallpaper = wallpaper
+                            onClicked: root.selectedWallpaper = wallpaperQuery.model.item(index)
                         }
                     }
 
@@ -424,7 +424,7 @@ MD.Page {
                                 if (busy)
                                     return;
 
-                                applyQuery.wallpaperId = root.selectedWallpaper?.id || "";
+                                applyQuery.wallpaperId = root.selectedWallpaper?.id_proto || "";
                                 applyQuery.displayIds = root.applyTargetIds;
                                 applyQuery.reload();
                             }

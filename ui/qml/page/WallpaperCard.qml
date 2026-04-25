@@ -7,7 +7,7 @@ import waywallen.ui as W
 MD.ListGridBaseDelegate {
     id: root
 
-    property var wallpaper: model.modelData
+    property var wallpaper: model
     cellHeight: widthProvider.width + 32
 
     MD.Card {

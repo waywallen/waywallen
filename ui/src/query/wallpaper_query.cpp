@@ -7,6 +7,7 @@ module;
 module waywallen;
 import :query.wallpaper;
 import :app;
+import :msg.store;
 
 using namespace Qt::Literals::StringLiterals;
 
@@ -20,7 +21,9 @@ namespace waywallen
 // WallpaperListQuery
 // ---------------------------------------------------------------------------
 
-WallpaperListQuery::WallpaperListQuery(QObject* parent): Query(parent) {
+WallpaperListQuery::WallpaperListQuery(QObject* parent)
+    : Query(parent), m_model(new model::WallpaperListModel(this)) {
+    m_model->set_store(m_model, AppStore::instance()->wallpapers);
     connect_requet_reload(&WallpaperListQuery::wpTypeChanged);
 }
 
@@ -33,6 +36,7 @@ void WallpaperListQuery::setWpType(const QString& v) {
 }
 
 auto WallpaperListQuery::wallpapers() const -> const QVariantList& { return m_wallpapers; }
+auto WallpaperListQuery::model() const -> model::WallpaperListModel* { return m_model; }
 
 void WallpaperListQuery::reload() {
     setStatus(Status::Querying);
@@ -49,9 +53,14 @@ void WallpaperListQuery::reload() {
         co_await asio::post(asio::bind_executor(self->get_executor(), use_task));
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
-            auto&        list_rsp = rsp.wallpaperList();
-            QVariantList items;
+            auto&                       list_rsp = rsp.wallpaperList();
+            std::vector<model::Wallpaper> items;
+            QVariantList                legacy;
+            items.reserve(list_rsp.wallpapers().size());
+            legacy.reserve(list_rsp.wallpapers().size());
             for (const auto& wp : list_rsp.wallpapers()) {
+                items.push_back(wp);
+
                 QVariantMap m;
                 m[u"id"_s]       = wp.id_proto();
                 m[u"name"_s]     = wp.name();
@@ -62,9 +71,10 @@ void WallpaperListQuery::reload() {
                 m[u"width"_s]    = wp.width();
                 m[u"height"_s]   = wp.height();
                 m[u"format"_s]   = wp.format();
-                items.append(m);
+                legacy.append(m);
             }
-            self->m_wallpapers = std::move(items);
+            self->m_model->sync(items);
+            self->m_wallpapers = std::move(legacy);
             Q_EMIT self->wallpapersChanged();
         });
         co_return;
