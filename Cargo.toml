@@ -1,5 +1,6 @@
 [workspace]
 members = [".", "tools/wayproto-gen", "displays/layer-shell"]
+default-members = [".", "displays/layer-shell"]
 
 [package]
 name = "waywallen"
