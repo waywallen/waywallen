@@ -11,7 +11,7 @@ export import :query.query;
 namespace waywallen
 {
 
-export class HealthQuery : public Query, public QueryExtra<HealthQuery> {
+export class HealthQuery : public Query, public QueryExtra<control::v1::Response, HealthQuery> {
     Q_OBJECT
     QML_ELEMENT
 

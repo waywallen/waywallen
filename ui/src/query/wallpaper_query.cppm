@@ -39,7 +39,7 @@ private:
     qint32  m_total { 0 };
 };
 
-export class WallpaperScanQuery : public Query, public QueryExtra<WallpaperScanQuery> {
+export class WallpaperScanQuery : public Query, public QueryExtra<control::v1::Response, WallpaperScanQuery> {
     Q_OBJECT
     QML_ELEMENT
 
@@ -58,7 +58,7 @@ private:
     quint32 m_count { 0 };
 };
 
-export class WallpaperApplyQuery : public Query, public QueryExtra<WallpaperApplyQuery> {
+export class WallpaperApplyQuery : public Query, public QueryExtra<control::v1::Response, WallpaperApplyQuery> {
     Q_OBJECT
     QML_ELEMENT
 

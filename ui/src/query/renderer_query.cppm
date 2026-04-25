@@ -11,7 +11,7 @@ export import :query.query;
 namespace waywallen
 {
 
-export class RendererListQuery : public Query, public QueryExtra<RendererListQuery> {
+export class RendererListQuery : public Query, public QueryExtra<control::v1::Response, RendererListQuery> {
     Q_OBJECT
     QML_ELEMENT
 
@@ -34,7 +34,7 @@ private:
     QVariantList m_instances;
 };
 
-export class RendererPluginListQuery : public Query, public QueryExtra<RendererPluginListQuery> {
+export class RendererPluginListQuery : public Query, public QueryExtra<control::v1::Response, RendererPluginListQuery> {
     Q_OBJECT
     QML_ELEMENT
 
@@ -57,7 +57,7 @@ private:
     QStringList  m_supported_types;
 };
 
-export class RendererKillQuery : public Query, public QueryExtra<RendererKillQuery> {
+export class RendererKillQuery : public Query, public QueryExtra<control::v1::Response, RendererKillQuery> {
     Q_OBJECT
     QML_ELEMENT
 
