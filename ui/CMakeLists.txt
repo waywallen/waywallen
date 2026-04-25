@@ -63,6 +63,8 @@ set(SOURCES_NO_MOC
   src/library.cpp
   src/notify.cpp
   src/renderer.cpp
+  src/msg/store.cpp
+  src/model/store_item.cpp
   src/query/query.cpp
   src/query/wallpaper_query.cpp
   src/query/renderer_query.cpp
@@ -85,6 +87,8 @@ set(MOC_SOURCE_FILES
   src/library.cppm
   src/notify.cppm
   src/renderer.cppm
+  src/msg/store.cppm
+  src/model/store_item.cppm
   src/query/query.cppm
   src/query/wallpaper_query.cppm
   src/query/renderer_query.cppm
@@ -96,6 +100,8 @@ set(MOC_SOURCE_FILES
 set(MODULES
     src/mod.cppm
     src/proto.cppm
+    src/model/share_store.cppm
+    src/msg/backend_msg.cppm
     src/query/mod.cppm
 )
 

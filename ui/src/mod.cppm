@@ -8,4 +8,6 @@ export import :display;
 export import :library;
 export import :notify;
 export import :renderer;
+export import :msg.store;
+export import :model.store_item;
 export import :query;
