@@ -419,8 +419,18 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
                 mgr.list_by_type(&r.wp_type)
             };
 
+            let total = raw_entries.len() as u32;
+            let offset = r.offset as usize;
+            let take = if r.limit == 0 {
+                raw_entries.len().saturating_sub(offset)
+            } else {
+                r.limit as usize
+            };
+
             let entries: Vec<pb::WallpaperEntry> = raw_entries
                 .into_iter()
+                .skip(offset)
+                .take(take)
                 .map(|e| {
                     let db_meta = crate::model::sync::relative_under_root(
                         &e.library_root,
@@ -430,12 +440,12 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
                     entry_to_pb(e, db_meta)
                 })
                 .collect();
-            let count = entries.len() as u32;
+
             ok(
                 rid,
                 Res::WallpaperList(pb::WallpaperListResponse {
                     wallpapers: entries,
-                    count,
+                    count: total,
                 }),
             )
         }

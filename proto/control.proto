@@ -176,9 +176,14 @@ message WallpaperEntry {
 
 message WallpaperListRequest {
   string wp_type = 1; // empty = all
+  // Pagination. limit = 0 means "no pagination, return everything starting at offset".
+  uint32 offset = 2;
+  uint32 limit = 3;
 }
 message WallpaperListResponse {
   repeated WallpaperEntry wallpapers = 1;
+  // Total number of entries matching wp_type, ignoring offset/limit. Allows the
+  // client to know when it has fetched the last page.
   uint32 count = 2;
 }
 
