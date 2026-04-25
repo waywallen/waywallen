@@ -18,6 +18,7 @@ use anyhow::{Context, Result};
 use sea_orm::DatabaseConnection;
 
 use super::repo::{self, ItemUpsertArgs};
+use crate::media_probe::MediaProbe;
 use crate::wallpaper_type::WallpaperEntry;
 
 #[derive(Debug, Clone)]
@@ -49,6 +50,7 @@ pub async fn sync_plugin_entries(
     plugin: PluginRef<'_>,
     entries: &[WallpaperEntry],
     protected_libraries: &[String],
+    probe: &dyn MediaProbe,
 ) -> Result<(SyncSummary, super::entities::source_plugin::Model)> {
     let plugin_model = repo::upsert_plugin(db, plugin.name, plugin.version)
         .await
@@ -122,6 +124,29 @@ pub async fn sync_plugin_entries(
                 .as_deref()
                 .and_then(|abs| relative_under_root(lib_path, abs))
                 .filter(|s| !s.is_empty());
+
+            // If plugin supplied any media field, trust it entirely.
+            // Otherwise probe the resource path.
+            let (size, width, height, format_str) =
+                if entry.size.is_some() || entry.width.is_some()
+                    || entry.height.is_some() || entry.format.is_some()
+                {
+                    (
+                        entry.size,
+                        entry.width.and_then(|v| i32::try_from(v).ok()),
+                        entry.height.and_then(|v| i32::try_from(v).ok()),
+                        entry.format.clone(),
+                    )
+                } else {
+                    let md = probe.probe(&entry.resource);
+                    (
+                        md.size,
+                        md.width.and_then(|v| i32::try_from(v).ok()),
+                        md.height.and_then(|v| i32::try_from(v).ok()),
+                        md.format,
+                    )
+                };
+
             let persisted = repo::upsert_item(
                 db,
                 ItemUpsertArgs {
@@ -133,6 +158,10 @@ pub async fn sync_plugin_entries(
                     preview_path: preview_rel.as_deref(),
                     description: entry.description.as_deref(),
                     external_id: entry.external_id.as_deref(),
+                    size,
+                    width,
+                    height,
+                    format: format_str.as_deref(),
                 },
             )
             .await?;
@@ -171,7 +200,28 @@ fn relative_under_root(root: &str, resource: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::media_probe::MediaMetadata;
     use crate::model::connect_url;
+
+    struct NoOpProbe;
+    impl MediaProbe for NoOpProbe {
+        fn probe(&self, _path: &str) -> MediaMetadata {
+            MediaMetadata::default()
+        }
+    }
+
+    struct FakeProbe {
+        meta: MediaMetadata,
+    }
+    impl MediaProbe for FakeProbe {
+        fn probe(&self, _path: &str) -> MediaMetadata {
+            self.meta.clone()
+        }
+    }
+
+    fn nop() -> NoOpProbe {
+        NoOpProbe
+    }
 
     fn entry(
         plugin_name: &str,
@@ -191,6 +241,10 @@ mod tests {
             description: None,
             tags: Vec::new(),
             external_id: None,
+            size: None,
+            width: None,
+            height: None,
+            format: None,
         }
     }
 
@@ -216,6 +270,7 @@ mod tests {
             PluginRef { name: "image", version: "0.1" },
             &entries,
             &[],
+            &nop(),
         )
         .await
         .unwrap();
@@ -235,7 +290,7 @@ mod tests {
         let db = mem_db().await;
         let mut e = entry("p", "/ws", "/ws/12345/scene.pkg", "scene");
         e.preview = Some("/ws/12345/preview.gif".into());
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[], &nop())
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -249,7 +304,7 @@ mod tests {
         let db = mem_db().await;
         let mut e = entry("p", "/root", "/root/a.png", "image");
         e.preview = Some("/elsewhere/thumb.png".into());
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[], &nop())
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -264,7 +319,7 @@ mod tests {
             entry("p", "/root", "/root/ok.png", "image"),
             entry("p", "/root", "/elsewhere/bad.png", "image"),
         ];
-        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[])
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[], &nop())
                 .await
                 .unwrap();
         assert_eq!(summary.items_upserted, 1);
@@ -275,7 +330,7 @@ mod tests {
     async fn type_is_normalized_lowercase() {
         let db = mem_db().await;
         let entries = [entry("p", "/r", "/r/a.png", "Scene")];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[], &nop())
             .await
             .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
@@ -299,12 +354,17 @@ mod tests {
             description: Some("rain and music".to_owned()),
             tags: vec!["Nature".to_owned(), "relaxing".to_owned()],
             external_id: Some("12345".to_owned()),
+            size: None,
+            width: None,
+            height: None,
+            format: None,
         };
         let _ = sync_plugin_entries(
             &db,
             PluginRef { name: "wallpaper_engine", version: "0.2.0" },
             &[we],
             &[],
+            &nop(),
         )
         .await
         .unwrap();
@@ -331,7 +391,7 @@ mod tests {
             e
         };
         let entries = [mk("a.png", "Anime"), mk("b.png", "anime"), mk("c.png", "ANIME")];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &entries, &[], &nop())
             .await
             .unwrap();
         assert_eq!(repo::list_tags(&db).await.unwrap().len(), 1);
@@ -342,13 +402,13 @@ mod tests {
         let db = mem_db().await;
         let mut first = entry("p", "/r", "/r/a.png", "image");
         first.tags = vec!["Anime".into(), "Nature".into()];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[first], &[])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[first], &[], &nop())
             .await
             .unwrap();
 
         let mut second = entry("p", "/r", "/r/a.png", "image");
         second.tags = vec!["Game".into()];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[second], &[])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[second], &[], &nop())
             .await
             .unwrap();
 
@@ -367,12 +427,12 @@ mod tests {
             entry("p", "/a", "/a/y.png", "image"),
             entry("p", "/b", "/b/z.png", "image"),
         ];
-        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &first, &[])
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &first, &[], &nop())
             .await
             .unwrap();
 
         let second = [entry("p", "/a", "/a/x.png", "image")];
-        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &second, &[])
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "1" }, &second, &[], &nop())
                 .await
                 .unwrap();
         assert_eq!(summary.items_upserted, 1);
@@ -388,12 +448,66 @@ mod tests {
             PluginRef { name: "p", version: "" },
             &[entry("p", "/one", "/one/x.png", "image")],
             &[],
+            &nop(),
         )
         .await
         .unwrap();
-        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[], &[])
+        let (summary, _) = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[], &[], &nop())
                 .await
                 .unwrap();
         assert_eq!(summary.libraries_deleted, 1);
+    }
+
+    #[tokio::test]
+    async fn media_meta_probed_when_entry_lacks_it() {
+        let db = mem_db().await;
+        let e = entry("p", "/r", "/r/a.mp4", "video");
+        let probe = FakeProbe {
+            meta: MediaMetadata {
+                size: Some(99),
+                width: Some(640),
+                height: Some(480),
+                format: Some("fake".to_owned()),
+            },
+        };
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[], &probe)
+            .await
+            .unwrap();
+        let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
+        let items = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
+        let it = &items[0];
+        assert_eq!(it.size, Some(99));
+        assert_eq!(it.width, Some(640));
+        assert_eq!(it.height, Some(480));
+        assert_eq!(it.format.as_deref(), Some("fake"));
+    }
+
+    #[tokio::test]
+    async fn plugin_provided_media_meta_preserved() {
+        let db = mem_db().await;
+        // Entry has width and height set by plugin; size and format absent.
+        let mut e = entry("p", "/r", "/r/b.mp4", "video");
+        e.width = Some(1920);
+        e.height = Some(1080);
+        // Probe would return different values if consulted.
+        let probe = FakeProbe {
+            meta: MediaMetadata {
+                size: Some(42),
+                width: Some(999),
+                height: Some(999),
+                format: Some("FAKE".to_owned()),
+            },
+        };
+        let _ = sync_plugin_entries(&db, PluginRef { name: "p", version: "" }, &[e], &[], &probe)
+            .await
+            .unwrap();
+        let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
+        let items = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
+        let it = &items[0];
+        // Plugin-provided fields preserved exactly; probe not consulted.
+        assert_eq!(it.width, Some(1920));
+        assert_eq!(it.height, Some(1080));
+        assert_eq!(it.size, None);
+        assert_eq!(it.format, None);
     }
 }

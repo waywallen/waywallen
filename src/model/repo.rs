@@ -179,6 +179,10 @@ pub struct ItemUpsertArgs<'a> {
     pub preview_path: Option<&'a str>,
     pub description: Option<&'a str>,
     pub external_id: Option<&'a str>,
+    pub size: Option<i64>,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub format: Option<&'a str>,
 }
 
 /// Upsert an item keyed by `(library_id, path)`. Every non-key column
@@ -198,6 +202,10 @@ pub async fn upsert_item(
         preview_path: Set(args.preview_path.map(str::to_owned)),
         description: Set(args.description.map(str::to_owned)),
         external_id: Set(args.external_id.map(str::to_owned)),
+        size: Set(args.size),
+        width: Set(args.width),
+        height: Set(args.height),
+        format: Set(args.format.map(str::to_owned)),
         ..Default::default()
     };
     item::Entity::insert(am)
@@ -210,6 +218,10 @@ pub async fn upsert_item(
                     item::Column::PreviewPath,
                     item::Column::Description,
                     item::Column::ExternalId,
+                    item::Column::Size,
+                    item::Column::Width,
+                    item::Column::Height,
+                    item::Column::Format,
                 ])
                 .to_owned(),
         )
@@ -401,6 +413,10 @@ mod tests {
             preview_path: None,
             description: None,
             external_id: None,
+            size: None,
+            width: None,
+            height: None,
+            format: None,
         }
     }
 
@@ -439,6 +455,10 @@ mod tests {
                 preview_path: Some("thumb.jpg"),
                 description: Some("desc"),
                 external_id: Some("wk-1"),
+                size: None,
+                width: None,
+                height: None,
+                format: None,
             },
         )
         .await
@@ -467,6 +487,10 @@ mod tests {
                 preview_path: None,
                 description: None,
                 external_id: None,
+                size: None,
+                width: None,
+                height: None,
+                format: None,
             },
         )
         .await
@@ -482,6 +506,10 @@ mod tests {
                 preview_path: Some("new/preview.png"),
                 description: Some("now animated"),
                 external_id: Some("ext-42"),
+                size: None,
+                width: None,
+                height: None,
+                format: None,
             },
         )
         .await
@@ -491,6 +519,60 @@ mod tests {
         assert_eq!(updated.preview_path.as_deref(), Some("new/preview.png"));
         assert_eq!(updated.description.as_deref(), Some("now animated"));
         assert_eq!(updated.external_id.as_deref(), Some("ext-42"));
+    }
+
+    #[tokio::test]
+    async fn upsert_item_persists_media_meta() {
+        let db = mem_db().await;
+        let p = upsert_plugin(&db, "p", "").await.unwrap();
+        let lib = add_library(&db, p.id, "/root").await.unwrap();
+        let first = upsert_item(
+            &db,
+            ItemUpsertArgs {
+                plugin_id: p.id,
+                library_id: lib.id,
+                path: "video.mkv",
+                ty: "video",
+                display_name: "v",
+                preview_path: None,
+                description: None,
+                external_id: None,
+                size: Some(123_456),
+                width: Some(1920),
+                height: Some(1080),
+                format: Some("matroska,webm"),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(first.size, Some(123_456));
+        assert_eq!(first.width, Some(1920));
+        assert_eq!(first.height, Some(1080));
+        assert_eq!(first.format.as_deref(), Some("matroska,webm"));
+
+        let second = upsert_item(
+            &db,
+            ItemUpsertArgs {
+                plugin_id: p.id,
+                library_id: lib.id,
+                path: "video.mkv",
+                ty: "video",
+                display_name: "v",
+                preview_path: None,
+                description: None,
+                external_id: None,
+                size: None,
+                width: None,
+                height: None,
+                format: None,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(second.size, None);
+        assert_eq!(second.width, None);
+        assert_eq!(second.height, None);
+        assert_eq!(second.format, None);
     }
 
     #[tokio::test]

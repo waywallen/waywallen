@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 
+use media_probe::{AvFormatProbe, MediaProbe};
+
 mod control;
 mod control_proto;
 mod dbus_iface;
@@ -10,6 +12,7 @@ mod display_endpoint;
 mod display_proto;
 mod display_spawner;
 mod ipc;
+mod media_probe;
 mod model;
 mod plugin;
 mod renderer_manager;
@@ -41,6 +44,9 @@ pub struct AppState {
     /// Background task supervisor. Used to off-load startup scanning,
     /// DB sync, and similar work so `async_main` stays responsive.
     pub tasks: Arc<tasks::TaskManager>,
+    /// Shared media probe. Constructed once at startup; reused by both
+    /// SourceManager and the sync layer so dlopen happens at most once.
+    pub probe: Arc<dyn MediaProbe>,
 }
 
 impl AppState {
@@ -204,13 +210,17 @@ async fn async_main() -> anyhow::Result<()> {
         }
     }
 
+    // Shared media probe — constructed once, reused by SourceManager
+    // and the sync layer so libavformat is dlopen-ed at most once.
+    let probe = Arc::new(AvFormatProbe::new()) as Arc<dyn MediaProbe>;
+
     // Source management: create an empty manager now, defer loading
     // the Lua plugins + scanning their directories to a background
     // task. A cold scan over a large image library is easily seconds
     // of synchronous filesystem work; keeping it on the startup hot
     // path means UDS/WS/DBus/layer-shell spawn all wait on it.
     let source_mgr = Arc::new(tokio::sync::Mutex::new(
-        plugin::source_manager::SourceManager::new()
+        plugin::source_manager::SourceManager::with_probe(probe.clone())
             .expect("failed to create source manager"),
     ));
 
@@ -239,6 +249,7 @@ async fn async_main() -> anyhow::Result<()> {
         ui_path: std::sync::Mutex::new(None),
         shutdown: shutdown_tx,
         tasks: task_mgr.clone(),
+        probe: probe.clone(),
     });
 
     // Off-load source-plugin loading + scanning + DB sync + initial

@@ -351,6 +351,7 @@ pub async fn refresh_sources(app: &Arc<AppState>) -> Result<usize> {
             sync::PluginRef { name: &info.name, version: &info.version },
             &entries,
             &protected,
+            &*app.probe,
         )
         .await
         {

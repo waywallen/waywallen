@@ -2,7 +2,9 @@ use anyhow::Result;
 use mlua::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::Arc;
 
+use crate::media_probe::{AvFormatProbe, MediaProbe};
 use crate::wallpaper_type::{WallpaperEntry, WallpaperType};
 
 // ---------------------------------------------------------------------------
@@ -28,6 +30,8 @@ pub struct SourceManager {
     entries: Vec<WallpaperEntry>,
     /// Index: wp_type → indices into `entries`.
     by_type: HashMap<WallpaperType, Vec<usize>>,
+    /// Shared media probe exposed to Lua via ctx.probe(path).
+    probe: Arc<dyn MediaProbe>,
 }
 
 // mlua with the `send` feature makes Lua: Send.
@@ -41,12 +45,17 @@ const _: () = {
 
 impl SourceManager {
     pub fn new() -> Result<Self> {
+        Self::with_probe(Arc::new(AvFormatProbe::new()))
+    }
+
+    pub fn with_probe(probe: Arc<dyn MediaProbe>) -> Result<Self> {
         let lua = Lua::new();
         Ok(Self {
             lua,
             plugins: HashMap::new(),
             entries: Vec::new(),
             by_type: HashMap::new(),
+            probe,
         })
     }
 
@@ -152,6 +161,10 @@ impl SourceManager {
                 description: tbl.get::<String>("description").ok(),
                 tags: tbl.get::<Vec<String>>("tags").unwrap_or_default(),
                 external_id: tbl.get::<String>("external_id").ok(),
+                size: None,
+                width: None,
+                height: None,
+                format: None,
             };
             let idx = self.entries.len();
             self.by_type
@@ -281,6 +294,23 @@ impl SourceManager {
             Ok(())
         })?;
         ctx.set("log", log_fn)?;
+
+        // ctx.probe(path) -> table|nil
+        // Returns a table with present media fields, or nil if all fields are None.
+        let probe_arc = Arc::clone(&self.probe);
+        let probe_fn = self.lua.create_function(move |lua, path: String| {
+            let md = probe_arc.probe(&path);
+            if md.size.is_none() && md.width.is_none() && md.height.is_none() && md.format.is_none() {
+                return Ok(mlua::Value::Nil);
+            }
+            let tbl = lua.create_table()?;
+            if let Some(v) = md.size { tbl.set("size", v)?; }
+            if let Some(v) = md.width { tbl.set("width", v)?; }
+            if let Some(v) = md.height { tbl.set("height", v)?; }
+            if let Some(v) = md.format { tbl.set("format", v)?; }
+            Ok(mlua::Value::Table(tbl))
+        })?;
+        ctx.set("probe", probe_fn)?;
 
         Ok(ctx)
     }
@@ -415,7 +445,71 @@ fn json_to_lua(lua: &Lua, val: &serde_json::Value) -> LuaResult<LuaValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::media_probe::{MediaMetadata, MediaProbe};
     use std::io::Write;
+
+    struct FakeProbe {
+        meta: MediaMetadata,
+    }
+    impl MediaProbe for FakeProbe {
+        fn probe(&self, _path: &str) -> MediaMetadata {
+            self.meta.clone()
+        }
+    }
+
+    #[test]
+    fn ctx_probe_callable_from_lua() {
+        let probe = Arc::new(FakeProbe {
+            meta: MediaMetadata {
+                size: Some(1234),
+                width: Some(1920),
+                height: Some(1080),
+                format: Some("matroska,webm".to_owned()),
+            },
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let plugin_path = dir.path().join("probe_test.lua");
+        let mut f = std::fs::File::create(&plugin_path).unwrap();
+        write!(
+            f,
+            r#"
+local M = {{}}
+function M.info()
+    return {{ name = "probe_test", types = {{"video"}}, version = "1.0" }}
+end
+function M.scan(ctx)
+    local m = ctx.probe("/fake/path/video.mp4")
+    if m == nil then error("probe returned nil") end
+    return {{
+        {{
+            id = "v1",
+            name = "Video",
+            wp_type = "video",
+            resource = "/lib/v1.mp4",
+            library_root = "/lib",
+            metadata = {{}},
+            _probe_size = m.size,
+            _probe_width = m.width,
+            _probe_height = m.height,
+            _probe_format = m.format,
+        }},
+    }}
+end
+return M
+"#
+        )
+        .unwrap();
+
+        let mut mgr = SourceManager::with_probe(probe as Arc<dyn MediaProbe>).unwrap();
+        mgr.load_plugin(&plugin_path).unwrap();
+        mgr.scan_all(&HashMap::new()).unwrap();
+
+        let entries = mgr.list();
+        assert_eq!(entries.len(), 1);
+        // The Lua plugin called ctx.probe successfully (it would error() otherwise).
+        // Verify the entry was emitted correctly.
+        assert_eq!(entries[0].id, "v1");
+    }
 
     #[test]
     fn test_load_and_scan_plugin() {

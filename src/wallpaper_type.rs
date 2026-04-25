@@ -32,6 +32,18 @@ pub struct WallpaperEntry {
     /// Stable external identifier (e.g. Wallpaper Engine `workshopid`).
     #[serde(default)]
     pub external_id: Option<String>,
+    /// File size in bytes.
+    #[serde(default)]
+    pub size: Option<i64>,
+    /// Primary video stream width in pixels.
+    #[serde(default)]
+    pub width: Option<u32>,
+    /// Primary video stream height in pixels.
+    #[serde(default)]
+    pub height: Option<u32>,
+    /// Media format string (e.g. "matroska,webm", "image2").
+    #[serde(default)]
+    pub format: Option<String>,
     /// Name of the source plugin that produced this entry. Written by
     /// `SourceManager::scan_plugin` — Lua plugins do not set it
     /// themselves. Defaults to empty so deserializing older snapshots

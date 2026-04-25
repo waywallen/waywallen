@@ -32,6 +32,7 @@ ash = "0.38"
 toml = "0.8"
 glob = "0.3"
 mlua = { version = "0.10", features = ["lua54", "vendored", "send"] }
+libloading = "0.8"
 zbus = { version = "4", default-features = false, features = ["tokio"] }
 sea-orm = { version = "1.1", default-features = false, features = [
     "macros",
