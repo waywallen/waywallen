@@ -66,6 +66,9 @@ async fn handle_conn(
     // Subscribe to process-wide events (scan lifecycle etc.). Lag here
     // is non-fatal — UI re-fetches on the next event.
     let mut global_rx = state.events.subscribe();
+    // Task-lifecycle events feed into `StatusSync` (active task count
+    // is one of its fields). Lag is non-fatal; the next push corrects.
+    let mut task_rx = state.tasks.subscribe();
     {
         let snap = state.router.snapshot_displays().await;
         let evt = displays_replace_event(snap);
@@ -82,6 +85,9 @@ async fn handle_conn(
         let evt = libraries_replace_event(snap);
         sink.send(Message::Binary(wrap_event(evt).encode_to_vec())).await?;
     }
+    // Initial daemon-status snapshot. Same wire shape as subsequent
+    // pushes so the UI handler is uniform.
+    sink.send(Message::Binary(wrap_event(status_sync_event(&state)).encode_to_vec())).await?;
 
     loop {
         tokio::select! {
@@ -114,14 +120,33 @@ async fn handle_conn(
                         if let Some(pe) = global_event_to_pb(&e) {
                             sink.send(Message::Binary(wrap_event(pe).encode_to_vec())).await?;
                         }
+                        if matches!(e, GlobalEvent::StatusChanged) {
+                            sink.send(Message::Binary(wrap_event(status_sync_event(&state)).encode_to_vec())).await?;
+                        }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         log::warn!("ws {peer}: global event lag {n}");
+                        // Resync after lag — the snapshot is the
+                        // authority, transient events were the lossy
+                        // notifications.
+                        sink.send(Message::Binary(wrap_event(status_sync_event(&state)).encode_to_vec())).await?;
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                         // Daemon shutting down — let the router-event
                         // arm or the request arm break us out cleanly.
                     }
+                }
+            }
+            tevt = task_rx.recv() => {
+                match tevt {
+                    Ok(_) => {
+                        sink.send(Message::Binary(wrap_event(status_sync_event(&state)).encode_to_vec())).await?;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("ws {peer}: task event lag {n}");
+                        sink.send(Message::Binary(wrap_event(status_sync_event(&state)).encode_to_vec())).await?;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {}
                 }
             }
             evt = events_rx.recv() => {
@@ -275,6 +300,27 @@ fn router_event_to_pb(e: RouterEvent) -> pb::Event {
     }
 }
 
+/// Snapshot daemon-side runtime state into a `StatusSync` server event.
+/// Pushed on WS connect, on every `GlobalEvent::StatusChanged`, and on
+/// any `TaskEvent`. Authoritative — the UI binds to its fields rather
+/// than counting transient start/end events.
+fn status_sync_event(state: &Arc<AppState>) -> pb::Event {
+    use std::sync::atomic::Ordering;
+    let scan_in_progress = state.scan_in_progress.load(Ordering::SeqCst);
+    let active_task_count = state
+        .tasks
+        .list()
+        .into_iter()
+        .filter(|r| matches!(r.state, tasks::TaskState::Running))
+        .count() as u32;
+    pb::Event {
+        payload: Some(pb::event::Payload::StatusSync(pb::StatusSync {
+            scan_in_progress,
+            active_task_count,
+        })),
+    }
+}
+
 /// Translate the subset of `GlobalEvent` variants the UI cares about
 /// into wire `pb::Event`s. Returns `None` for events that are
 /// daemon-internal (boot phase markers, restore lifecycle).
@@ -301,10 +347,16 @@ fn global_event_to_pb(e: &GlobalEvent) -> Option<pb::Event> {
                 },
             )),
         }),
+        GlobalEvent::LibrariesAdded { paths } => Some(pb::Event {
+            payload: Some(pb::event::Payload::LibrariesAdded(pb::LibrariesAdded {
+                paths: paths.clone(),
+            })),
+        }),
         GlobalEvent::SourcesReady
         | GlobalEvent::DisplayReady
         | GlobalEvent::RestoreApplied(_)
-        | GlobalEvent::RestoreFailed(_) => None,
+        | GlobalEvent::RestoreFailed(_)
+        | GlobalEvent::StatusChanged => None,
     }
 }
 
@@ -771,7 +823,11 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
                         path: lib.path,
                         plugin_name: r.plugin_name,
                     };
+                    let added_path = snap.path.clone();
                     state.router.upsert_library(snap);
+                    state.events.publish(GlobalEvent::LibrariesAdded {
+                        paths: vec![added_path],
+                    });
                     // Rescan so the new library's items flow into the
                     // in-memory snapshot + DB without waiting for the
                     // next daemon restart. Shares `"scan/refresh"`

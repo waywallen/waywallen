@@ -49,6 +49,11 @@ pub struct AppState {
     /// notifications about restore success/failure.
     pub events: events::EventBus,
     pub ws_port: std::sync::atomic::AtomicU16,
+    /// True while `control::refresh_sources` is between `ScanStarted`
+    /// and `ScanCompleted`/`ScanFailed`. Snapshotted into the
+    /// `StatusSync` server event so the UI can show a spinner without
+    /// relying on transient start/end notifications.
+    pub scan_in_progress: std::sync::atomic::AtomicBool,
     pub ui_path: std::sync::Mutex<Option<PathBuf>>,
     /// Daemon-wide shutdown signal. Flips `false` → `true` exactly once.
     /// Every long-lived task (display endpoint, per-client loops, tray,
@@ -271,6 +276,7 @@ async fn async_main() -> anyhow::Result<()> {
         rotation: rotation_handle,
         events: events::EventBus::default(),
         ws_port: std::sync::atomic::AtomicU16::new(0),
+        scan_in_progress: std::sync::atomic::AtomicBool::new(false),
         ui_path: std::sync::Mutex::new(None),
         shutdown: shutdown_tx,
         tasks: task_mgr.clone(),

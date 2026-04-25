@@ -50,6 +50,17 @@ pub enum GlobalEvent {
     ScanCompleted { count: usize },
     /// A wallpaper rescan failed; the string is the formatted error.
     ScanFailed(String),
+    /// One or more libraries were just added — manually via
+    /// `LibraryAdd` (single path) or via `LibraryAutoDetect` (one or
+    /// more). UI mirrors this through `Notify` and surfaces a toast.
+    /// `paths` is the absolute library root list of the additions.
+    LibrariesAdded { paths: Vec<String> },
+    /// Some piece of daemon-side runtime state changed. Carries no
+    /// payload — receivers re-snapshot via the `StatusSync` builder
+    /// in `ws_server`. Used by the closed-loop UI status binding;
+    /// transient notifications (`ScanStarted`/`ScanCompleted`) are
+    /// for one-shot reactions like toasts.
+    StatusChanged,
 }
 
 pub struct EventBus {

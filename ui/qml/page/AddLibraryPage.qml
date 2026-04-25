@@ -16,10 +16,9 @@ MD.Page {
 
     W.LibraryAddQuery {
         id: addQuery
-        onFinished: {
-            W.Action.toast('Library Added')
-            MD.Util.closePopup(root.MD.MProp.page)
-        }
+        // Toast now fires globally from Window.qml on the daemon's
+        // `LibrariesAdded` event (mirrored via Notify).
+        onFinished: MD.Util.closePopup(root.MD.MProp.page)
     }
 
     MD.ButtonGroup {

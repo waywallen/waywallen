@@ -513,6 +513,12 @@ pub async fn auto_detect_libraries(
     }
 
     if !added.is_empty() {
+        app.events.publish(crate::events::GlobalEvent::LibrariesAdded {
+            paths: added.iter().map(|s| s.path.clone()).collect(),
+        });
+    }
+
+    if !added.is_empty() {
         let app_clone = app.clone();
         tokio::spawn(async move {
             if let Err(e) = refresh_sources(&app_clone).await {
@@ -582,9 +588,14 @@ pub async fn libraries_by_plugin_name(
 /// from `LibraryAdd` / `LibraryRemove` so the in-memory snapshot and
 /// DB stay consistent with the user-managed library list.
 pub async fn refresh_sources(app: &Arc<AppState>) -> Result<usize> {
+    use std::sync::atomic::Ordering;
+    app.scan_in_progress.store(true, Ordering::SeqCst);
     app.events.publish(crate::events::GlobalEvent::ScanStarted);
+    app.events.publish(crate::events::GlobalEvent::StatusChanged);
 
     let result = refresh_sources_inner(app).await;
+
+    app.scan_in_progress.store(false, Ordering::SeqCst);
     match &result {
         Ok(count) => app
             .events
@@ -593,6 +604,7 @@ pub async fn refresh_sources(app: &Arc<AppState>) -> Result<usize> {
             .events
             .publish(crate::events::GlobalEvent::ScanFailed(format!("{e:#}"))),
     }
+    app.events.publish(crate::events::GlobalEvent::StatusChanged);
     result
 }
 

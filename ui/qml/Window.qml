@@ -70,6 +70,17 @@ MD.ApplicationWindow {
         }
     }
 
+    // Global daemon-event toasts. Notify mirrors `GlobalEvent` from the
+    // daemon; library additions surface here so the toast fires no
+    // matter which page triggered the add (manual vs auto-detect).
+    Connections {
+        target: W.Notify
+        function onLibrariesAdded(paths) {
+            const n = paths.length;
+            W.Action.toast(n === 1 ? "Library added" : (n + " libraries added"));
+        }
+    }
+
     MD.Popup {
         id: m_disconnect_overlay
         visible: !W.DaemonDBusClient.daemonAvailable

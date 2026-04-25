@@ -26,6 +26,15 @@ export class Notify : public QObject {
     QML_ELEMENT
     QML_SINGLETON
 
+    /// Mirrors `StatusSync.scan_in_progress`. Bind QML directly to
+    /// this property — no need to count `wallpaperScanStarted`/
+    /// `wallpaperScanCompleted` transitions, which can be lost on lag
+    /// or late connect.
+    Q_PROPERTY(bool scanInProgress READ scanInProgress NOTIFY statusChanged FINAL)
+    /// Mirrors `StatusSync.active_task_count`. Number of TaskManager
+    /// tasks currently in `Running`.
+    Q_PROPERTY(quint32 activeTaskCount READ activeTaskCount NOTIFY statusChanged FINAL)
+
 public:
     Notify(QObject* parent);
     ~Notify() override;
@@ -36,6 +45,9 @@ public:
     static auto    instance() -> Notify*;
     static Notify* create(QQmlEngine*, QJSEngine*);
 
+    auto scanInProgress() const -> bool { return m_scan_in_progress; }
+    auto activeTaskCount() const -> quint32 { return m_active_task_count; }
+
 Q_SIGNALS:
     /// Daemon began a wallpaper rescan (`GlobalEvent::ScanStarted`).
     void wallpaperScanStarted();
@@ -44,6 +56,21 @@ Q_SIGNALS:
     /// total entry count after sync (0 on failure); `error` is empty
     /// on success, otherwise a one-line reason.
     void wallpaperScanCompleted(quint32 count, const QString& error);
+    /// Daemon added one or more libraries — manually via `LibraryAdd`
+    /// or via `LibraryAutoDetect`. `paths` is the absolute roots that
+    /// were just inserted. The matching `LibraryChanged` per-library
+    /// state events still drive the library list update; this is the
+    /// transient toast trigger.
+    void librariesAdded(const QStringList& paths);
+    /// Emitted whenever the daemon pushes a `StatusSync` snapshot
+    /// (initial connect + every change). The `scanInProgress` and
+    /// `activeTaskCount` properties already reflect the new values
+    /// when this fires.
+    void statusChanged();
+
+private:
+    bool    m_scan_in_progress { false };
+    quint32 m_active_task_count { 0 };
 };
 
 } // namespace waywallen

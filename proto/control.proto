@@ -316,7 +316,28 @@ message Event {
     LibraryRemoved         library_removed           = 9;
     WallpaperScanStarted   wallpaper_scan_started    = 10;
     WallpaperScanCompleted wallpaper_scan_completed  = 11;
+    LibrariesAdded         libraries_added           = 12;
+    StatusSync             status_sync               = 13;
   }
+}
+
+// Snapshot of daemon-side runtime state. Pushed on WS connect and on
+// every change that affects any field (scan transitions, task
+// lifecycle). Authoritative — start/end events are best-effort
+// notifications, but `StatusSync` is the field UI binds to for
+// closed-loop state (e.g. spinner visibility).
+message StatusSync {
+  // True while a wallpaper rescan (`refresh_sources`) is in flight.
+  bool scan_in_progress = 1;
+  // Count of TaskManager tasks currently in `Running` state.
+  uint32 active_task_count = 2;
+}
+
+// One or more libraries were just added — by `LibraryAdd` (one path)
+// or by `LibraryAutoDetect` (one or more). UI uses this for a toast;
+// the matching `LibraryChanged` events still drive list-state updates.
+message LibrariesAdded {
+  repeated string paths = 1;
 }
 
 // A wallpaper rescan has started on the daemon (manual via

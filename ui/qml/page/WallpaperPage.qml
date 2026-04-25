@@ -105,6 +105,11 @@ MD.Page {
                             MD.Action {
                                 icon.name: MD.Token.icon.refresh
                                 text: 'Refresh'
+                                // Disabled while a scan is in flight (the
+                                // daemon dedups `scan/refresh` anyway, but
+                                // this gives users immediate visual feedback
+                                // and avoids stacking ineffective triggers).
+                                enabled: !W.Notify.scanInProgress
                                 // Daemon answers immediately and pushes
                                 // completion via `WallpaperScanCompleted`,
                                 // which the `Connections` block on
@@ -113,6 +118,18 @@ MD.Page {
                             }
                         ]
                     }
+                }
+
+                // Horizontal scan-progress strip below the toolbar.
+                // Only shown when the grid has wallpapers to display
+                // (the empty-state path uses the centered BusyIndicator).
+                MD.LinearIndicator {
+                    Layout.fillWidth: true
+                    Layout.leftMargin: 16
+                    Layout.rightMargin: 16
+                    Layout.topMargin: 4
+                    visible: m_grid_view.count > 0 && W.Notify.scanInProgress
+                    running: visible
                 }
 
                 // Grid + centered empty-state overlay
@@ -153,15 +170,21 @@ MD.Page {
                         spacing: 16
                         visible: m_grid_view.count === 0
 
-                        MD.CircularIndicator {
+                        // Spin while either the list query is mid-flight,
+                        // or the daemon reports an in-progress scan via
+                        // `Notify.scanInProgress` (closed-loop StatusSync,
+                        // tolerates dropped start/end events).
+                        readonly property bool scanning: wallpaperQuery.querying || W.Notify.scanInProgress
+
+                        MD.BusyIndicator {
                             Layout.alignment: Qt.AlignHCenter
-                            visible: wallpaperQuery.querying
+                            visible: parent.scanning
                             running: visible
                         }
 
                         MD.Text {
                             Layout.alignment: Qt.AlignHCenter
-                            visible: !wallpaperQuery.querying
+                            visible: !parent.scanning
                             text: "No wallpapers found"
                             typescale: MD.Token.typescale.body_large
                             color: MD.Token.color.on_surface_variant
@@ -169,7 +192,7 @@ MD.Page {
 
                         MD.BusyButton {
                             Layout.alignment: Qt.AlignHCenter
-                            visible: !wallpaperQuery.querying
+                            visible: !parent.scanning
                             text: "Auto detect libraries"
                             busy: autoDetectQuery.querying
                             mdState.type: MD.Enum.BtFilledTonal
