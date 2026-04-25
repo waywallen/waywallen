@@ -7,5 +7,5 @@
 //! sites compile unchanged.
 
 pub use crate::ipc::generated::{
-    DecodeError, Event as EventMsg, Request as ControlMsg, PROTOCOL_NAME, PROTOCOL_VERSION,
+    Event as EventMsg, Request as ControlMsg,
 };

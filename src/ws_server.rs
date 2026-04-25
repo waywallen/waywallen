@@ -412,7 +412,7 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
             )
         }
 
-        Req::WallpaperScan(_) => match control::refresh_sources(&state).await {
+        Req::WallpaperScan(_) => match control::refresh_sources(state).await {
             Ok(count) => ok(
                 rid,
                 Res::WallpaperScan(pb::WallpaperScanResponse { count: count as u32 }),
@@ -663,7 +663,7 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
             }
         }
 
-        Req::LibraryAutoDetect(_) => match control::auto_detect_libraries(&state).await {
+        Req::LibraryAutoDetect(_) => match control::auto_detect_libraries(state).await {
             Ok(added) => ok(
                 rid,
                 Res::LibraryAutoDetect(pb::LibraryAutoDetectResponse {

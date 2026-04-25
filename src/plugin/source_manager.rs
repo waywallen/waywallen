@@ -370,10 +370,8 @@ impl SourceManager {
 fn parse_lua_string_map(tbl: &LuaTable, key: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     if let Ok(meta) = tbl.get::<LuaTable>(key) {
-        for pair in meta.pairs::<String, String>() {
-            if let Ok((k, v)) = pair {
-                map.insert(k, v);
-            }
+        for (k, v) in meta.pairs::<String, String>().flatten() {
+            map.insert(k, v);
         }
     }
     map

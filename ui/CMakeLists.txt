@@ -20,7 +20,7 @@ if(QT_KNOWN_POLICY_QTP0004)
   qt_policy(SET QTP0003 NEW)
   qt_policy(SET QTP0004 NEW)
 endif()
-set(QT_QML_GENERATE_QMLLS_INI ON)
+set(QT_QML_GENERATE_QMLLS_INI OFF)
 
 set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml_modules")
 set(QML_IMPORT_PATH
@@ -129,8 +129,6 @@ qt_add_qml_module(
   URI
   waywallen.ui
   STATIC
-  PLUGIN_TARGET
-  waywallen-qml
   DEPENDENCIES
   QtCore
   QtQuick
@@ -150,8 +148,7 @@ qt_add_qml_module(
   ${RESOURCES}
   NO_PLUGIN_OPTIONAL)
 
-target_sources(waywallen-qml PUBLIC FILE_SET CXX_MODULES FILES ${MODULES} ${MOC_SOURCE_FILES})
-target_sources(waywallen-qml PRIVATE ${SOURCES_NO_MOC})
+target_sources(waywallen-qml PRIVATE ${MODULES} ${MOC_SOURCE_FILES} ${SOURCES_NO_MOC})
 
 set_source_files_properties(
   "${CMAKE_CURRENT_BINARY_DIR}/waywallen-qml_qmltyperegistrations.cpp" TARGET_DIRECTORY

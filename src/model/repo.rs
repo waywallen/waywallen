@@ -1,11 +1,11 @@
 //! Typed CRUD helpers on top of the SeaORM entities.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use anyhow::{Context, Result};
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, DatabaseTransaction,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction,
     EntityTrait, QueryFilter, QueryOrder, Set, TransactionTrait,
 };
 
