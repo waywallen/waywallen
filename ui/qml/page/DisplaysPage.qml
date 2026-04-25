@@ -8,20 +8,24 @@ import waywallen.ui as W
 MD.Page {
     id: root
 
+    title: 'Displays'
+    showHeader: true
+    showBackground: false
     readonly property real displayGapPx: 80
 
     property var selectedId: null
-
-    W.DisplayListQuery {
-        id: displayQuery
-        Component.onCompleted: reload()
-    }
 
     function layoutRects() {
         const out = [];
         let x = 0;
         for (const d of W.App.displayManager.displays || []) {
-            out.push({ x: x, y: 0, w: d.width, h: d.height, d: d });
+            out.push({
+                x: x,
+                y: 0,
+                w: d.width,
+                h: d.height,
+                d: d
+            });
             x += d.width + root.displayGapPx;
         }
         return out;
@@ -31,19 +35,23 @@ MD.Page {
 
     readonly property real boundsW: {
         let max = 0;
-        for (const r of rects) max = Math.max(max, r.x + r.w);
+        for (const r of rects)
+            max = Math.max(max, r.x + r.w);
         return max || 1;
     }
     readonly property real boundsH: {
         let max = 0;
-        for (const r of rects) max = Math.max(max, r.y + r.h);
+        for (const r of rects)
+            max = Math.max(max, r.y + r.h);
         return max || 1;
     }
 
     function selectedDisplay() {
-        if (root.selectedId === null) return null;
+        if (root.selectedId === null)
+            return null;
         for (const d of W.App.displayManager.displays || []) {
-            if (d.id === root.selectedId) return d;
+            if (d.id === root.selectedId)
+                return d;
         }
         return null;
     }
@@ -52,155 +60,116 @@ MD.Page {
 
     ColumnLayout {
         anchors.fill: parent
-        spacing: 0
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
+        spacing: 16
 
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            Layout.topMargin: 12
-            Layout.bottomMargin: 8
-            spacing: 8
-
-            MD.Text {
-                text: "Displays"
-                typescale: MD.Token.typescale.title_large
-                color: MD.Token.color.on_surface
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Item {
-                Layout.preferredWidth: 40
-                Layout.preferredHeight: 40
-
-                MD.IconButton {
-                    anchors.fill: parent
-                    icon.name: MD.Token.icon.refresh
-                    enabled: !displayQuery.querying
-                    opacity: displayQuery.querying ? 0.0 : 1.0
-                    onClicked: displayQuery.reload()
-                }
-
-                MD.CircularIndicator {
-                    anchors.centerIn: parent
-                    width: 24
-                    height: 24
-                    visible: displayQuery.querying
-                    running: displayQuery.querying
-                }
-            }
-        }
-
-        Item {
-            id: canvas
+        MD.Pane {
+            id: displaysPane
             Layout.fillWidth: true
             Layout.fillHeight: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
+            leftPadding: 16
+            rightPadding: 16
+            radius: 16
+            backgroundColor: MD.MProp.color.surface
 
-            readonly property real padding: 24
-            readonly property real viewScale: {
-                const availW = Math.max(1, width - padding * 2);
-                const availH = Math.max(1, height - padding * 2);
-                return Math.min(availW / root.boundsW, availH / root.boundsH);
-            }
-            readonly property real offsetX: (width - root.boundsW * viewScale) / 2
-            readonly property real offsetY: (height - root.boundsH * viewScale) / 2
+            contentItem: Item {
+                id: canvas
+                implicitHeight: 48
 
-            MouseArea {
-                anchors.fill: parent
-                onClicked: root.selectedId = null
-            }
+                readonly property real padding: 24
+                readonly property real viewScale: {
+                    const availW = Math.max(1, width - padding * 2);
+                    const availH = Math.max(1, height - padding * 2);
+                    return Math.min(availW / root.boundsW, availH / root.boundsH);
+                }
+                readonly property real offsetX: (width - root.boundsW * viewScale) / 2
+                readonly property real offsetY: (height - root.boundsH * viewScale) / 2
 
-            MD.Text {
-                anchors.centerIn: parent
-                visible: (root.rects.length === 0)
-                text: displayQuery.querying ? "Loading…" : "No displays registered"
-                typescale: MD.Token.typescale.body_medium
-                color: MD.Token.color.on_surface_variant
-            }
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: root.selectedId = null
+                }
 
-            Repeater {
-                model: root.rects
+                MD.Text {
+                    anchors.centerIn: parent
+                    visible: (root.rects.length === 0)
+                    text: "No displays registered"
+                    typescale: MD.Token.typescale.body_medium
+                    color: MD.Token.color.on_surface_variant
+                }
 
-                delegate: Item {
-                    id: rectItem
-                    required property int index
-                    required property var modelData
+                Repeater {
+                    model: root.rects
 
-                    readonly property var d: modelData.d
-                    readonly property bool hasLink: (d.links && d.links.length > 0)
-                    readonly property bool isSelected: (root.selectedId === d.id)
+                    delegate: Item {
+                        id: rectItem
+                        required property int index
+                        required property var modelData
 
-                    x: canvas.offsetX + modelData.x * canvas.viewScale
-                    y: canvas.offsetY + modelData.y * canvas.viewScale
-                    width: modelData.w * canvas.viewScale
-                    height: modelData.h * canvas.viewScale
+                        readonly property var d: modelData.d
+                        readonly property bool hasLink: (d.links && d.links.length > 0)
+                        readonly property bool isSelected: (root.selectedId === d.id)
 
-                    Shape {
-                        anchors.fill: parent
-                        preferredRendererType: Shape.CurveRenderer
-                        antialiasing: true
+                        x: canvas.offsetX + modelData.x * canvas.viewScale
+                        y: canvas.offsetY + modelData.y * canvas.viewScale
+                        width: modelData.w * canvas.viewScale
+                        height: modelData.h * canvas.viewScale
 
-                        ShapePath {
-                            strokeColor: rectItem.isSelected
-                                         ? MD.Token.color.primary
-                                         : MD.Token.color.outline
-                            strokeWidth: rectItem.isSelected ? 3 : 1.5
-                            fillColor: rectItem.hasLink
-                                       ? MD.Token.color.primary_container
-                                       : MD.Token.color.surface_container_highest
-                            capStyle: ShapePath.RoundCap
-                            joinStyle: ShapePath.RoundJoin
+                        Shape {
+                            anchors.fill: parent
+                            preferredRendererType: Shape.CurveRenderer
+                            antialiasing: true
 
-                            PathRectangle {
-                                x: 0
-                                y: 0
-                                width: rectItem.width
-                                height: rectItem.height
-                                radius: 10
+                            ShapePath {
+                                strokeColor: rectItem.isSelected ? MD.Token.color.primary : MD.Token.color.outline
+                                strokeWidth: rectItem.isSelected ? 3 : 1.5
+                                fillColor: rectItem.hasLink ? MD.Token.color.primary_container : MD.Token.color.surface_container_highest
+                                capStyle: ShapePath.RoundCap
+                                joinStyle: ShapePath.RoundJoin
+
+                                PathRectangle {
+                                    x: 0
+                                    y: 0
+                                    width: rectItem.width
+                                    height: rectItem.height
+                                    radius: 10
+                                }
                             }
                         }
-                    }
 
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.selectedId = rectItem.d.id
-                    }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: root.selectedId = rectItem.d.id
+                        }
 
-                    ColumnLayout {
-                        anchors.centerIn: parent
-                        spacing: 4
+                        ColumnLayout {
+                            anchors.centerIn: parent
+                            spacing: 4
 
-                        MD.Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: rectItem.d.name || ("Display " + rectItem.d.id)
-                            typescale: MD.Token.typescale.title_small
-                            color: rectItem.hasLink
-                                   ? MD.Token.color.on_primary_container
-                                   : MD.Token.color.on_surface
+                            MD.Text {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: rectItem.d.name || ("Display " + rectItem.d.id)
+                                typescale: MD.Token.typescale.title_small
+                                color: rectItem.hasLink ? MD.Token.color.on_primary_container : MD.Token.color.on_surface
+                            }
+
+                            MD.Text {
+                                Layout.alignment: Qt.AlignHCenter
+                                text: rectItem.d.width + " × " + rectItem.d.height
+                                typescale: MD.Token.typescale.label_medium
+                                color: rectItem.hasLink ? MD.Token.color.on_primary_container : MD.Token.color.on_surface_variant
+                            }
                         }
 
                         MD.Text {
-                            Layout.alignment: Qt.AlignHCenter
-                            text: rectItem.d.width + " × " + rectItem.d.height
-                            typescale: MD.Token.typescale.label_medium
-                            color: rectItem.hasLink
-                                   ? MD.Token.color.on_primary_container
-                                   : MD.Token.color.on_surface_variant
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.margins: 6
+                            text: "#" + rectItem.d.id
+                            typescale: MD.Token.typescale.label_small
+                            color: rectItem.hasLink ? MD.Token.color.on_primary_container : MD.Token.color.on_surface_variant
                         }
-                    }
-
-                    MD.Text {
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.margins: 6
-                        text: "#" + rectItem.d.id
-                        typescale: MD.Token.typescale.label_small
-                        color: rectItem.hasLink
-                               ? MD.Token.color.on_primary_container
-                               : MD.Token.color.on_surface_variant
                     }
                 }
             }
@@ -210,15 +179,13 @@ MD.Page {
         MD.Pane {
             id: detailsPane
             Layout.fillWidth: true
-            Layout.leftMargin: 16
-            Layout.rightMargin: 16
-            Layout.topMargin: root.selected ? 12 : 0
-            Layout.bottomMargin: root.selected ? 16 : 0
-            Layout.preferredHeight: root.selected
-                ? detailsContent.implicitHeight + topPadding + bottomPadding
-                : 0
+            Layout.preferredHeight: root.selected ? implicitHeight : 0
+
+            leftPadding: 16
+            rightPadding: 16
+            bottomPadding: 12
+
             radius: 16
-            padding: 16
             backgroundColor: MD.MProp.color.surface
             visible: Layout.preferredHeight > 0.5
             clip: true
@@ -240,9 +207,7 @@ MD.Page {
 
                     MD.Text {
                         Layout.fillWidth: true
-                        text: root.selected
-                              ? (root.selected.name || ("Display " + root.selected.id))
-                              : ""
+                        text: root.selected ? (root.selected.name || ("Display " + root.selected.id)) : ""
                         typescale: MD.Token.typescale.title_medium
                         color: MD.Token.color.on_surface
                         elide: Text.ElideRight
@@ -280,9 +245,7 @@ MD.Page {
                             color: MD.Token.color.on_surface_variant
                         }
                         MD.Text {
-                            text: root.selected
-                                  ? root.selected.width + " × " + root.selected.height
-                                  : ""
+                            text: root.selected ? root.selected.width + " × " + root.selected.height : ""
                             typescale: MD.Token.typescale.body_medium
                             color: MD.Token.color.on_surface
                         }
@@ -297,15 +260,15 @@ MD.Page {
                             color: MD.Token.color.on_surface_variant
                         }
                         MD.Text {
-                            text: root.selected
-                                  ? (root.selected.refreshMhz / 1000).toFixed(3) + " Hz"
-                                  : ""
+                            text: root.selected ? (root.selected.refreshMhz / 1000).toFixed(3) + " Hz" : ""
                             typescale: MD.Token.typescale.body_medium
                             color: MD.Token.color.on_surface
                         }
                     }
 
-                    Item { Layout.fillWidth: true }
+                    Item {
+                        Layout.fillWidth: true
+                    }
                 }
 
                 MD.Divider {
@@ -322,8 +285,7 @@ MD.Page {
 
                 MD.Text {
                     Layout.fillWidth: true
-                    visible: !!root.selected
-                             && (!root.selected.links || root.selected.links.length === 0)
+                    visible: !!root.selected && (!root.selected.links || root.selected.links.length === 0)
                     text: "Idle — no renderer bound."
                     typescale: MD.Token.typescale.body_small
                     color: MD.Token.color.on_surface_variant
@@ -359,5 +321,6 @@ MD.Page {
                 }
             }
         }
+        Item {}
     }
 }

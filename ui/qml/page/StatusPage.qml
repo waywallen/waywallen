@@ -8,7 +8,9 @@ import waywallen.ui as W
 MD.Page {
     id: root
     padding: 0
+    showHeader: true
     showBackground: false
+    title: 'Status'
 
     readonly property bool anyQuerying: healthQuery.querying || rendererQuery.querying || pluginQuery.querying || sourceQuery.querying
 
@@ -105,44 +107,6 @@ MD.Page {
         ColumnLayout {
             width: m_flick.contentWidth
             spacing: 12
-
-            // --- Header: title + refresh ---
-            RowLayout {
-                Layout.fillWidth: true
-                Layout.bottomMargin: 4
-                spacing: 8
-
-                MD.Text {
-                    text: "Status"
-                    typescale: MD.Token.typescale.title_large
-                    color: MD.Token.color.on_surface
-                }
-
-                Item {
-                    Layout.fillWidth: true
-                }
-
-                Item {
-                    Layout.preferredWidth: 40
-                    Layout.preferredHeight: 40
-
-                    MD.IconButton {
-                        anchors.fill: parent
-                        icon.name: MD.Token.icon.refresh
-                        enabled: !root.anyQuerying
-                        opacity: root.anyQuerying ? 0.0 : 1.0
-                        onClicked: root.reloadAll()
-                    }
-
-                    MD.CircularIndicator {
-                        anchors.centerIn: parent
-                        width: 24
-                        height: 24
-                        visible: root.anyQuerying
-                        running: root.anyQuerying
-                    }
-                }
-            }
 
             // --- Daemon ---
             SectionPane {
