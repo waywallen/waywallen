@@ -105,11 +105,10 @@ impl DBusMenu {
         }
         let app = self.app.clone();
         match id {
-            ID_OPEN_UI => {
-                if !crate::spawn_ui(&app) {
+            ID_OPEN_UI
+                if !crate::spawn_ui(&app) => {
                     log::warn!("tray: open_ui failed");
                 }
-            }
             ID_NEXT => {
                 if let Err(e) = control::step(&app, 1).await {
                     log::warn!("tray next: {e}");

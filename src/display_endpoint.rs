@@ -258,7 +258,7 @@ async fn run_frame_loop(
                 }
             },
             maybe_req = req_rx.recv() => match maybe_req {
-                Some(Ok(Request::BufferRelease { buffer_generation: g, buffer_index, seq })) => {
+                Some(Ok(Request::BufferRelease { buffer_generation: _g, buffer_index: _, seq: _ })) => {
                 }
                 Some(Ok(Request::UpdateDisplay { width, height, properties: _ })) => {
                     router.update_display_size(display_id, width, height).await;

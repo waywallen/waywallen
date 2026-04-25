@@ -134,8 +134,7 @@ impl RoutingTable {
         // policy: each display sees exactly one renderer.
         let existing: Vec<LinkId> = self
             .by_display
-            .get(&display_id)
-            .map(|v| v.clone())
+            .get(&display_id).cloned()
             .unwrap_or_default();
         for old in existing {
             let _ = self.remove_link(old);

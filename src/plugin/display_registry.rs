@@ -25,18 +25,15 @@ pub struct DisplayManifest {
 /// How the daemon handles the backend's lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum SpawnMode {
     /// Daemon starts the `bin` as a subprocess (e.g. wlr-layer-shell bin).
+    #[default]
     Daemon,
     /// DE starts it on its own (e.g. Plasma kpackage loaded by plasmashell).
     External,
 }
 
-impl Default for SpawnMode {
-    fn default() -> Self {
-        SpawnMode::Daemon
-    }
-}
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DisplayDef {

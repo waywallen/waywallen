@@ -17,11 +17,7 @@ pub mod generated {
 
 pub mod codec;
 
-pub use codec::{
-    recv_event, recv_request, send_event, send_request, CodecError, CodecResult,
-    MAX_BODY_BYTES, MAX_FDS_PER_MSG,
-};
-pub use generated::{opcode, DecodeError, Event, Rect, Request, PROTOCOL_NAME, PROTOCOL_VERSION};
+pub use generated::{opcode, Event, Request, PROTOCOL_NAME};
 
 #[cfg(test)]
 mod tests {

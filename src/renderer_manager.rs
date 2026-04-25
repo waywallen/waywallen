@@ -436,7 +436,7 @@ impl RendererManager {
                 let guard = sock
                     .lock()
                     .map_err(|e| anyhow!("sock mutex poisoned: {e}"))?;
-                Ok(send_control(&*guard, &msg, &[]))
+                Ok(send_control(&guard, &msg, &[]))
             })
             .await
             .context("send_control join")?;
@@ -498,7 +498,7 @@ impl RendererManager {
         let sock = handle.sock.clone();
         let _ = tokio::task::spawn_blocking(move || {
             if let Ok(guard) = sock.lock() {
-                let _ = send_control(&*guard, &ControlMsg::Shutdown, &[]);
+                let _ = send_control(&guard, &ControlMsg::Shutdown, &[]);
             }
         })
         .await;
