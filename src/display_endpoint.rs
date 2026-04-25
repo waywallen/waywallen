@@ -104,6 +104,7 @@ async fn handle_client(
     router: Arc<Router>,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
+    log::info!("display client connected; performing handshake");
     let registration = do_handshake(&stream, &mut shutdown_rx).await?;
     let DisplayHandle { id: display_id, rx } = router.register_display(registration).await;
     log::info!("display {display_id} registered with router");

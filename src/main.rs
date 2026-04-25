@@ -293,10 +293,97 @@ async fn async_main() -> anyhow::Result<()> {
         );
     }
 
+    // Display infrastructure first. The UDS endpoint and (if applicable)
+    // the daemon-managed display backend subprocess are queued *before*
+    // any source-side work so they hit the runtime as early as
+    // possible — display registration must not wait on the Lua scan.
+    let mut display_registry = plugin::display_registry::build_default_registry()
+        .unwrap_or_else(|e| {
+            log::warn!("display registry init failed: {e:#}");
+            plugin::display_registry::DisplayRegistry::new()
+        });
+    for plugin_dir in &cli.plugin_dirs {
+        let displays_dir = plugin_dir.join("displays");
+        if displays_dir.is_dir() {
+            match plugin::display_registry::DisplayRegistry::scan(&displays_dir) {
+                Ok(scanned) => {
+                    for def in scanned.all() {
+                        display_registry.register(def.clone());
+                    }
+                }
+                Err(e) => log::warn!("scan {}: {e}", displays_dir.display()),
+            }
+        }
+    }
+    let display_caps = display_spawner::detect_de();
+    let display_backend: Option<plugin::display_registry::DisplayDef> = if cli.no_display {
+        log::info!("--no-display: skipping display backend selection");
+        None
+    } else {
+        let pick = if let Some(name) = cli.display_backend.as_deref() {
+            match display_registry.find(name) {
+                Some(def) => {
+                    log::info!("display backend pinned by --display-backend: {name}");
+                    display_spawner::PickOutcome::Matched(def.clone())
+                }
+                None => {
+                    log::error!(
+                        "--display-backend {name} not found in registry; falling back to auto-detect"
+                    );
+                    display_spawner::pick_backend(&display_registry, &display_caps)
+                }
+            }
+        } else {
+            display_spawner::pick_backend(&display_registry, &display_caps)
+        };
+        display_spawner::log_outcome(&pick, &display_caps);
+        let should_spawn = display_spawner::should_daemon_spawn(&pick);
+        match pick {
+            display_spawner::PickOutcome::KdeHardMatch(def)
+            | display_spawner::PickOutcome::Matched(def)
+                if should_spawn =>
+            {
+                Some(def)
+            }
+            _ => None,
+        }
+    };
+
+    let display_sock_path = display_endpoint::default_socket_path();
+    {
+        let router = router.clone();
+        let sock_path = display_sock_path.clone();
+        let shutdown_rx = state.shutdown_subscribe();
+        state.tasks.spawn_async(
+            tasks::TaskKind::Service,
+            "display/endpoint",
+            async move {
+                display_endpoint::serve_with_shutdown(&sock_path, router, shutdown_rx)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("display endpoint exited: {e}"))
+            },
+        );
+    }
+    if let Some(def) = display_backend {
+        let sock_path = display_sock_path.clone();
+        let shutdown_rx = state.shutdown_subscribe();
+        let name = def.name.clone();
+        state.tasks.spawn_async(
+            tasks::TaskKind::Service,
+            format!("display/backend/{name}"),
+            async move {
+                display_spawner::run_backend(def, sock_path, shutdown_rx)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("display backend supervisor exited: {e}"))
+            },
+        );
+    }
+
     // Off-load source-plugin loading + scanning + DB sync + initial
     // playlist seed onto the TaskManager. `async_main` proceeds
     // immediately to bind UDS/WS/DBus; the UI will see an empty
-    // playlist until the task completes and populates it.
+    // playlist until the task completes and populates it. Display
+    // registration runs in parallel — it does not gate on this task.
     {
         let source_mgr = source_mgr.clone();
         let plugin_dirs = cli.plugin_dirs.clone();
@@ -390,11 +477,11 @@ async fn async_main() -> anyhow::Result<()> {
         );
     }
 
-    // Restore coordinator: waits on the two latched phase markers,
-    // sleeps a short settle window so the display backend can finish
-    // its own bind handshake, then kicks off the restore as a
-    // tracked task in the TaskManager so its lifecycle is visible
-    // via `ListTasks` / `TaskStatus`.
+    // Restore coordinator: gate ONLY on display readiness. The scan
+    // is a pure background task and must not delay restore. If the
+    // saved wallpaper id is missing from the (still-empty) in-memory
+    // snapshot, restore logs and bails — by definition that item is
+    // stale and can stay un-restored until the user picks again.
     {
         let coord_state = state.clone();
         let restore_last = cli.restore_last;
@@ -402,12 +489,7 @@ async fn async_main() -> anyhow::Result<()> {
             tasks::TaskKind::Service,
             "boot/restore-coordinator",
             async move {
-                let mut sources_rx = coord_state.events.watch_sources_ready();
                 let mut display_rx = coord_state.events.watch_display_ready();
-
-                let _ = sources_rx.wait_for(|v| *v).await;
-                log::info!("restore coordinator: sources ready");
-
                 let _ = display_rx.wait_for(|v| *v).await;
                 log::info!(
                     "restore coordinator: display registered, settling 2s before restore"
@@ -438,97 +520,6 @@ async fn async_main() -> anyhow::Result<()> {
             "probe/scheduler",
             async move {
                 probe_task::scheduler_loop(db_for_task, probe_for_task, shutdown_for_task).await
-            },
-        );
-    }
-
-    // Display backend registry + auto-selection. This does not spawn the
-    // backend yet (that lands in a follow-up); for now we log the pick
-    // so `journalctl -u waywallen` shows what would have launched.
-    let mut display_registry = plugin::display_registry::build_default_registry()
-        .unwrap_or_else(|e| {
-            log::warn!("display registry init failed: {e:#}");
-            plugin::display_registry::DisplayRegistry::new()
-        });
-    for plugin_dir in &cli.plugin_dirs {
-        let displays_dir = plugin_dir.join("displays");
-        if displays_dir.is_dir() {
-            match plugin::display_registry::DisplayRegistry::scan(&displays_dir) {
-                Ok(scanned) => {
-                    for def in scanned.all() {
-                        display_registry.register(def.clone());
-                    }
-                }
-                Err(e) => log::warn!("scan {}: {e}", displays_dir.display()),
-            }
-        }
-    }
-    let display_caps = display_spawner::detect_de();
-    // Decide which backend to run. We clone the DisplayDef out of the
-    // registry so the spawn task can outlive the borrow.
-    let display_backend: Option<plugin::display_registry::DisplayDef> = if cli.no_display {
-        log::info!("--no-display: skipping display backend selection");
-        None
-    } else {
-        let pick = if let Some(name) = cli.display_backend.as_deref() {
-            match display_registry.find(name) {
-                Some(def) => {
-                    log::info!("display backend pinned by --display-backend: {name}");
-                    display_spawner::PickOutcome::Matched(def.clone())
-                }
-                None => {
-                    log::error!(
-                        "--display-backend {name} not found in registry; falling back to auto-detect"
-                    );
-                    display_spawner::pick_backend(&display_registry, &display_caps)
-                }
-            }
-        } else {
-            display_spawner::pick_backend(&display_registry, &display_caps)
-        };
-        display_spawner::log_outcome(&pick, &display_caps);
-        let should_spawn = display_spawner::should_daemon_spawn(&pick);
-        match pick {
-            display_spawner::PickOutcome::KdeHardMatch(def)
-            | display_spawner::PickOutcome::Matched(def)
-                if should_spawn =>
-            {
-                Some(def)
-            }
-            _ => None,
-        }
-    };
-
-    // Display endpoint on UDS (waywallen-display-v1 protocol).
-    let display_sock_path = display_endpoint::default_socket_path();
-    {
-        let router = router.clone();
-        let sock_path = display_sock_path.clone();
-        let shutdown_rx = state.shutdown_subscribe();
-        state.tasks.spawn_async(
-            tasks::TaskKind::Service,
-            "display/endpoint",
-            async move {
-                display_endpoint::serve_with_shutdown(&sock_path, router, shutdown_rx)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("display endpoint exited: {e}"))
-            },
-        );
-    }
-
-    // Daemon-managed display backend (layer-shell etc.). Started after
-    // the UDS endpoint is bound so the child's first connect succeeds.
-    if let Some(def) = display_backend {
-        let sock_path = display_sock_path.clone();
-        let shutdown_rx = state.shutdown_subscribe();
-        let name = def.name.clone();
-        state.tasks.spawn_async(
-            tasks::TaskKind::Service,
-            format!("display/backend/{name}"),
-            async move {
-                display_spawner::run_backend(def, sock_path, shutdown_rx)
-                    .await
-                    .map_err(|e| anyhow::anyhow!("display backend supervisor exited: {e}"))
             },
         );
     }

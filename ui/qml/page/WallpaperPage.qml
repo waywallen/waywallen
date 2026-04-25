@@ -39,14 +39,6 @@ MD.Page {
 
     W.LibraryAutoDetectQuery {
         id: autoDetectQuery
-        onStatusChanged: {
-            // Only kick the scan; the daemon will broadcast
-            // `WallpaperScanCompleted` when it finishes, which
-            // the `Connections` block above handles.
-            if (status === 3) {
-                scanQuery.reload();
-            }
-        }
     }
 
     property var selectedWallpaper: null
