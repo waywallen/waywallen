@@ -17,7 +17,8 @@ MD.Page {
     W.LibraryAddQuery {
         id: addQuery
         onFinished: {
-            MD.Util.closePopup(root)
+            W.Action.toast('Library Added')
+            MD.Util.closePopup(root.MD.MProp.page)
         }
     }
 

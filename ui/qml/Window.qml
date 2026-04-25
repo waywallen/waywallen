@@ -13,13 +13,7 @@ MD.ApplicationWindow {
     id: win
     MD.MProp.size.width: width
     MD.MProp.backgroundColor: {
-        const c = MD.MProp.size.windowClass;
-        switch (c) {
-        case MD.Enum.WindowClassCompact:
-            return MD.Token.color.surface;
-        default:
-            return MD.Token.color.surface_container;
-        }
+        return MD.MProp.color.surface_container;
     }
     MD.MProp.textColor: MD.MProp.color.getOn(MD.MProp.backgroundColor)
 
@@ -53,11 +47,7 @@ MD.ApplicationWindow {
         }
     ]
 
-    readonly property var pageComponents: [
-        "qrc:/waywallen/ui/qml/page/WallpaperPage.qml",
-        "qrc:/waywallen/ui/qml/page/DisplaysPage.qml",
-        "qrc:/waywallen/ui/qml/page/StatusPage.qml",
-    ]
+    readonly property var pageComponents: ["qrc:/waywallen/ui/qml/page/WallpaperPage.qml", "qrc:/waywallen/ui/qml/page/DisplaysPage.qml", "qrc:/waywallen/ui/qml/page/StatusPage.qml",]
 
     onCurrentPageChanged: {
         m_content.replace(m_content.currentItem, pageComponents[currentPage], {});
@@ -163,26 +153,36 @@ MD.ApplicationWindow {
                         }
 
                         MD.Divider {
+                            Layout.leftMargin: 28
+                            Layout.rightMargin: 28
                             Layout.fillWidth: true
                         }
                     }
 
-                    drawerContent: ColumnLayout {
-                        spacing: 0
+                    drawerContent: Item {
+                        implicitHeight: children[0].implicitHeight
+                        implicitWidth: children[0].implicitWidth
 
-                        MD.Divider {
-                            Layout.fillWidth: true
-                        }
+                        ColumnLayout {
+                            width: parent.width
+                            spacing: 0
 
-                        MD.DrawerItem {
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 16
-                            Layout.rightMargin: 16
-                            icon.name: MD.Token.icon.info
-                            text: "About"
-                            onClicked: MD.Util.showPopup('waywallen.ui/PagePopup', {
-                                source: 'waywallen.ui/AboutPage'
-                            }, win)
+                            MD.Divider {
+                                Layout.leftMargin: 28
+                                Layout.rightMargin: 28
+                                Layout.fillWidth: true
+                            }
+
+                            MD.DrawerItem {
+                                Layout.fillWidth: true
+                                Layout.leftMargin: 12
+                                Layout.rightMargin: 12
+                                icon.name: MD.Token.icon.info
+                                text: "About"
+                                onClicked: MD.Util.showPopup('waywallen.ui/PagePopup', {
+                                    source: 'waywallen.ui/AboutPage'
+                                }, win)
+                            }
                         }
                     }
                 }
@@ -193,7 +193,7 @@ MD.ApplicationWindow {
                 id: m_content
                 Layout.fillHeight: true
                 Layout.fillWidth: true
-                Layout.margins: win.isCompact ? 0 : 8
+                // Layout.margins: win.isCompact ? 0 : 8
                 clip: true
                 initialItem: Item {}
 
@@ -202,7 +202,7 @@ MD.ApplicationWindow {
                 MD.PageContext {
                     id: m_page_ctx
                     showHeader: false
-                    backgroundRadius: win.isCompact ? 0 : 12
+                    backgroundRadius: win.isCompact ? 0 : MD.Token.shape.corner.large
                     showBackground: !win.isCompact
                 }
             }

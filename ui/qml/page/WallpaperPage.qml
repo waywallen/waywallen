@@ -66,8 +66,8 @@ MD.Page {
             next.push(id);
         applyTargetIds = next;
     }
-
     showBackground: false
+    padding: MD.MProp.size.isCompact ? 0 : 12
 
     contentItem: RowLayout {
         spacing: 12
@@ -76,7 +76,7 @@ MD.Page {
         MD.Pane {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            radius: MD.Token.shape.corner.large
+            radius: root.MD.MProp.page.backgroundRadius
             padding: 0
             showBackground: true
 
@@ -209,7 +209,7 @@ MD.Page {
             Layout.fillHeight: true
             Layout.maximumWidth: 280
             visible: root.selectedWallpaper !== null
-            radius: MD.Token.shape.corner.large
+            radius: root.MD.MProp.page.backgroundRadius
             padding: 0
             showBackground: true
 
