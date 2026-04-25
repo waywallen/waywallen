@@ -31,6 +31,11 @@ mod ws_server;
 pub struct AppState {
     pub renderer_manager: Arc<renderer_manager::RendererManager>,
     pub source_manager: Arc<tokio::sync::Mutex<plugin::source_manager::SourceManager>>,
+    /// Read-only mirror of the latest scan results. Updated atomically
+    /// by `control::refresh_sources` after the Lua scan finishes; read
+    /// by `WallpaperList`/`WallpaperApply`/`SourceList` so those handlers
+    /// don't contend with an in-flight scan on `source_manager`.
+    pub source_snapshot: Arc<tokio::sync::RwLock<plugin::source_snapshot::SourceSnapshot>>,
     pub router: Arc<routing::Router>,
     pub settings: Arc<settings::SettingsStore>,
     pub db: sea_orm::DatabaseConnection,
@@ -251,9 +256,14 @@ async fn async_main() -> anyhow::Result<()> {
 
     let (rotation_handle, rotation_rx) = playlist::rotator::make_handle();
 
+    let source_snapshot = Arc::new(tokio::sync::RwLock::new(
+        plugin::source_snapshot::SourceSnapshot::default(),
+    ));
+
     let state = Arc::new(AppState {
         renderer_manager: renderer_mgr,
         source_manager: source_mgr.clone(),
+        source_snapshot,
         router: router.clone(),
         settings: settings_store,
         db: db.clone(),

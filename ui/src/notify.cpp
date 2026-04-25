@@ -5,6 +5,8 @@ module waywallen;
 import :notify;
 import :app;
 
+namespace proto = waywallen::control::v1;
+
 namespace waywallen
 {
 
@@ -21,14 +23,24 @@ Notify* Notify::create(QQmlEngine*, QJSEngine*) {
     return n;
 }
 
-Notify::Notify(QObject* parent): QObject(parent) {}
+Notify::Notify(QObject* parent): QObject(parent) {
+    // Subscribe to the daemon's server-event channel exactly once.
+    // Backend lives for the App's lifetime; the connection is parented
+    // to `this` so the QueuedConnection unwinds cleanly on shutdown.
+    if (auto* backend = App::instance()->backend()) {
+        connect(backend, &Backend::eventReceived, this,
+                [this](const proto::Event& evt) {
+                    if (evt.hasWallpaperScanStarted()) {
+                        Q_EMIT wallpaperScanStarted();
+                    } else if (evt.hasWallpaperScanCompleted()) {
+                        const auto& done = evt.wallpaperScanCompleted();
+                        Q_EMIT wallpaperScanCompleted(done.count(), done.error());
+                    }
+                },
+                Qt::QueuedConnection);
+    }
+}
 Notify::~Notify() = default;
-
-void Notify::info(const QString& m) { Q_EMIT notified(Severity::Info, m); }
-void Notify::success(const QString& m) { Q_EMIT notified(Severity::Success, m); }
-void Notify::warning(const QString& m) { Q_EMIT notified(Severity::Warning, m); }
-void Notify::error(const QString& m) { Q_EMIT notified(Severity::Error, m); }
-void Notify::post(Severity sev, const QString& m) { Q_EMIT notified(sev, m); }
 
 } // namespace waywallen
 

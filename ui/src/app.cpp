@@ -8,6 +8,7 @@ import :app;
 import :display;
 import :renderer;
 import :query;
+import :notify;
 
 using namespace waywallen;
 using namespace Qt::Literals::StringLiterals;
@@ -134,6 +135,11 @@ void App::init() {
         auto* lq = new LibraryListQuery(d->m_library_mgr.get());
         lq->reload();
     });
+
+    // Eagerly construct the daemon-event mirror. Without this Notify
+    // would only spring into existence when the first QML consumer
+    // accesses it — and would miss the daemon's startup scan event.
+    (void)Notify::instance();
 
     // Connect to the daemon's WebSocket (no-op if port is still 0).
     d->m_backend->connectTo();

@@ -76,8 +76,8 @@ async fn apply_wallpaper_inner(
     fps: u32,
 ) -> Result<ApplyResult> {
     let entry = {
-        let mgr = app.source_manager.lock().await;
-        mgr.get(id).cloned()
+        let snap = app.source_snapshot.read().await;
+        snap.get(id).cloned()
     };
     let entry = entry.ok_or_else(|| anyhow!("wallpaper '{id}' not found"))?;
 
@@ -150,8 +150,8 @@ pub async fn step(app: &Arc<AppState>, delta: i32) -> Result<String> {
         let mut playlist = app.playlist.lock().await;
         if playlist.active_id.is_none() {
             let snapshot: Vec<String> = {
-                let mgr = app.source_manager.lock().await;
-                mgr.list().iter().map(|e| e.id.clone()).collect()
+                let snap = app.source_snapshot.read().await;
+                snap.list().iter().map(|e| e.id.clone()).collect()
             };
             playlist.refresh(snapshot);
         }
@@ -271,8 +271,8 @@ pub async fn playlist_status(app: &Arc<AppState>) -> PlaylistStatus {
 /// re-enters the same playlist.
 pub async fn activate_playlist(app: &Arc<AppState>, id: i64) -> Result<()> {
     let snapshot: Vec<WallpaperEntry> = {
-        let mgr = app.source_manager.lock().await;
-        mgr.list().to_vec()
+        let snap = app.source_snapshot.read().await;
+        snap.list().to_vec()
     };
     {
         let mut state = app.playlist.lock().await;
@@ -289,8 +289,8 @@ pub async fn activate_playlist(app: &Arc<AppState>, id: i64) -> Result<()> {
 /// immediately, no rescan required.
 pub async fn deactivate_playlist(app: &Arc<AppState>) -> Result<()> {
     let snapshot: Vec<WallpaperEntry> = {
-        let mgr = app.source_manager.lock().await;
-        mgr.list().to_vec()
+        let snap = app.source_snapshot.read().await;
+        snap.list().to_vec()
     };
     {
         let mut state = app.playlist.lock().await;
@@ -582,10 +582,29 @@ pub async fn libraries_by_plugin_name(
 /// from `LibraryAdd` / `LibraryRemove` so the in-memory snapshot and
 /// DB stay consistent with the user-managed library list.
 pub async fn refresh_sources(app: &Arc<AppState>) -> Result<usize> {
+    app.events.publish(crate::events::GlobalEvent::ScanStarted);
+
+    let result = refresh_sources_inner(app).await;
+    match &result {
+        Ok(count) => app
+            .events
+            .publish(crate::events::GlobalEvent::ScanCompleted { count: *count }),
+        Err(e) => app
+            .events
+            .publish(crate::events::GlobalEvent::ScanFailed(format!("{e:#}"))),
+    }
+    result
+}
+
+async fn refresh_sources_inner(app: &Arc<AppState>) -> Result<usize> {
     let libs_by_plugin = libraries_by_plugin_name(&app.db).await?;
 
     let source_mgr = app.source_manager.clone();
     let libs_for_scan = libs_by_plugin.clone();
+    // The Lua VM lock (`source_manager`) is held only during the scan
+    // itself. Read consumers (`WallpaperList`/`WallpaperApply`/
+    // `SourceList`) go through `source_snapshot` instead and never park
+    // behind this section.
     let snapshot: Vec<WallpaperEntry> = tokio::task::spawn_blocking(move || {
         let mut sm = source_mgr.blocking_lock();
         sm.scan_all(&libs_for_scan)?;
@@ -598,6 +617,15 @@ pub async fn refresh_sources(app: &Arc<AppState>) -> Result<usize> {
         let sm = app.source_manager.lock().await;
         sm.plugins().unwrap_or_default()
     };
+
+    // Install the fresh snapshot under the read-only mirror's brief
+    // write guard. Cheap clone here keeps `snapshot` available for the
+    // per-plugin DB sync below.
+    {
+        let mut snap = app.source_snapshot.write().await;
+        snap.install(snapshot.clone(), plugins.clone());
+    }
+
     for info in &plugins {
         let entries: Vec<_> = snapshot
             .iter()

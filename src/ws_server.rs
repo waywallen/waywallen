@@ -14,11 +14,13 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 
 use crate::control;
 use crate::control_proto as pb;
+use crate::events::GlobalEvent;
 use crate::ipc::proto::ControlMsg;
 use crate::model::repo;
 use crate::playlist;
 use crate::renderer_manager;
 use crate::routing::{DisplaySnapshot, LibrarySnapshot, RendererSnapshot, RouterEvent};
+use crate::tasks;
 use crate::AppState;
 
 /// Bind the WebSocket control plane and return the actual local address
@@ -61,6 +63,9 @@ async fn handle_conn(
     // Subscribe to router events *before* snapshotting so no updates
     // get dropped between the snapshot and the live stream starting.
     let mut events_rx = state.router.subscribe_events();
+    // Subscribe to process-wide events (scan lifecycle etc.). Lag here
+    // is non-fatal — UI re-fetches on the next event.
+    let mut global_rx = state.events.subscribe();
     {
         let snap = state.router.snapshot_displays().await;
         let evt = displays_replace_event(snap);
@@ -102,6 +107,22 @@ async fn handle_conn(
 
                 let resp = dispatch(&state, req).await;
                 sink.send(Message::Binary(wrap_response(resp).encode_to_vec())).await?;
+            }
+            gevt = global_rx.recv() => {
+                match gevt {
+                    Ok(e) => {
+                        if let Some(pe) = global_event_to_pb(&e) {
+                            sink.send(Message::Binary(wrap_event(pe).encode_to_vec())).await?;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("ws {peer}: global event lag {n}");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        // Daemon shutting down — let the router-event
+                        // arm or the request arm break us out cleanly.
+                    }
+                }
             }
             evt = events_rx.recv() => {
                 match evt {
@@ -254,6 +275,39 @@ fn router_event_to_pb(e: RouterEvent) -> pb::Event {
     }
 }
 
+/// Translate the subset of `GlobalEvent` variants the UI cares about
+/// into wire `pb::Event`s. Returns `None` for events that are
+/// daemon-internal (boot phase markers, restore lifecycle).
+fn global_event_to_pb(e: &GlobalEvent) -> Option<pb::Event> {
+    match e {
+        GlobalEvent::ScanStarted => Some(pb::Event {
+            payload: Some(pb::event::Payload::WallpaperScanStarted(
+                pb::WallpaperScanStarted {},
+            )),
+        }),
+        GlobalEvent::ScanCompleted { count } => Some(pb::Event {
+            payload: Some(pb::event::Payload::WallpaperScanCompleted(
+                pb::WallpaperScanCompleted {
+                    count: *count as u32,
+                    error: String::new(),
+                },
+            )),
+        }),
+        GlobalEvent::ScanFailed(msg) => Some(pb::Event {
+            payload: Some(pb::event::Payload::WallpaperScanCompleted(
+                pb::WallpaperScanCompleted {
+                    count: 0,
+                    error: msg.clone(),
+                },
+            )),
+        }),
+        GlobalEvent::SourcesReady
+        | GlobalEvent::DisplayReady
+        | GlobalEvent::RestoreApplied(_)
+        | GlobalEvent::RestoreFailed(_) => None,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
@@ -394,7 +448,9 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
         }
 
         Req::WallpaperList(r) => {
-            let mgr = state.source_manager.lock().await;
+            // Read from the snapshot mirror (see `source_snapshot.rs`)
+            // so an in-flight scan does not block this query.
+            let snap = state.source_snapshot.read().await;
 
             // Build a lookup map: (library.path, item.path) -> item::Model
             // so we can overlay DB media-meta (size/width/height/format) onto
@@ -415,9 +471,9 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
             };
 
             let raw_entries: Vec<&crate::wallpaper_type::WallpaperEntry> = if r.wp_type.is_empty() {
-                mgr.list().iter().collect()
+                snap.list().iter().collect()
             } else {
-                mgr.list_by_type(&r.wp_type)
+                snap.list_by_type(&r.wp_type)
             };
 
             let total = raw_entries.len() as u32;
@@ -451,30 +507,39 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
             )
         }
 
-        Req::WallpaperScan(_) => match control::refresh_sources(&state).await {
-            Ok(count) => ok(
+        Req::WallpaperScan(_) => {
+            // Fire-and-forget: kick the rescan onto the TaskManager and
+            // return immediately. Completion (or failure) reaches the
+            // UI via the `WallpaperScanCompleted` server event, so the
+            // request is just an ack. `spawn_async_unique` collapses
+            // overlapping triggers (rapid clicks, library churn) under
+            // one in-flight scan.
+            let scan_state = state.clone();
+            state.tasks.spawn_async_unique(
+                tasks::TaskKind::Generic,
+                "scan/refresh",
+                "scan/refresh",
+                async move { control::refresh_sources(&scan_state).await.map(|_| ()) },
+            );
+            ok(
                 rid,
-                Res::WallpaperScan(pb::WallpaperScanResponse { count: count as u32 }),
-            ),
-            Err(e) => error_response(rid, pb::Status::Internal, format!("scan failed: {e}")),
-        },
+                Res::WallpaperScan(pb::WallpaperScanResponse { count: 0 }),
+            )
+        }
 
         Req::SourceList(_) => {
-            let mgr = state.source_manager.lock().await;
-            match mgr.plugins() {
-                Ok(plugins) => {
-                    let sources = plugins
-                        .into_iter()
-                        .map(|p| pb::SourcePluginInfo {
-                            name: p.name,
-                            types: p.types,
-                            version: p.version,
-                        })
-                        .collect();
-                    ok(rid, Res::SourceList(pb::SourceListResponse { sources }))
-                }
-                Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
-            }
+            let snap = state.source_snapshot.read().await;
+            let sources = snap
+                .plugins()
+                .iter()
+                .cloned()
+                .map(|p| pb::SourcePluginInfo {
+                    name: p.name,
+                    types: p.types,
+                    version: p.version,
+                })
+                .collect();
+            ok(rid, Res::SourceList(pb::SourceListResponse { sources }))
         }
 
         Req::DisplayList(_) => {
@@ -502,8 +567,8 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
 
         Req::WallpaperApply(r) => {
             let entry = {
-                let mgr = state.source_manager.lock().await;
-                mgr.get(&r.wallpaper_id).cloned()
+                let snap = state.source_snapshot.read().await;
+                snap.get(&r.wallpaper_id).cloned()
             };
             let Some(entry) = entry else {
                 return error_response(
@@ -709,13 +774,18 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
                     state.router.upsert_library(snap);
                     // Rescan so the new library's items flow into the
                     // in-memory snapshot + DB without waiting for the
-                    // next daemon restart.
+                    // next daemon restart. Shares `"scan/refresh"`
+                    // dedup key with manual scans — rapid LibraryAdd
+                    // bursts collapse into a single in-flight scan.
                     let rescan_state = state.clone();
-                    tokio::spawn(async move {
-                        if let Err(e) = control::refresh_sources(&rescan_state).await {
-                            log::warn!("rescan after LibraryAdd failed: {e:#}");
-                        }
-                    });
+                    state.tasks.spawn_async_unique(
+                        tasks::TaskKind::Generic,
+                        "scan/refresh",
+                        "scan/refresh-after-library-add",
+                        async move {
+                            control::refresh_sources(&rescan_state).await.map(|_| ())
+                        },
+                    );
                     ok(rid, Res::LibraryAdd(pb::Empty {}))
                 }
                 Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),
@@ -736,11 +806,14 @@ async fn dispatch(state: &Arc<AppState>, req: pb::Request) -> pb::Response {
             Ok(_) => {
                 state.router.remove_library(r.id);
                 let rescan_state = state.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = control::refresh_sources(&rescan_state).await {
-                        log::warn!("rescan after LibraryRemove failed: {e:#}");
-                    }
-                });
+                state.tasks.spawn_async_unique(
+                    tasks::TaskKind::Generic,
+                    "scan/refresh",
+                    "scan/refresh-after-library-remove",
+                    async move {
+                        control::refresh_sources(&rescan_state).await.map(|_| ())
+                    },
+                );
                 ok(rid, Res::LibraryRemove(pb::Empty {}))
             }
             Err(e) => error_response(rid, pb::Status::Internal, e.to_string()),

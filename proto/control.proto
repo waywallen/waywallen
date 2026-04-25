@@ -209,6 +209,10 @@ message WallpaperListResponse {
 }
 
 message WallpaperScanRequest {}
+// Ack-only — the rescan now runs asynchronously on the daemon. `count`
+// is `0` for newly-queued scans; the actual entry count arrives in the
+// later `WallpaperScanCompleted` server event so the UI does not have
+// to block on the response.
 message WallpaperScanResponse {
   uint32 count = 1;
 }
@@ -301,16 +305,32 @@ message LibraryAutoDetectResponse {
 
 message Event {
   oneof payload {
-    DisplaySnapshot  display_snapshot  = 1;
-    DisplayChanged   display_changed   = 2;
-    DisplayRemoved   display_removed   = 3;
-    RendererSnapshot renderer_snapshot = 4;
-    RendererChanged  renderer_changed  = 5;
-    RendererRemoved  renderer_removed  = 6;
-    LibrarySnapshot  library_snapshot  = 7;
-    LibraryChanged   library_changed   = 8;
-    LibraryRemoved   library_removed   = 9;
+    DisplaySnapshot        display_snapshot          = 1;
+    DisplayChanged         display_changed           = 2;
+    DisplayRemoved         display_removed           = 3;
+    RendererSnapshot       renderer_snapshot         = 4;
+    RendererChanged        renderer_changed          = 5;
+    RendererRemoved        renderer_removed          = 6;
+    LibrarySnapshot        library_snapshot          = 7;
+    LibraryChanged         library_changed           = 8;
+    LibraryRemoved         library_removed           = 9;
+    WallpaperScanStarted   wallpaper_scan_started    = 10;
+    WallpaperScanCompleted wallpaper_scan_completed  = 11;
   }
+}
+
+// A wallpaper rescan has started on the daemon (manual via
+// `WallpaperScan`, or automatic after `LibraryAdd`/`LibraryRemove` /
+// at startup). UI may show a transient "scanning…" affordance.
+message WallpaperScanStarted {}
+
+// A wallpaper rescan finished. `count` is the total entry count after
+// the swap; `error` is empty on success, otherwise a one-line reason.
+// UI typically reacts with a `Notify` toast and a `WallpaperList`
+// refetch — daemon does not push the list itself, only the trigger.
+message WallpaperScanCompleted {
+  uint32 count = 1;
+  string error = 2;
 }
 
 // Full replacement — sent once right after the WS handshake so a

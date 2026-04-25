@@ -17,6 +17,22 @@ MD.Page {
         id: scanQuery
     }
 
+    // Daemon-driven scans (manual click, LibraryAdd/Remove, startup)
+    // all reach the UI through `Notify` (mirrors the daemon's
+    // `GlobalEvent` broadcasts). Toast UX is handled here via
+    // `Action.toast`; Notify itself is intentionally toast-free.
+    Connections {
+        target: W.Notify
+        function onWallpaperScanCompleted(count, error) {
+            if (error && error.length > 0) {
+                W.Action.toast("Scan failed: " + error);
+            } else {
+                W.Action.toast("Scanned " + count + " wallpapers");
+            }
+            wallpaperQuery.reload();
+        }
+    }
+
     W.WallpaperApplyQuery {
         id: applyQuery
     }
@@ -24,9 +40,11 @@ MD.Page {
     W.LibraryAutoDetectQuery {
         id: autoDetectQuery
         onStatusChanged: {
+            // Only kick the scan; the daemon will broadcast
+            // `WallpaperScanCompleted` when it finishes, which
+            // the `Connections` block above handles.
             if (status === 3) {
                 scanQuery.reload();
-                wallpaperQuery.reload();
             }
         }
     }
@@ -95,10 +113,11 @@ MD.Page {
                             MD.Action {
                                 icon.name: MD.Token.icon.refresh
                                 text: 'Refresh'
-                                onTriggered: {
-                                    scanQuery.reload();
-                                    wallpaperQuery.reload();
-                                }
+                                // Daemon answers immediately and pushes
+                                // completion via `WallpaperScanCompleted`,
+                                // which the `Connections` block on
+                                // `scanQuery` handles (Notify + list reload).
+                                onTriggered: scanQuery.reload()
                             }
                         ]
                     }

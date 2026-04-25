@@ -40,6 +40,16 @@ pub enum GlobalEvent {
     /// the formatted error so log subscribers don't need a typed
     /// error variant.
     RestoreFailed(String),
+    /// A wallpaper rescan (`refresh_sources`) just started. WS clients
+    /// translate this to `pb::Event::WallpaperScanStarted`. Not latched
+    /// — late subscribers do not see prior scans, which is fine because
+    /// they re-fetch the list on connect anyway.
+    ScanStarted,
+    /// A wallpaper rescan finished successfully; `count` is the total
+    /// entry count after the swap.
+    ScanCompleted { count: usize },
+    /// A wallpaper rescan failed; the string is the formatted error.
+    ScanFailed(String),
 }
 
 pub struct EventBus {
