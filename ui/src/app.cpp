@@ -142,6 +142,10 @@ void App::init() {
     // Connect to the daemon's WebSocket (no-op if port is still 0).
     d->m_backend->connectTo();
 
+    // Resolve the installed QML modules relative to the executable
+    // (bin/ ←→ lib/qt6/qml) so spawns that don't inherit
+    // QML_IMPORT_PATH — tray "Open UI", desktop entries — still work.
+    engine->addImportPath(QGuiApplication::applicationDirPath() + u"/../lib/qt6/qml"_s);
     engine->addImportPath(u"qrc:/"_s);
     // Load the main window from the QML module.
     engine->loadFromModule("waywallen.ui", "Window");
