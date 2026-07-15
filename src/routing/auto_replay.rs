@@ -69,6 +69,13 @@ pub fn decide(policy: &AutoReplayPolicy, facts: Facts) -> Decision {
             best = Decision::from_action(action);
         }
     }
+    // While locked and still the active session, cap auto-replay at Mute so the reused lock renderer keeps drawing.
+    if facts.session_locked
+        && !facts.session_inactive
+        && best.action.priority() > AutoAction::Mute.priority()
+    {
+        best = Decision::from_action(AutoAction::Mute);
+    }
     best
 }
 
@@ -148,6 +155,68 @@ mod tests {
                 flags: FLAG_ACTIVE | FLAG_FULLSCREEN,
                 session_locked: false,
                 session_inactive: false,
+            },
+        );
+        assert_eq!(decision.action, AutoAction::Stop);
+    }
+
+    #[test]
+    fn session_lock_is_capped_at_mute() {
+        // Lock caps at Mute: no Stop, no Pause, so the renderer keeps drawing.
+        for configured in [AutoAction::Stop, AutoAction::Pause] {
+            let policy = policy(&[(AutoCondition::SessionLocked, configured)]);
+            let decision = decide(
+                &policy,
+                Facts {
+                    flags: 0,
+                    session_locked: true,
+                    session_inactive: false,
+                },
+            );
+            assert_eq!(decision.action, AutoAction::Mute, "configured={configured:?}");
+        }
+    }
+
+    #[test]
+    fn window_pause_is_capped_while_locked() {
+        // Don't let a fullscreen desktop window freeze the renderer while locked.
+        let policy = policy(&[(AutoCondition::Fullscreen, AutoAction::Stop)]);
+        let decision = decide(
+            &policy,
+            Facts {
+                flags: FLAG_FULLSCREEN,
+                session_locked: true,
+                session_inactive: false,
+            },
+        );
+        assert_eq!(decision.action, AutoAction::Mute);
+    }
+
+    #[test]
+    fn locked_and_inactive_still_stops() {
+        // Locked but switched away: the lock screen is hidden, so the stronger action stands.
+        let policy = policy(&[(AutoCondition::SessionInactive, AutoAction::Stop)]);
+        let decision = decide(
+            &policy,
+            Facts {
+                flags: 0,
+                session_locked: true,
+                session_inactive: true,
+            },
+        );
+        assert_eq!(decision.action, AutoAction::Stop);
+    }
+
+    #[test]
+    fn session_inactive_stop_still_kills() {
+        // The cap is lock-specific; user-switch (inactive) Stop is unchanged.
+        let policy = policy(&[(AutoCondition::SessionInactive, AutoAction::Stop)]);
+        let decision = decide(
+            &policy,
+            Facts {
+                flags: 0,
+                session_locked: false,
+                session_inactive: true,
             },
         );
         assert_eq!(decision.action, AutoAction::Stop);
