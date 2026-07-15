@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -153,6 +154,138 @@ pub fn detect_de() -> DeCaps {
         probed_globals: Vec::new(),
         flatpak_id,
     }
+}
+
+/// Discover a live Wayland socket when `WAYLAND_DISPLAY` is unset by
+/// scanning the runtime dir for `wayland-*` sockets. Unlike the env
+/// var — frozen at process start — the socket appears on disk when the
+/// compositor comes up, so this works for a daemon launched before the
+/// session existed. Returns a value usable as `WAYLAND_DISPLAY`: the
+/// socket name, or an absolute path when `XDG_RUNTIME_DIR` itself is
+/// unset (libwayland accepts both).
+pub fn scan_wayland_socket() -> Option<String> {
+    if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+        return scan_wayland_socket_in(Path::new(&dir));
+    }
+    // systemd's default runtime dir; keep the absolute path so the
+    // spawned client doesn't need XDG_RUNTIME_DIR either.
+    let uid = unsafe { libc::getuid() };
+    let dir = PathBuf::from(format!("/run/user/{uid}"));
+    scan_wayland_socket_in(&dir).map(|name| dir.join(name).to_string_lossy().into_owned())
+}
+
+fn scan_wayland_socket_in(dir: &Path) -> Option<String> {
+    let mut best: Option<String> = None;
+    for entry in std::fs::read_dir(dir).ok()? {
+        let Ok(entry) = entry else { continue };
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.starts_with("wayland-") || name.ends_with(".lock") {
+            continue;
+        }
+        let is_socket = entry
+            .file_type()
+            .map(|t| {
+                use std::os::unix::fs::FileTypeExt;
+                t.is_socket()
+            })
+            .unwrap_or(false);
+        if !is_socket {
+            continue;
+        }
+        if best.as_deref().is_none_or(|cur| name < cur) {
+            best = Some(name.to_string());
+        }
+    }
+    best
+}
+
+/// Session environment as recorded by the systemd user manager.
+/// Compositors publish `WAYLAND_DISPLAY` / `XDG_CURRENT_DESKTOP` there
+/// via `dbus-update-activation-environment --systemd`, so unlike this
+/// process's own environment it keeps updating after early boot.
+/// Empty on non-systemd systems.
+pub async fn systemd_user_environment(conn: &zbus::Connection) -> HashMap<String, String> {
+    match read_systemd_environment(conn).await {
+        Ok(map) => map,
+        Err(e) => {
+            log::debug!("systemd user environment unavailable: {e}");
+            HashMap::new()
+        }
+    }
+}
+
+async fn read_systemd_environment(
+    conn: &zbus::Connection,
+) -> zbus::Result<HashMap<String, String>> {
+    let proxy = zbus::Proxy::new(
+        conn,
+        "org.freedesktop.systemd1",
+        "/org/freedesktop/systemd1",
+        "org.freedesktop.systemd1.Manager",
+    )
+    .await?;
+    let vars: Vec<String> = proxy.get_property("Environment").await?;
+    Ok(vars
+        .into_iter()
+        .filter_map(|kv| {
+            let (k, v) = kv.split_once('=')?;
+            Some((k.to_string(), v.to_string()))
+        })
+        .collect())
+}
+
+/// `detect_de()` plus runtime fallbacks for the early-boot case.
+/// Returns the merged caps and the env overrides a spawned backend
+/// needs — values discovered here are not in the daemon's own
+/// environment, so children would not inherit them.
+pub async fn detect_de_runtime(conn: Option<&zbus::Connection>) -> (DeCaps, Vec<(String, String)>) {
+    let session = match conn {
+        Some(conn) => systemd_user_environment(conn).await,
+        None => HashMap::new(),
+    };
+    merge_caps(detect_de(), &session, scan_wayland_socket())
+}
+
+/// Fill holes in `base` from the systemd session env, then from an
+/// on-disk socket scan. Process env always wins.
+fn merge_caps(
+    base: DeCaps,
+    session: &HashMap<String, String>,
+    socket: Option<String>,
+) -> (DeCaps, Vec<(String, String)>) {
+    let mut caps = base;
+    let mut overrides = Vec::new();
+    if caps.xdg_desktop.is_empty() {
+        if let Some(raw) = session.get("XDG_CURRENT_DESKTOP") {
+            let tokens: Vec<String> = raw
+                .split(':')
+                .filter(|p| !p.is_empty())
+                .map(|p| p.to_ascii_lowercase())
+                .collect();
+            if !tokens.is_empty() {
+                caps.xdg_desktop = tokens;
+                overrides.push(("XDG_CURRENT_DESKTOP".to_string(), raw.clone()));
+            }
+        }
+    }
+    if !caps.is_wayland_session {
+        if let Some(ty) = session.get("XDG_SESSION_TYPE") {
+            caps.is_wayland_session = ty.eq_ignore_ascii_case("wayland");
+        }
+    }
+    if caps.wayland_display.is_none() {
+        let discovered = session
+            .get("WAYLAND_DISPLAY")
+            .filter(|s| !s.is_empty())
+            .cloned()
+            .or(socket);
+        if let Some(display) = discovered {
+            overrides.push(("WAYLAND_DISPLAY".to_string(), display.clone()));
+            caps.wayland_display = Some(display);
+        }
+    }
+    (caps, overrides)
 }
 
 /// Why `pick_backend` returned the choice it did. Mostly for logging.
@@ -397,11 +530,21 @@ const RESTART_INITIAL: Duration = Duration::from_secs(2);
 /// Upper bound on the exponential backoff.
 const RESTART_MAX: Duration = Duration::from_secs(10);
 
+/// Initial delay between backend re-detection attempts when the daemon
+/// started before the session environment existed.
+pub const DETECT_RETRY_INITIAL: Duration = Duration::from_secs(2);
+/// Upper bound on the re-detection backoff.
+pub const DETECT_RETRY_MAX: Duration = Duration::from_secs(15);
+/// Give up on re-detection after this long; a session that has not
+/// appeared by then is not going to.
+pub const DETECT_RETRY_WINDOW: Duration = Duration::from_secs(300);
+
 /// Supervise a daemon-spawned display backend for the lifetime of the
 /// process. Exits cleanly when `shutdown_rx` flips to `true` (SIGTERMs
 pub async fn run_backend(
     def: DisplayDef,
     socket: PathBuf,
+    extra_env: Vec<(String, String)>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> anyhow::Result<()> {
     if !matches!(def.spawn, SpawnMode::Daemon) {
@@ -434,6 +577,21 @@ pub async fn run_backend(
         cmd.arg("--socket").arg(&socket);
         for extra in &def.extra_args {
             cmd.arg(extra);
+        }
+        cmd.envs(extra_env.iter().map(|(k, v)| (k.as_str(), v.as_str())));
+        // The compositor may not have been up when the daemon started.
+        // When nothing provides WAYLAND_DISPLAY, re-scan per attempt so
+        // the restart backoff self-heals once the socket appears.
+        if std::env::var_os("WAYLAND_DISPLAY").is_none()
+            && !extra_env.iter().any(|(k, _)| k == "WAYLAND_DISPLAY")
+        {
+            if let Some(display) = scan_wayland_socket() {
+                log::info!(
+                    "display backend '{}': discovered WAYLAND_DISPLAY={display}",
+                    def.name
+                );
+                cmd.env("WAYLAND_DISPLAY", &display);
+            }
         }
         cmd.env("WAYWALLEN_SOCKET", &socket);
         cmd.kill_on_drop(true)
@@ -672,5 +830,91 @@ mod tests {
         assert_eq!(status.desktop, "sway");
         assert_eq!(status.flatpak_id, "org.waywallen.waywallen");
         assert!(status.reason.contains("Flatpak"));
+    }
+
+    #[test]
+    fn socket_scan_finds_lowest_socket_and_skips_locks() {
+        let dir = tempfile::tempdir().unwrap();
+        std::os::unix::net::UnixListener::bind(dir.path().join("wayland-1")).unwrap();
+        std::os::unix::net::UnixListener::bind(dir.path().join("wayland-0")).unwrap();
+        std::fs::write(dir.path().join("wayland-0.lock"), b"").unwrap();
+        // Plain file with a matching name must not count as a socket.
+        std::fs::write(dir.path().join("wayland-"), b"").unwrap();
+
+        assert_eq!(
+            scan_wayland_socket_in(dir.path()).as_deref(),
+            Some("wayland-0")
+        );
+    }
+
+    #[test]
+    fn socket_scan_empty_dir_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(scan_wayland_socket_in(dir.path()), None);
+    }
+
+    fn session(vars: &[(&str, &str)]) -> HashMap<String, String> {
+        vars.iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn merge_caps_process_env_wins() {
+        let base = DeCaps {
+            xdg_desktop: vec!["hyprland".into()],
+            wayland_display: Some("wayland-1".into()),
+            ..Default::default()
+        };
+        let sess = session(&[
+            ("XDG_CURRENT_DESKTOP", "KDE"),
+            ("WAYLAND_DISPLAY", "wayland-0"),
+        ]);
+
+        let (caps, overrides) = merge_caps(base, &sess, Some("wayland-9".into()));
+
+        assert_eq!(caps.xdg_desktop, vec!["hyprland".to_string()]);
+        assert_eq!(caps.wayland_display.as_deref(), Some("wayland-1"));
+        assert!(overrides.is_empty());
+    }
+
+    #[test]
+    fn merge_caps_fills_from_session_env() {
+        let sess = session(&[
+            ("XDG_CURRENT_DESKTOP", "Hyprland:wlroots"),
+            ("XDG_SESSION_TYPE", "wayland"),
+            ("WAYLAND_DISPLAY", "wayland-1"),
+        ]);
+
+        let (caps, overrides) = merge_caps(DeCaps::default(), &sess, None);
+
+        assert_eq!(
+            caps.xdg_desktop,
+            vec!["hyprland".to_string(), "wlroots".to_string()]
+        );
+        assert!(caps.is_wayland_session);
+        assert_eq!(caps.wayland_display.as_deref(), Some("wayland-1"));
+        assert_eq!(
+            overrides,
+            vec![
+                (
+                    "XDG_CURRENT_DESKTOP".to_string(),
+                    "Hyprland:wlroots".to_string()
+                ),
+                ("WAYLAND_DISPLAY".to_string(), "wayland-1".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_caps_falls_back_to_socket_scan() {
+        let (caps, overrides) =
+            merge_caps(DeCaps::default(), &session(&[]), Some("wayland-0".into()));
+
+        assert_eq!(caps.wayland_display.as_deref(), Some("wayland-0"));
+        assert_eq!(
+            overrides,
+            vec![("WAYLAND_DISPLAY".to_string(), "wayland-0".to_string())]
+        );
     }
 }
