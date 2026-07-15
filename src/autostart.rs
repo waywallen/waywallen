@@ -1,10 +1,11 @@
+use std::path::{Path, PathBuf};
+
 use ashpd::desktop::background::Background;
 
 use crate::error::{Error, Result};
 use crate::settings::SettingsStore;
 
 const FLATPAK_ID_ENV: &str = "FLATPAK_ID";
-const AUTOSTART_COMMAND: [&str; 2] = ["waywallen", "--no-ui"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PortalState {
@@ -19,9 +20,10 @@ struct XdpPortal;
 
 impl PortalClient for XdpPortal {
     async fn set_enabled(&self, enabled: bool) -> Result<PortalState> {
+        let command = autostart_command();
         let request = Background::request()
             .auto_start(enabled)
-            .command(&AUTOSTART_COMMAND)
+            .command(&command)
             .dbus_activatable(false)
             .send()
             .await
@@ -36,20 +38,107 @@ impl PortalClient for XdpPortal {
     }
 }
 
+fn is_sandboxed() -> bool {
+    std::env::var_os(FLATPAK_ID_ENV).is_some_and(|id| !id.is_empty())
+}
+
+/// Login-start command line. Inside Flatpak the portal rewrites it to
+/// `flatpak run <app-id> ...`, so the bare binary name suffices. On the
+/// host the daemon is often not on PATH, so pin the running executable.
+fn autostart_command() -> Vec<String> {
+    let bin = if is_sandboxed() {
+        "waywallen".to_string()
+    } else {
+        std::env::current_exe()
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "waywallen".to_string())
+    };
+    vec![bin, "--no-ui".to_string()]
+}
+
+/// XDG autostart entry location. Order mirrors
+/// `settings::default_config_path`:
+///   1. `$XDG_CONFIG_HOME/autostart/waywallen.desktop`
+///   2. `$HOME/.config/autostart/waywallen.desktop`
+fn xdg_autostart_path() -> PathBuf {
+    if let Some(xdg) = std::env::var_os("XDG_CONFIG_HOME") {
+        return PathBuf::from(xdg).join("autostart/waywallen.desktop");
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join(".config/autostart/waywallen.desktop");
+    }
+    PathBuf::from("waywallen-autostart.desktop")
+}
+
+/// Quote one Exec argument per the Desktop Entry spec: double-quote and
+/// backslash-escape the reserved characters that stay live inside quotes.
+fn quote_exec_arg(arg: &str) -> String {
+    let mut out = String::with_capacity(arg.len() + 2);
+    out.push('"');
+    for c in arg.chars() {
+        if matches!(c, '"' | '`' | '$' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    out
+}
+
+fn write_autostart_entry(path: &Path, command: &[String]) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let exec = command
+        .iter()
+        .map(|a| quote_exec_arg(a))
+        .collect::<Vec<_>>()
+        .join(" ");
+    let entry = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=Waywallen\n\
+         Comment=Wallpaper manager daemon\n\
+         Exec={exec}\n\
+         Icon=org.waywallen.waywallen\n\
+         Terminal=false\n"
+    );
+    std::fs::write(path, entry)
+}
+
+fn remove_autostart_entry(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
+}
+
 #[derive(Default)]
 pub struct AutostartService {
     mutation: tokio::sync::Mutex<()>,
 }
 
 impl AutostartService {
+    /// Persisted intent, not live desktop state — an entry removed
+    /// behind our back (portal side or a hand-deleted .desktop file)
+    /// is not detected.
     pub fn enabled(&self, settings: &SettingsStore) -> Result<bool> {
-        ensure_flatpak()?;
         Ok(settings.global().autostart_enabled)
     }
 
+    /// Sandboxed: the Background portal is the only mechanism, and it
+    /// resolves the Flatpak app id reliably. On the host the portal
+    /// derives the caller's app id from the launch context (cgroup),
+    /// which can attribute the entry to the wrong application — so
+    /// write the XDG autostart entry directly instead.
     pub async fn set_enabled(&self, settings: &SettingsStore, enabled: bool) -> Result<bool> {
-        ensure_flatpak()?;
-        self.set_enabled_with(settings, enabled, &XdpPortal).await
+        if is_sandboxed() {
+            self.set_enabled_with(settings, enabled, &XdpPortal).await
+        } else {
+            self.set_enabled_host(settings, enabled, &xdg_autostart_path())
+                .await
+        }
     }
 
     async fn set_enabled_with<C: PortalClient>(
@@ -71,16 +160,23 @@ impl AutostartService {
         settings.flush_now().await;
         Ok(enabled)
     }
-}
 
-fn ensure_flatpak() -> Result<()> {
-    let available = std::env::var_os(FLATPAK_ID_ENV).is_some_and(|id| !id.is_empty());
-    if available {
-        Ok(())
-    } else {
-        Err(Error::FailedPrecondition(
-            "autostart is only available inside Flatpak".to_string(),
-        ))
+    async fn set_enabled_host(
+        &self,
+        settings: &SettingsStore,
+        enabled: bool,
+        entry: &Path,
+    ) -> Result<bool> {
+        let _guard = self.mutation.lock().await;
+        if enabled {
+            write_autostart_entry(entry, &autostart_command())?;
+        } else {
+            remove_autostart_entry(entry)?;
+        }
+
+        settings.update(|s| s.global.autostart_enabled = enabled);
+        settings.flush_now().await;
+        Ok(enabled)
     }
 }
 
@@ -179,5 +275,73 @@ mod tests {
 
         assert!(matches!(result, Err(Error::PortalCallFailed(_))));
         assert!(!settings.global().autostart_enabled);
+    }
+
+    #[tokio::test]
+    async fn host_enable_writes_entry_and_persists() {
+        let (_dir, settings) = settings().await;
+        let dir = tempdir().unwrap();
+        let entry = dir.path().join("autostart/waywallen.desktop");
+
+        let enabled = AutostartService::default()
+            .set_enabled_host(&settings, true, &entry)
+            .await
+            .unwrap();
+
+        assert!(enabled);
+        assert!(settings.global().autostart_enabled);
+        let content = std::fs::read_to_string(&entry).unwrap();
+        assert!(content.starts_with("[Desktop Entry]"));
+        assert!(content.contains("--no-ui"));
+    }
+
+    #[tokio::test]
+    async fn host_disable_removes_entry_and_persists() {
+        let (_dir, settings) = settings().await;
+        settings.update(|s| s.global.autostart_enabled = true);
+        settings.flush_now().await;
+        let dir = tempdir().unwrap();
+        let entry = dir.path().join("waywallen.desktop");
+        write_autostart_entry(&entry, &["waywallen".into(), "--no-ui".into()]).unwrap();
+
+        let enabled = AutostartService::default()
+            .set_enabled_host(&settings, false, &entry)
+            .await
+            .unwrap();
+
+        assert!(!enabled);
+        assert!(!settings.global().autostart_enabled);
+        assert!(!entry.exists());
+    }
+
+    #[tokio::test]
+    async fn host_write_failure_does_not_update_state() {
+        let (_dir, settings) = settings().await;
+        let dir = tempdir().unwrap();
+        // A directory at the entry path makes the write fail.
+        let entry = dir.path().join("waywallen.desktop");
+        std::fs::create_dir(&entry).unwrap();
+
+        let result = AutostartService::default()
+            .set_enabled_host(&settings, true, &entry)
+            .await;
+
+        assert!(matches!(result, Err(Error::Io(_))));
+        assert!(!settings.global().autostart_enabled);
+    }
+
+    #[test]
+    fn remove_missing_entry_is_ok() {
+        let dir = tempdir().unwrap();
+        assert!(remove_autostart_entry(&dir.path().join("absent.desktop")).is_ok());
+    }
+
+    #[test]
+    fn exec_args_are_quoted() {
+        assert_eq!(
+            quote_exec_arg("/opt/way wallen/bin"),
+            "\"/opt/way wallen/bin\""
+        );
+        assert_eq!(quote_exec_arg("a\"b$c"), "\"a\\\"b\\$c\"");
     }
 }
