@@ -173,7 +173,11 @@ mod tests {
                     session_inactive: false,
                 },
             );
-            assert_eq!(decision.action, AutoAction::Mute, "configured={configured:?}");
+            assert_eq!(
+                decision.action,
+                AutoAction::Mute,
+                "configured={configured:?}"
+            );
         }
     }
 

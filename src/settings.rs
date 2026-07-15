@@ -40,6 +40,7 @@ pub struct DisplayPrefs {
     /// Last wallpaper id applied to this display.
     /// Used to restore per-display assignment on restart.
     pub last_wallpaper: Option<String>,
+    pub lock_wallpaper: Option<String>,
     pub alias: Option<String>,
     pub active_playlist_id: Option<i64>,
 }
@@ -52,6 +53,7 @@ impl DisplayPrefs {
             && self.rotation.is_none()
             && self.auto_replay.is_none()
             && self.last_wallpaper.is_none()
+            && self.lock_wallpaper.is_none()
             && self.alias.is_none()
             && self.active_playlist_id.is_none()
     }
@@ -153,6 +155,8 @@ impl AutoReplayPolicy {
 #[serde(default)]
 pub struct GlobalSettings {
     pub last_wallpaper: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lock_wallpaper: Option<String>,
     /// Queue playback mode: `"sequential"` / `"shuffle"` / `"random"`.
     /// Restored on startup so the rotator resumes the same behavior.
     #[serde(alias = "playlist_mode")]
@@ -214,6 +218,7 @@ impl Default for GlobalSettings {
     fn default() -> Self {
         Self {
             last_wallpaper: None,
+            lock_wallpaper: None,
             queue_mode: "sequential".to_string(),
             rotation_secs: 0,
             audio_fade_ms: DEFAULT_AUDIO_FADE_MS,
@@ -694,6 +699,21 @@ impl SettingsStore {
         g.global.last_wallpaper.clone()
     }
 
+    pub fn resolved_lock_wallpaper(&self, display_key: &str) -> Option<String> {
+        {
+            let g = self.inner.read().expect("settings poisoned");
+            if let Some(id) = g
+                .displays
+                .get(display_key)
+                .and_then(|prefs| prefs.lock_wallpaper.clone())
+                .or_else(|| g.global.lock_wallpaper.clone())
+            {
+                return Some(id);
+            }
+        }
+        self.resolved_last_wallpaper(display_key)
+    }
+
     /// Snapshot just the cloned per-display preferences.
     /// Used to expose overrides over the control plane.
     pub fn display_prefs(&self, display_name: &str) -> Option<DisplayPrefs> {
@@ -1105,6 +1125,44 @@ fillmode = "preserve_aspect_fit"
         assert_eq!(
             store.resolved_last_wallpaper("DP-2").as_deref(),
             Some("wp-global"),
+        );
+    }
+
+    #[tokio::test]
+    async fn resolved_lock_wallpaper_falls_back_to_desktop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load_or_default(tmp.path().join("config.toml")).await;
+
+        store.update(|s| {
+            s.global.last_wallpaper = Some("desktop".into());
+        });
+        assert_eq!(
+            store.resolved_lock_wallpaper("HDMI-A-1").as_deref(),
+            Some("desktop"),
+        );
+
+        store.update(|s| s.global.lock_wallpaper = Some("lock-global".into()));
+        assert_eq!(
+            store.resolved_lock_wallpaper("HDMI-A-1").as_deref(),
+            Some("lock-global"),
+        );
+
+        store.update(|s| {
+            s.displays.insert(
+                "HDMI-A-1".into(),
+                DisplayPrefs {
+                    lock_wallpaper: Some("lock-a".into()),
+                    ..Default::default()
+                },
+            );
+        });
+        assert_eq!(
+            store.resolved_lock_wallpaper("HDMI-A-1").as_deref(),
+            Some("lock-a"),
+        );
+        assert_eq!(
+            store.resolved_lock_wallpaper("DP-2").as_deref(),
+            Some("lock-global"),
         );
     }
 

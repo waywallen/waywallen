@@ -984,6 +984,10 @@ impl Router {
 
     /// Update the session-level state driven by the
     /// `session_monitor` task. `None` leaves that flag unchanged.
+    pub async fn is_session_locked(&self) -> bool {
+        self.inner.lock().await.session_locked
+    }
+
     pub async fn update_session_state(
         self: &Arc<Self>,
         locked: Option<bool>,

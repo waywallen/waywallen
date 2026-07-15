@@ -72,9 +72,10 @@ fn spawn_wallpaper_recall(state: Arc<AppState>) {
             let mut events_rx = state.router.subscribe_events();
 
             // Initial sweep of already-registered displays.
+            let locked = state.router.is_session_locked().await;
             for snap in state.router.snapshot_displays().await {
                 if seen.insert(snap.id) {
-                    record(&state, &mut pending, snap, SETTLE);
+                    record(&state, &mut pending, snap, locked, SETTLE);
                 }
             }
 
@@ -100,9 +101,10 @@ fn spawn_wallpaper_recall(state: Arc<AppState>) {
                                 return Ok(());
                             }
                         };
+                        let locked = state.router.is_session_locked().await;
                         for snap in snaps {
                             if seen.insert(snap.id) {
-                                record(&state, &mut pending, snap, SETTLE);
+                                record(&state, &mut pending, snap, locked, SETTLE);
                             }
                         }
                     }
@@ -147,9 +149,20 @@ fn record(
     state: &Arc<AppState>,
     pending: &mut HashMap<String, (tokio::time::Instant, Vec<scheduler::DisplayId>)>,
     snap: routing::DisplaySnapshot,
+    locked: bool,
     settle: Duration,
 ) {
     let key = snap.instance_id.as_deref().unwrap_or(&snap.name);
+    if locked {
+        if let Some(wp_id) = state.settings.resolved_lock_wallpaper(key) {
+            pending
+                .entry(wp_id)
+                .or_insert_with(|| (tokio::time::Instant::now(), Vec::new()))
+                .1
+                .push(snap.id);
+        }
+        return;
+    }
     let playlist_owned = state
         .settings
         .display_prefs(key)
