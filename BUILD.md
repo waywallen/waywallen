@@ -12,6 +12,7 @@ End-to-end build instructions for developers.
 | Vulkan SDK | ≥ 1.1 |  |
 | Qt6 | ≥ 6.10 | Quick, DBus, Protobuf |
 | ffmpeg | - |  |
+| git-lfs | - | QmlMaterial stores its icon fonts in LFS; without it the UI builds but every icon renders as a placeholder box |
 
 ## Build, install, run
 
