@@ -208,6 +208,125 @@ fn resolve_ui_path(explicit: Option<PathBuf>) -> Option<PathBuf> {
     None
 }
 
+/// Auto-pick (or pin) and preflight a display backend for `caps`.
+/// Returns the status to surface plus the def to spawn when the daemon
+/// owns the backend process.
+fn select_display_backend(
+    registry: &plugin::display_registry::DisplayRegistry,
+    caps: &display::spawner::DeCaps,
+    pinned: Option<&str>,
+) -> (
+    display::spawner::DisplayBackendStatus,
+    Option<plugin::display_registry::DisplayDef>,
+) {
+    let pick = if let Some(name) = pinned {
+        match registry.find(name) {
+            Some(def) => {
+                log::info!("display backend pinned by --display-backend: {name}");
+                display::spawner::PickOutcome::Matched(def.clone())
+            }
+            None => {
+                log::error!(
+                    "--display-backend {name} not found in registry; falling back to auto-detect"
+                );
+                display::spawner::pick_backend(registry, caps)
+            }
+        }
+    } else {
+        display::spawner::pick_backend(registry, caps)
+    };
+    display::spawner::log_outcome(&pick, caps);
+    let should_spawn = display::spawner::should_daemon_spawn(&pick);
+    match pick {
+        display::spawner::PickOutcome::KdeHardMatch(def)
+        | display::spawner::PickOutcome::Matched(def)
+            if should_spawn =>
+        {
+            let (status, backend) = display::spawner::preflight_daemon_backend(def, caps);
+            if status.state == display::spawner::DISPLAY_BACKEND_STATE_BINARY_MISSING
+                || status.state == display::spawner::DISPLAY_BACKEND_STATE_FLATPAK_RESTRICTED
+            {
+                log::error!("{}", status.reason);
+            }
+            (status, backend)
+        }
+        display::spawner::PickOutcome::KdeHardMatch(def)
+        | display::spawner::PickOutcome::Matched(def) => (
+            display::spawner::DisplayBackendStatus::external(&def, caps),
+            None,
+        ),
+        display::spawner::PickOutcome::None => (
+            display::spawner::DisplayBackendStatus::unmatched(caps),
+            None,
+        ),
+    }
+}
+
+/// Early-boot backend recovery. Polls the session (systemd user env +
+/// on-disk Wayland sockets) until `XDG_CURRENT_DESKTOP` appears, then
+/// runs the normal selection once and spawns the supervisor when the
+/// daemon owns the backend. Bounded by `DETECT_RETRY_WINDOW`.
+fn spawn_backend_detect_retry(
+    state: Arc<AppState>,
+    registry: Arc<plugin::display_registry::DisplayRegistry>,
+    sock_path: PathBuf,
+    conn: zbus::Connection,
+) {
+    let tasks = state.tasks.clone();
+    tasks.spawn_async(
+        tasks::TaskKind::Service,
+        "display/backend-detect",
+        async move {
+            let mut shutdown_rx = state.shutdown_subscribe();
+            let mut delay = display::spawner::DETECT_RETRY_INITIAL;
+            let deadline = tokio::time::Instant::now() + display::spawner::DETECT_RETRY_WINDOW;
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = shutdown_rx.wait_for(|v| *v) => return Ok(()),
+                    _ = tokio::time::sleep(delay) => {}
+                }
+                let (caps, extra_env) = display::spawner::detect_de_runtime(Some(&conn)).await;
+                if caps.xdg_desktop.is_empty() {
+                    if tokio::time::Instant::now() >= deadline {
+                        log::warn!(
+                            "display backend detection gave up after {}s without a session; \
+                             pass --display-backend or start waywallen after login",
+                            display::spawner::DETECT_RETRY_WINDOW.as_secs()
+                        );
+                        return Ok(());
+                    }
+                    delay = std::cmp::min(delay * 2, display::spawner::DETECT_RETRY_MAX);
+                    continue;
+                }
+                log::info!(
+                    "session environment appeared (xdg_desktop={:?}); selecting display backend",
+                    caps.xdg_desktop
+                );
+                let (status, backend) = select_display_backend(&registry, &caps, None);
+                *state.display_backend_status.write().unwrap() = status;
+                state.events.publish(events::GlobalEvent::StatusChanged);
+                if let Some(def) = backend {
+                    let shutdown_rx = state.shutdown_subscribe();
+                    let name = def.name.clone();
+                    state.tasks.spawn_async(
+                        tasks::TaskKind::Service,
+                        format!("display/backend/{name}"),
+                        async move {
+                            display::spawner::run_backend(def, sock_path, extra_env, shutdown_rx)
+                                .await
+                                .map_err(|e| {
+                                    anyhow::anyhow!("display backend supervisor exited: {e}")
+                                })
+                        },
+                    );
+                }
+                return Ok(());
+            }
+        },
+    );
+}
+
 fn main() -> anyhow::Result<()> {
     env_logger::init();
 
@@ -425,55 +544,20 @@ async fn async_main() -> anyhow::Result<()> {
             }
         }
     }
-    let display_caps = display::spawner::detect_de();
+    let display_registry = Arc::new(display_registry);
+    let (display_caps, display_extra_env) =
+        display::spawner::detect_de_runtime(Some(&dbus_conn)).await;
     let display_backend: Option<plugin::display_registry::DisplayDef> = if cli.no_display {
         log::info!("--no-display: skipping display backend selection");
         *state.display_backend_status.write().unwrap() =
             display::spawner::DisplayBackendStatus::disabled(&display_caps);
         None
     } else {
-        let pick = if let Some(name) = cli.display_backend.as_deref() {
-            match display_registry.find(name) {
-                Some(def) => {
-                    log::info!("display backend pinned by --display-backend: {name}");
-                    display::spawner::PickOutcome::Matched(def.clone())
-                }
-                None => {
-                    log::error!(
-                        "--display-backend {name} not found in registry; falling back to auto-detect"
-                    );
-                    display::spawner::pick_backend(&display_registry, &display_caps)
-                }
-            }
-        } else {
-            display::spawner::pick_backend(&display_registry, &display_caps)
-        };
-        display::spawner::log_outcome(&pick, &display_caps);
-        let should_spawn = display::spawner::should_daemon_spawn(&pick);
-        let (status, backend) = match pick {
-            display::spawner::PickOutcome::KdeHardMatch(def)
-            | display::spawner::PickOutcome::Matched(def)
-                if should_spawn =>
-            {
-                let (status, backend) =
-                    display::spawner::preflight_daemon_backend(def, &display_caps);
-                if status.state == display::spawner::DISPLAY_BACKEND_STATE_BINARY_MISSING
-                    || status.state == display::spawner::DISPLAY_BACKEND_STATE_FLATPAK_RESTRICTED
-                {
-                    log::error!("{}", status.reason);
-                }
-                (status, backend)
-            }
-            display::spawner::PickOutcome::KdeHardMatch(def)
-            | display::spawner::PickOutcome::Matched(def) => (
-                display::spawner::DisplayBackendStatus::external(&def, &display_caps),
-                None,
-            ),
-            display::spawner::PickOutcome::None => (
-                display::spawner::DisplayBackendStatus::unmatched(&display_caps),
-                None,
-            ),
-        };
+        let (status, backend) = select_display_backend(
+            &display_registry,
+            &display_caps,
+            cli.display_backend.as_deref(),
+        );
         *state.display_backend_status.write().unwrap() = status;
         backend
     };
@@ -495,15 +579,29 @@ async fn async_main() -> anyhow::Result<()> {
     if let Some(def) = display_backend {
         let sock_path = display_sock_path.clone();
         let shutdown_rx = state.shutdown_subscribe();
+        let extra_env = display_extra_env.clone();
         let name = def.name.clone();
         state.tasks.spawn_async(
             tasks::TaskKind::Service,
             format!("display/backend/{name}"),
             async move {
-                display::spawner::run_backend(def, sock_path, shutdown_rx)
+                display::spawner::run_backend(def, sock_path, extra_env, shutdown_rx)
                     .await
                     .map_err(|e| anyhow::anyhow!("display backend supervisor exited: {e}"))
             },
+        );
+    } else if !cli.no_display
+        && cli.display_backend.is_none()
+        && display_caps.xdg_desktop.is_empty()
+    {
+        // Early-boot recovery: an empty XDG_CURRENT_DESKTOP usually
+        // means the daemon started before the session came up (e.g. a
+        // systemd unit racing the compositor), not an unknown desktop.
+        spawn_backend_detect_retry(
+            state.clone(),
+            display_registry.clone(),
+            display_sock_path.clone(),
+            dbus_conn.clone(),
         );
     }
 
