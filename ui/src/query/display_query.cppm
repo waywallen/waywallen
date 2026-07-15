@@ -154,4 +154,34 @@ private:
     bool    m_clear { false };
 };
 
+export class DisplayLockWallpaperSetQuery
+    : public Query,
+      public QueryExtra<control::v1::Response, DisplayLockWallpaperSetQuery> {
+    Q_OBJECT
+    QML_ELEMENT
+
+    Q_PROPERTY(QString name READ name WRITE setName NOTIFY paramsChanged FINAL)
+    Q_PROPERTY(quint64 displayId READ displayId WRITE setDisplayId NOTIFY paramsChanged FINAL)
+    Q_PROPERTY(QString wallpaperId READ wallpaperId WRITE setWallpaperId NOTIFY paramsChanged FINAL)
+
+public:
+    DisplayLockWallpaperSetQuery(QObject* parent = nullptr);
+
+    auto name() const -> const QString& { return m_name; }
+    void setName(const QString& v);
+    auto displayId() const -> quint64 { return m_display_id; }
+    void setDisplayId(quint64 v);
+    auto wallpaperId() const -> const QString& { return m_wallpaper_id; }
+    void setWallpaperId(const QString& v);
+
+    void reload() override;
+
+    Q_SIGNAL void paramsChanged();
+
+private:
+    QString m_name;
+    quint64 m_display_id { 0 };
+    QString m_wallpaper_id;
+};
+
 } // namespace waywallen

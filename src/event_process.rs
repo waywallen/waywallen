@@ -154,7 +154,18 @@ fn record(
 ) {
     let key = snap.instance_id.as_deref().unwrap_or(&snap.name);
     if locked {
-        if let Some(wp_id) = state.settings.resolved_lock_wallpaper(key) {
+        let key = key.to_string();
+        if !state
+            .settings
+            .display_prefs(&key)
+            .is_some_and(|p| p.has_lock_screen)
+        {
+            state.settings.update(|s| {
+                s.displays.entry(key.clone()).or_default().has_lock_screen = true;
+            });
+            state.events.publish(GlobalEvent::SettingsChanged);
+        }
+        if let Some(wp_id) = state.settings.resolved_lock_wallpaper(&key) {
             pending
                 .entry(wp_id)
                 .or_insert_with(|| (tokio::time::Instant::now(), Vec::new()))

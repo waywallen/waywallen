@@ -65,6 +65,7 @@ message Request {
     WallpaperPropertySetRequest wallpaper_property_set = 43;
     WallpaperApplyViaPortalRequest wallpaper_apply_via_portal = 44;
     DisplayRenameRequest      display_rename = 45;
+    DisplayLockWallpaperSetRequest display_lock_wallpaper_set = 67;
     PluginInstallRequest      plugin_install = 46;
     PluginListRequest         plugin_list = 47;
     TagListRequest            tag_list = 48;
@@ -135,6 +136,7 @@ message Response {
     WallpaperPropertySetResponse wallpaper_property_set = 43;
     WallpaperApplyViaPortalResponse wallpaper_apply_via_portal = 44;
     DisplayRenameResponse      display_rename = 45;
+    DisplayLockWallpaperSetResponse display_lock_wallpaper_set = 67;
     PluginInstallResponse      plugin_install = 46;
     PluginListResponse         plugin_list = 47;
     TagListResponse            tag_list = 48;
@@ -637,6 +639,8 @@ message DisplayInfo {
   // this value so display settings remain independently editable.
   LayoutPrefs display_layout = 12;
   LayoutSource effective_layout_source = 13;
+  string lock_wallpaper = 14;
+  bool has_lock_screen = 15;
 }
 
 message DisplayRenameRequest {
@@ -651,6 +655,13 @@ message DisplayRenameRequest {
 message DisplayRenameResponse {
   DisplayInfo display = 1;
 }
+
+message DisplayLockWallpaperSetRequest {
+  repeated uint64 display_ids = 1;
+  string wallpaper_id = 2;
+}
+
+message DisplayLockWallpaperSetResponse {}
 
 message RemoteAvailabilityRequest {}
 

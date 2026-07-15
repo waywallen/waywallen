@@ -73,6 +73,8 @@ using proto::DisplayListRequest;
 using proto::DisplayListResponse;
 using proto::DisplayRenameRequest;
 using proto::DisplayRenameResponse;
+using proto::DisplayLockWallpaperSetRequest;
+using proto::DisplayLockWallpaperSetResponse;
 using proto::LayoutOverride;
 
 using proto::RemoteAvailabilityRequest;

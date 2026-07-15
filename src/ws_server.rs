@@ -464,6 +464,8 @@ fn display_snapshot_to_pb(s: DisplaySnapshot, settings: &SettingsStore) -> pb::D
         alias: override_prefs.alias.clone().unwrap_or_default(),
         display_layout: Some(layout_prefs_to_pb_resolved(&s.display_layout)),
         effective_layout_source: layout_source_to_pb(s.effective_layout_source) as i32,
+        lock_wallpaper: override_prefs.lock_wallpaper.clone().unwrap_or_default(),
+        has_lock_screen: override_prefs.has_lock_screen,
     }
 }
 
@@ -2019,6 +2021,25 @@ async fn dispatch_inner(
                 None => None,
             };
             Res::DisplayRename(pb::DisplayRenameResponse { display })
+        }
+
+        Req::DisplayLockWallpaperSet(r) => {
+            let wallpaper_id = (!r.wallpaper_id.trim().is_empty()).then(|| r.wallpaper_id.clone());
+            let target = (!r.display_ids.is_empty()).then_some(r.display_ids.as_slice());
+            let target_ids = state.router.registered_display_ids(target).await;
+            let keys = state.router.display_settings_keys(&target_ids).await;
+            state.settings.update(|s| {
+                for (_, key) in &keys {
+                    let entry = s.displays.entry(key.clone()).or_default();
+                    entry.lock_wallpaper = wallpaper_id.clone();
+                    let empty = entry.is_empty();
+                    if empty {
+                        s.displays.remove(key);
+                    }
+                }
+            });
+            state.events.publish(GlobalEvent::SettingsChanged);
+            Res::DisplayLockWallpaperSet(pb::DisplayLockWallpaperSetResponse {})
         }
 
         Req::RemoteAvailability(_) => {

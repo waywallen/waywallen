@@ -186,6 +186,46 @@ void DisplayRenameQuery::reload() {
     });
 }
 
+DisplayLockWallpaperSetQuery::DisplayLockWallpaperSetQuery(QObject* parent): Query(parent) {}
+
+#define WW_SET(field, val)          \
+    do {                            \
+        if (this->field != val) {   \
+            this->field = val;      \
+            Q_EMIT paramsChanged(); \
+        }                           \
+    } while (0)
+
+void DisplayLockWallpaperSetQuery::setName(const QString& v) { WW_SET(m_name, v); }
+void DisplayLockWallpaperSetQuery::setDisplayId(quint64 v) { WW_SET(m_display_id, v); }
+void DisplayLockWallpaperSetQuery::setWallpaperId(const QString& v) { WW_SET(m_wallpaper_id, v); }
+#undef WW_SET
+
+void DisplayLockWallpaperSetQuery::reload() {
+    setStatus(Status::Querying);
+    auto backend = App::instance()->backend();
+
+    proto::DisplayLockWallpaperSetRequest inner;
+    inner.setName(m_name);
+    inner.setDisplayId(m_display_id);
+    inner.setWallpaperId(m_wallpaper_id);
+
+    auto req = proto::Request {};
+    req.setDisplayLockWallpaperSet(std::move(inner));
+
+    auto self = QWatcher { this };
+    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+        auto result = co_await backend->send(std::move(req));
+        co_await asio::post(asio::bind_executor(QAsyncResult::get_executor(), use_task));
+        if (! self) co_return;
+
+        self->inspect_set(result, [](const proto::Response& rsp) {
+            (void)rsp;
+        });
+        co_return;
+    });
+}
+
 } // namespace waywallen
 
 #include "waywallen/query/display_query.moc.cpp"

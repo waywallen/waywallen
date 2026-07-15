@@ -41,6 +41,8 @@ pub struct DisplayPrefs {
     /// Used to restore per-display assignment on restart.
     pub last_wallpaper: Option<String>,
     pub lock_wallpaper: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_lock_screen: bool,
     pub alias: Option<String>,
     pub active_playlist_id: Option<i64>,
 }
@@ -54,6 +56,7 @@ impl DisplayPrefs {
             && self.auto_replay.is_none()
             && self.last_wallpaper.is_none()
             && self.lock_wallpaper.is_none()
+            && !self.has_lock_screen
             && self.alias.is_none()
             && self.active_playlist_id.is_none()
     }
