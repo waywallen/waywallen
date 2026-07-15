@@ -14,7 +14,59 @@ const WATCHER_SERVICE: &str = "org.kde.StatusNotifierWatcher";
 const WATCHER_PATH: &str = "/StatusNotifierWatcher";
 const WATCHER_IFACE: &str = "org.kde.StatusNotifierWatcher";
 
-pub async fn spawn(conn: Arc<Connection>, app: Arc<AppState>) -> Result<()> {
+/// Live tray state. The item and menu are served on their own bus
+/// connection rather than the daemon's: SNI hosts drop an icon when
+/// the name that registered it vanishes, so closing this connection is
+/// what makes hiding the tray work at runtime.
+pub struct TrayHandle {
+    conn: Connection,
+    watcher: tokio::task::JoinHandle<()>,
+}
+
+impl TrayHandle {
+    /// Connection hosting `/StatusNotifierItem` and `/MenuBar`.
+    pub fn connection(&self) -> &Connection {
+        &self.conn
+    }
+}
+
+/// Register the tray icon. Idempotent: no-op while a tray is up.
+/// Best-effort — a missing StatusNotifierWatcher is not an error; the
+/// watcher task registers once it appears.
+pub async fn ensure_started(app: Arc<AppState>) {
+    let mut slot = app.tray.lock().await;
+    if slot.is_some() {
+        return;
+    }
+    match start(app.clone()).await {
+        Ok(handle) => *slot = Some(handle),
+        Err(e) => log::warn!("tray: {e} (continuing without tray)"),
+    }
+}
+
+/// Remove the tray icon. Idempotent: no-op when not running.
+pub async fn ensure_stopped(app: &AppState) {
+    // Release the slot before closing so an in-flight menu handler
+    // waiting on it sees `None` instead of deadlocking against us.
+    let handle = app.tray.lock().await.take();
+    let Some(handle) = handle else {
+        return;
+    };
+    handle.watcher.abort();
+    // Dropping the name is the SNI removal signal; hosts clean up on
+    // NameOwnerChanged.
+    if let Err(e) = handle.conn.close().await {
+        log::debug!("tray: close: {e}");
+    }
+    log::info!("tray: removed {ITEM_PATH}");
+}
+
+async fn start(app: Arc<AppState>) -> Result<TrayHandle> {
+    // Own connection, not the daemon's — see `TrayHandle`.
+    let conn = Connection::session()
+        .await
+        .map_err(|e| anyhow!("session bus: {e}"))?;
+
     // Hosts resolve `IconName` against their own `XDG_DATA_DIRS`.
     // That may miss the AppImage squashfs mount, so expose a theme path.
     let icon_theme_path = std::env::current_exe()
@@ -23,23 +75,27 @@ pub async fn spawn(conn: Arc<Connection>, app: Arc<AppState>) -> Result<()> {
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
     let item = sni::StatusNotifierItem::new(app.clone(), icon_theme_path);
-    let menu = dbusmenu::DBusMenu::new(app.clone());
+    let menu = dbusmenu::DBusMenu::new(app);
 
     conn.object_server().at(ITEM_PATH, item).await?;
     conn.object_server().at(MENU_PATH, menu).await?;
 
-    register_with_watcher(&conn).await?;
-
-    // Re-register whenever the watcher (re)appears.
+    // Watch before the first registration attempt: a watcher that is
+    // not up yet (early boot) registers us when it appears, so a
+    // failure below is only informational.
     let conn_bg = conn.clone();
-    tokio::spawn(async move {
+    let watcher = tokio::spawn(async move {
         if let Err(e) = watch_watcher(conn_bg).await {
             log::warn!("tray watcher monitor exited: {e}");
         }
     });
 
-    log::info!("tray: registered {ITEM_PATH}");
-    Ok(())
+    match register_with_watcher(&conn).await {
+        Ok(()) => log::info!("tray: registered {ITEM_PATH}"),
+        Err(e) => log::info!("tray: watcher not available yet: {e}"),
+    }
+
+    Ok(TrayHandle { conn, watcher })
 }
 
 async fn register_with_watcher(conn: &Connection) -> Result<()> {
@@ -51,7 +107,7 @@ async fn register_with_watcher(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-async fn watch_watcher(conn: Arc<Connection>) -> Result<()> {
+async fn watch_watcher(conn: Connection) -> Result<()> {
     use futures_util::StreamExt;
     let dbus = zbus::fdo::DBusProxy::new(&conn).await?;
     let mut stream = dbus.receive_name_owner_changed().await?;

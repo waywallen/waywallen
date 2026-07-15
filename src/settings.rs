@@ -208,6 +208,10 @@ pub struct GlobalSettings {
 
     /// Last autostart state successfully accepted by the Flatpak portal.
     pub autostart_enabled: bool,
+
+    /// Hide the StatusNotifierItem tray icon. Applied live; the
+    /// `--no-tray` CLI flag forces the tray off regardless.
+    pub hide_tray_icon: bool,
 }
 
 impl Default for GlobalSettings {
@@ -229,6 +233,7 @@ impl Default for GlobalSettings {
             plugin_update_notifications: true,
             duplicate_renderers_for_same_wallpaper: false,
             autostart_enabled: false,
+            hide_tray_icon: false,
         }
     }
 }
@@ -975,6 +980,19 @@ duplicate_renderers_for_same_wallpaper = true
         assert!(toml::to_string(&s)
             .unwrap()
             .contains("duplicate_renderers_for_same_wallpaper = true"));
+    }
+
+    #[test]
+    fn hide_tray_icon_roundtrip() {
+        let src = r#"
+[global]
+hide_tray_icon = true
+"#;
+        let s: Settings = toml::from_str(src).unwrap();
+        assert!(s.global.hide_tray_icon);
+        assert!(toml::to_string(&s)
+            .unwrap()
+            .contains("hide_tray_icon = true"));
     }
 
     #[test]

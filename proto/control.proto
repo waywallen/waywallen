@@ -1040,6 +1040,10 @@ message GlobalSettings {
   // When enabled, one wallpaper applied to multiple displays gets one
   // renderer per display instead of sharing a single renderer instance.
   bool duplicate_renderers_for_same_wallpaper = 19;
+
+  // Hide the tray icon. The daemon applies this live; the window can
+  // be reopened by launching waywallen again. `--no-tray` overrides.
+  bool hide_tray_icon = 20;
 }
 
 enum AutoAction {

@@ -269,7 +269,14 @@ async fn snapshot_menu_state(app: &Arc<AppState>) -> MenuState {
 /// Best-effort `LayoutUpdated` emission. Called from `control::*`
 /// helpers when state that affects checkmark / radio rendering changes
 pub async fn notify_menu_changed(app: &Arc<AppState>) {
-    let conn = match app.dbus_conn.lock().unwrap().clone() {
+    // The menu lives on the tray's own connection; no tray, no menu.
+    let conn = match app
+        .tray
+        .lock()
+        .await
+        .as_ref()
+        .map(|t| t.connection().clone())
+    {
         Some(c) => c,
         None => return,
     };

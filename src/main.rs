@@ -87,6 +87,11 @@ pub struct AppState {
     /// SourceManager and the sync layer so dlopen happens at most once.
     pub probe: Arc<dyn MediaProbe>,
     pub playlists: playlist::engine::Engine,
+    /// `--no-tray` CLI override. Forces the tray off and makes the
+    /// `hide_tray_icon` live toggle a no-op for this run.
+    pub no_tray: bool,
+    /// Live tray handle; `Some` while the tray icon is registered.
+    pub tray: tokio::sync::Mutex<Option<tray::TrayHandle>>,
 }
 
 impl AppState {
@@ -484,6 +489,8 @@ async fn async_main() -> anyhow::Result<()> {
         tasks: task_mgr.clone(),
         probe: probe.clone(),
         playlists: playlist::engine::Engine::new(),
+        no_tray: cli.no_tray,
+        tray: tokio::sync::Mutex::new(None),
     });
 
     // Auto-rotation service. Runs until shutdown, parked on a watch
@@ -814,13 +821,14 @@ async fn async_main() -> anyhow::Result<()> {
         .publish(crate::events::GlobalEvent::StatusChanged);
 
     // Tray icon is best-effort and requires a StatusNotifierWatcher.
-    if !cli.no_tray {
-        let conn = dbus_conn.clone();
+    if cli.no_tray {
+        log::info!("tray disabled by --no-tray");
+    } else if state.settings.global().hide_tray_icon {
+        log::info!("tray hidden by hide_tray_icon setting");
+    } else {
         let state_t = state.clone();
         tokio::spawn(async move {
-            if let Err(e) = tray::spawn(conn, state_t).await {
-                log::warn!("tray: {e} (continuing without tray)");
-            }
+            tray::ensure_started(state_t).await;
         });
     }
 

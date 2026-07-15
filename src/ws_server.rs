@@ -683,6 +683,7 @@ fn global_to_pb(g: &crate::settings::GlobalSettings) -> pb::GlobalSettings {
         wallpaper_skip_content_ratings: g.wallpaper_skip_content_ratings.clone(),
         disable_plugin_update_notifications: !g.plugin_update_notifications,
         duplicate_renderers_for_same_wallpaper: g.duplicate_renderers_for_same_wallpaper,
+        hide_tray_icon: g.hide_tray_icon,
     }
 }
 
@@ -2334,6 +2335,7 @@ async fn dispatch_inner(
             let prev_layout = state.settings.snapshot().global.layout.clone();
             let prev_queue_mode = state.settings.snapshot().global.queue_mode.clone();
             let prev_rotation_secs = state.settings.snapshot().global.rotation_secs;
+            let prev_hide_tray = state.settings.snapshot().global.hide_tray_icon;
             state.settings.update(|s| {
                 if let Some(g) = r.global.as_ref() {
                     s.global.wallpaper_filter = WallpaperFilterState::from_pb(
@@ -2373,6 +2375,7 @@ async fn dispatch_inner(
                     s.global.plugin_update_notifications = !g.disable_plugin_update_notifications;
                     s.global.duplicate_renderers_for_same_wallpaper =
                         g.duplicate_renderers_for_same_wallpaper;
+                    s.global.hide_tray_icon = g.hide_tray_icon;
                 }
                 s.plugins = new_plugins.clone();
             });
@@ -2406,6 +2409,18 @@ async fn dispatch_inner(
             let new_rotation_secs = state.settings.snapshot().global.rotation_secs;
             if new_rotation_secs != prev_rotation_secs {
                 state.rotation.set_interval(new_rotation_secs);
+            }
+            let new_hide_tray = state.settings.snapshot().global.hide_tray_icon;
+            if new_hide_tray != prev_hide_tray {
+                if state.no_tray {
+                    log::info!(
+                        "--no-tray active; hide_tray_icon={new_hide_tray} takes effect next run"
+                    );
+                } else if new_hide_tray {
+                    crate::tray::ensure_stopped(state).await;
+                } else {
+                    crate::tray::ensure_started(state.clone()).await;
+                }
             }
             // Hot-reload live renderers for plugins whose settings changed.
             let mut plugin_names_changed: std::collections::HashSet<String> =
