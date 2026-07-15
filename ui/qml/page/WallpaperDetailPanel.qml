@@ -20,6 +20,14 @@ Item {
 
     property var applyTargetIds: []
     property int rendererIndex: 0
+    property string applyTarget: "desktop"
+    readonly property bool showLockTarget: {
+        const all = W.App.displayManager.displays || [];
+        const targets = root.applyTargetIds.length === 0
+            ? all
+            : all.filter(d => root.applyTargetIds.indexOf(d.id) >= 0);
+        return targets.some(d => !!d && d.hasLockScreen === true);
+    }
     readonly property var kFillModeValues: [1, 2, 3, 7]
     readonly property var kFillModeLabels: ["Stretch", "Fit", "Crop", "Center"]
     readonly property var kRotationValues: [1, 2, 3, 4]
@@ -113,9 +121,24 @@ Item {
     W.RendererPluginListQuery { id: pluginQuery }
     W.WallpaperApplyQuery { id: applyQuery }
     W.WallpaperApplyViaPortalQuery { id: portalApplyQuery }
+    W.DisplayLockWallpaperSetQuery { id: lockWallpaperQuery }
     W.WallpaperRemoveQuery {
         id: removeQuery
         wallpaperId: root.wallpaperId
+    }
+
+    Connections {
+        target: lockWallpaperQuery
+        function onStatusChanged() {
+            if (lockWallpaperQuery.status === 2) {
+                wallpaperGetQuery.reload();
+            } else if (lockWallpaperQuery.status === 3) {
+                const message = lockWallpaperQuery.error && lockWallpaperQuery.error.length > 0
+                    ? lockWallpaperQuery.error
+                    : qsTr("Apply failed");
+                W.Action.toast(message, 6000, 1, null);
+            }
+        }
     }
 
     Connections {
@@ -246,20 +269,28 @@ Item {
     MD.Action {
         id: applyAction
         text: "Apply"
-        busy: applyQuery.querying
+        busy: applyQuery.querying || lockWallpaperQuery.querying
         enabled: (W.App.displayManager.displays || []).length > 0
         onTriggered: {
             if (busy) return;
             if (!root.wp) return;
-            applyQuery.wallpaper = root.wp;
-            applyQuery.displayIds = root.applyTargetIds;
-            if (root.rendererCandidates.length >= 2) {
-                const pick = root.rendererCandidates[root.rendererIndex];
-                applyQuery.rendererName = pick ? (pick.name || "") : "";
-            } else {
-                applyQuery.rendererName = "";
+            const target = root.showLockTarget ? root.applyTarget : "desktop";
+            if (target === "desktop" || target === "both") {
+                applyQuery.wallpaper = root.wp;
+                applyQuery.displayIds = root.applyTargetIds;
+                if (root.rendererCandidates.length >= 2) {
+                    const pick = root.rendererCandidates[root.rendererIndex];
+                    applyQuery.rendererName = pick ? (pick.name || "") : "";
+                } else {
+                    applyQuery.rendererName = "";
+                }
+                applyQuery.reload();
             }
-            applyQuery.reload();
+            if (target === "lock" || target === "both") {
+                lockWallpaperQuery.displayIds = root.applyTargetIds;
+                lockWallpaperQuery.wallpaperId = root.wp.id_proto;
+                lockWallpaperQuery.reload();
+            }
         }
     }
 
@@ -944,6 +975,42 @@ Item {
                             checked: root.applyTargetIds.indexOf(modelData?.id) >= 0
                             onClicked: root.toggleTarget(modelData?.id)
                         }
+                    }
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+                visible: root.showLockTarget
+
+                MD.Text {
+                    text: "Set as"
+                    typescale: MD.Token.typescale.label_medium
+                    color: MD.Token.color.on_surface_variant
+                }
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 6
+
+                    MD.FilterChip {
+                        checkable: false
+                        text: "Both"
+                        checked: root.applyTarget === "both"
+                        onClicked: root.applyTarget = "both"
+                    }
+                    MD.FilterChip {
+                        checkable: false
+                        text: "Desktop"
+                        checked: root.applyTarget === "desktop"
+                        onClicked: root.applyTarget = "desktop"
+                    }
+                    MD.FilterChip {
+                        checkable: false
+                        text: "Lock Screen"
+                        checked: root.applyTarget === "lock"
+                        onClicked: root.applyTarget = "lock"
                     }
                 }
             }

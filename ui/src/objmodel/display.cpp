@@ -103,7 +103,8 @@ Display::Display(const proto::DisplayInfo& info, QObject* parent)
       m_layout_override(layoutOverrideFromPb(info)),
       m_drm_render_major(info.drmRenderMajor()),
       m_drm_render_minor(info.drmRenderMinor()),
-      m_lock_wallpaper(info.lockWallpaper()) {}
+      m_lock_wallpaper(info.lockWallpaper()),
+      m_has_lock_screen(info.hasLockScreen()) {}
 
 void Display::updateFrom(const proto::DisplayInfo& info) {
     rstd_assert(info.displayId() == m_id, "Display::updateFrom id mismatch");
@@ -154,6 +155,10 @@ void Display::updateFrom(const proto::DisplayInfo& info) {
     if (m_lock_wallpaper != info.lockWallpaper()) {
         m_lock_wallpaper = info.lockWallpaper();
         Q_EMIT lockWallpaperChanged();
+    }
+    if (m_has_lock_screen != info.hasLockScreen()) {
+        m_has_lock_screen = info.hasLockScreen();
+        Q_EMIT hasLockScreenChanged();
     }
 }
 

@@ -1,5 +1,6 @@
 module;
 #include "waywallen/query/display_query.moc.h"
+#include <qtprotobuftypes.h>
 #undef assert
 #include <rstd/macro.hpp>
 #include <algorithm>
@@ -196,8 +197,7 @@ DisplayLockWallpaperSetQuery::DisplayLockWallpaperSetQuery(QObject* parent): Que
         }                           \
     } while (0)
 
-void DisplayLockWallpaperSetQuery::setName(const QString& v) { WW_SET(m_name, v); }
-void DisplayLockWallpaperSetQuery::setDisplayId(quint64 v) { WW_SET(m_display_id, v); }
+void DisplayLockWallpaperSetQuery::setDisplayIds(const QVariantList& v) { WW_SET(m_display_ids, v); }
 void DisplayLockWallpaperSetQuery::setWallpaperId(const QString& v) { WW_SET(m_wallpaper_id, v); }
 #undef WW_SET
 
@@ -206,8 +206,14 @@ void DisplayLockWallpaperSetQuery::reload() {
     auto backend = App::instance()->backend();
 
     proto::DisplayLockWallpaperSetRequest inner;
-    inner.setName(m_name);
-    inner.setDisplayId(m_display_id);
+    QtProtobuf::uint64List ids;
+    ids.reserve(m_display_ids.size());
+    for (const auto& v : m_display_ids) {
+        bool ok = false;
+        auto id = v.toULongLong(&ok);
+        if (ok) ids.append(id);
+    }
+    inner.setDisplayIds(ids);
     inner.setWallpaperId(m_wallpaper_id);
 
     auto req = proto::Request {};

@@ -53,6 +53,7 @@ class Display : public QObject {
     Q_PROPERTY(qint64 activePlaylistId READ activePlaylistId NOTIFY playlistStatusChanged FINAL)
     Q_PROPERTY(QVariantMap playlistStatus READ playlistStatus NOTIFY playlistStatusChanged FINAL)
     Q_PROPERTY(QString lockWallpaper READ lockWallpaper NOTIFY lockWallpaperChanged FINAL)
+    Q_PROPERTY(bool hasLockScreen READ hasLockScreen NOTIFY hasLockScreenChanged FINAL)
 
 public:
     explicit Display(const proto::DisplayInfo& info, QObject* parent = nullptr);
@@ -74,6 +75,7 @@ public:
     auto activePlaylistId() const -> qint64 { return m_active_playlist_id; }
     auto playlistStatus() const -> const QVariantMap& { return m_playlist_status; }
     auto lockWallpaper() const -> const QString& { return m_lock_wallpaper; }
+    auto hasLockScreen() const -> bool { return m_has_lock_screen; }
 
     /// Diff-update from a freshly-received `DisplayInfo`. Only emits
     /// the signals for properties that actually changed.
@@ -89,6 +91,7 @@ public:
     Q_SIGNAL void layoutChanged();
     Q_SIGNAL void playlistStatusChanged();
     Q_SIGNAL void lockWallpaperChanged();
+    Q_SIGNAL void hasLockScreenChanged();
 
 private:
     static auto linksFromPb(const proto::DisplayInfo& info) -> QVariantList;
@@ -114,6 +117,7 @@ private:
     qint64       m_active_playlist_id { 0 };
     QVariantMap  m_playlist_status;
     QString      m_lock_wallpaper;
+    bool         m_has_lock_screen { false };
 };
 
 /// Singleton model for all currently-registered displays. Fed by:
