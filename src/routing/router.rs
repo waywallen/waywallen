@@ -320,28 +320,22 @@ impl Router {
                 rotation: Default::default(),
             };
         };
-        if let Some(iid) = info.instance_id.as_deref() {
-            if s.display_prefs(iid).is_some() {
-                return s.resolved_layout(iid);
-            }
+        let key = if let Some(iid) = info.instance_id.as_deref() {
             // No instance_id-keyed entry yet — fall back to the legacy
             // name-keyed entry so old config keeps working.
+            if s.display_prefs(iid).is_some() {
+                iid
+            } else {
+                info.name.as_str()
+            }
+        } else {
+            info.name.as_str()
+        };
+        if info.is_lock_screen {
+            s.resolved_lock_layout(key)
+        } else {
+            s.resolved_layout(key)
         }
-        s.resolved_layout(&info.name)
-    }
-
-    fn resolved_layout_for_renderer(
-        &self,
-        info: &DisplayInfo,
-        renderer_id: &str,
-        inner: &Inner,
-    ) -> ResolvedLayout {
-        inner
-            .wallpaper_layout_overrides
-            .get(renderer_id)
-            .copied()
-            .unwrap_or_default()
-            .apply_to(self.resolved_layout(info))
     }
 
     fn display_layout_source(&self, info: &DisplayInfo) -> LayoutSource {
@@ -353,12 +347,22 @@ impl Router {
         } else {
             s.display_prefs(&info.name)
         };
-        if prefs.as_ref().is_some_and(|p| {
-            p.fillmode.is_some()
-                || p.location.is_some()
-                || p.align.is_some()
-                || p.rotation.is_some()
-        }) {
+        let has_override = if info.is_lock_screen {
+            prefs.as_ref().is_some_and(|p| {
+                p.lock_fillmode.is_some()
+                    || p.lock_location.is_some()
+                    || p.lock_align.is_some()
+                    || p.lock_rotation.is_some()
+            })
+        } else {
+            prefs.as_ref().is_some_and(|p| {
+                p.fillmode.is_some()
+                    || p.location.is_some()
+                    || p.align.is_some()
+                    || p.rotation.is_some()
+            })
+        };
+        if has_override {
             LayoutSource::Display
         } else {
             LayoutSource::Global
@@ -403,6 +407,7 @@ impl Router {
         clear_fillmode: bool,
         clear_align: bool,
         clear_rotation: bool,
+        lock: bool,
     ) -> Option<DisplayId> {
         let Some(settings) = self.settings.get().cloned() else {
             log::warn!(
@@ -418,31 +423,60 @@ impl Router {
         };
         settings.update(|s| {
             let entry = s.displays.entry(key.clone()).or_default();
-            if clear_fillmode {
-                entry.fillmode = None;
-            }
-            if let Some(v) = new_fillmode {
-                entry.fillmode = Some(v);
-            }
-            if clear_align {
-                entry.location = None;
-                entry.align = None;
-            }
-            if let Some(v) = new_location {
-                entry.location = Some(v);
-                entry.align = None;
-            }
-            if let Some(v) = new_align {
-                if new_location.is_none() {
-                    entry.align = Some(v);
-                    entry.location = None;
+            if lock {
+                if clear_fillmode {
+                    entry.lock_fillmode = None;
                 }
-            }
-            if clear_rotation {
-                entry.rotation = None;
-            }
-            if let Some(v) = new_rotation {
-                entry.rotation = Some(v);
+                if let Some(v) = new_fillmode {
+                    entry.lock_fillmode = Some(v);
+                }
+                if clear_align {
+                    entry.lock_location = None;
+                    entry.lock_align = None;
+                }
+                if let Some(v) = new_location {
+                    entry.lock_location = Some(v);
+                    entry.lock_align = None;
+                }
+                if let Some(v) = new_align {
+                    if new_location.is_none() {
+                        entry.lock_align = Some(v);
+                        entry.lock_location = None;
+                    }
+                }
+                if clear_rotation {
+                    entry.lock_rotation = None;
+                }
+                if let Some(v) = new_rotation {
+                    entry.lock_rotation = Some(v);
+                }
+            } else {
+                if clear_fillmode {
+                    entry.fillmode = None;
+                }
+                if let Some(v) = new_fillmode {
+                    entry.fillmode = Some(v);
+                }
+                if clear_align {
+                    entry.location = None;
+                    entry.align = None;
+                }
+                if let Some(v) = new_location {
+                    entry.location = Some(v);
+                    entry.align = None;
+                }
+                if let Some(v) = new_align {
+                    if new_location.is_none() {
+                        entry.align = Some(v);
+                        entry.location = None;
+                    }
+                }
+                if clear_rotation {
+                    entry.rotation = None;
+                }
+                if let Some(v) = new_rotation {
+                    entry.rotation = Some(v);
+                }
             }
             // Prune empty entry to keep the on-disk file tidy.
             if entry.is_empty() {
@@ -790,6 +824,8 @@ impl Router {
                 refresh_mhz: reg.refresh_mhz,
                 properties: reg.properties,
                 bound: false,
+                // Registered while locked, so this is the lock surface; pin it for the display's lifetime.
+                is_lock_screen: inner.session_locked,
             };
             inner.displays.insert(
                 id,
@@ -2504,6 +2540,7 @@ mod tests {
                 false,
                 false,
                 false,
+                false,
             )
             .await;
 
@@ -3043,6 +3080,7 @@ mod tests {
             refresh_mhz: 60_000,
             properties: vec![],
             bound: true,
+            is_lock_screen: false,
         }
     }
 

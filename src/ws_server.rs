@@ -443,6 +443,9 @@ fn display_snapshot_to_pb(s: DisplaySnapshot, settings: &SettingsStore) -> pb::D
         .filter(|iid| settings.display_prefs(iid).is_some())
         .unwrap_or(s.name.as_str());
     let override_prefs = settings.display_prefs(layout_key).unwrap_or_default();
+    let lock_display_layout =
+        layout_prefs_to_pb_resolved(&settings.resolved_lock_layout(layout_key));
+    let lock_layout_override = lock_layout_override_to_pb(&override_prefs);
     pb::DisplayInfo {
         display_id: s.id,
         name: s.name,
@@ -466,6 +469,8 @@ fn display_snapshot_to_pb(s: DisplaySnapshot, settings: &SettingsStore) -> pb::D
         effective_layout_source: layout_source_to_pb(s.effective_layout_source) as i32,
         lock_wallpaper: override_prefs.lock_wallpaper.clone().unwrap_or_default(),
         has_lock_screen: override_prefs.has_lock_screen,
+        lock_display_layout: Some(lock_display_layout),
+        lock_layout_override: Some(lock_layout_override),
     }
 }
 
@@ -503,6 +508,33 @@ fn layout_override_to_pb(p: &crate::settings::DisplayPrefs) -> pb::LayoutOverrid
         rotation_set: p.rotation.is_some(),
         rotation: p
             .rotation
+            .map(rotation_to_pb)
+            .unwrap_or(pb::Rotation::Unspecified) as i32,
+        location_set: location.is_some(),
+        location_x: location.map(|v| u32::from(v.x.min(100))).unwrap_or(0),
+        location_y: location.map(|v| u32::from(v.y.min(100))).unwrap_or(0),
+    }
+}
+
+fn lock_layout_override_to_pb(p: &crate::settings::DisplayPrefs) -> pb::LayoutOverride {
+    let location = p.lock_location.or_else(|| {
+        p.lock_align
+            .map(crate::display::layout::Location::from_align)
+    });
+    pb::LayoutOverride {
+        fillmode_set: p.lock_fillmode.is_some(),
+        fillmode: p
+            .lock_fillmode
+            .map(fillmode_to_pb)
+            .unwrap_or(pb::FillMode::Unspecified) as i32,
+        align_set: p.lock_align.is_some(),
+        align: p
+            .lock_align
+            .map(align_to_pb)
+            .unwrap_or(pb::Align::Unspecified) as i32,
+        rotation_set: p.lock_rotation.is_some(),
+        rotation: p
+            .lock_rotation
             .map(rotation_to_pb)
             .unwrap_or(pb::Rotation::Unspecified) as i32,
         location_set: location.is_some(),
@@ -1972,6 +2004,9 @@ async fn dispatch_inner(
                     .filter(|o| o.rotation_set)
                     .and_then(|o| rotation_from_pb(o.rotation))
             };
+            let lock = pb::LayoutLocation::try_from(r.location)
+                .map(|l| l == pb::LayoutLocation::Lock)
+                .unwrap_or(false);
             let target_id = state
                 .router
                 .set_display_layout(
@@ -1984,6 +2019,7 @@ async fn dispatch_inner(
                     r.clear_fillmode,
                     r.clear_align || r.clear_location,
                     r.clear_rotation,
+                    lock,
                 )
                 .await;
             let display = match target_id {

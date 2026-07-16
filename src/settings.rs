@@ -43,6 +43,11 @@ pub struct DisplayPrefs {
     pub lock_wallpaper: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub has_lock_screen: bool,
+    /// Per-display lock-screen layout override; unset fields fall back to the desktop layout.
+    pub lock_fillmode: Option<FillMode>,
+    pub lock_location: Option<Location>,
+    pub lock_align: Option<Align>,
+    pub lock_rotation: Option<Rotation>,
     pub alias: Option<String>,
     pub active_playlist_id: Option<i64>,
 }
@@ -57,6 +62,10 @@ impl DisplayPrefs {
             && self.last_wallpaper.is_none()
             && self.lock_wallpaper.is_none()
             && !self.has_lock_screen
+            && self.lock_fillmode.is_none()
+            && self.lock_location.is_none()
+            && self.lock_align.is_none()
+            && self.lock_rotation.is_none()
             && self.alias.is_none()
             && self.active_playlist_id.is_none()
     }
@@ -675,6 +684,30 @@ impl SettingsStore {
         }
     }
 
+    /// Resolve a display's lock-screen layout, falling back to its desktop layout.
+    pub fn resolved_lock_layout(&self, display_name: &str) -> ResolvedLayout {
+        let g = self.inner.read().expect("settings poisoned");
+        let defaults = &g.global.layout;
+        let prefs = g.displays.get(display_name);
+        let default_location = defaults
+            .location
+            .unwrap_or_else(|| Location::from_align(defaults.align));
+        let base_fillmode = prefs.and_then(|p| p.fillmode).unwrap_or(defaults.fillmode);
+        let base_location = prefs
+            .and_then(|p| p.location)
+            .or_else(|| prefs.and_then(|p| p.align.map(Location::from_align)))
+            .unwrap_or(default_location);
+        let base_rotation = prefs.and_then(|p| p.rotation).unwrap_or(defaults.rotation);
+        ResolvedLayout {
+            fillmode: prefs.and_then(|p| p.lock_fillmode).unwrap_or(base_fillmode),
+            location: prefs
+                .and_then(|p| p.lock_location)
+                .or_else(|| prefs.and_then(|p| p.lock_align.map(Location::from_align)))
+                .unwrap_or(base_location),
+            rotation: prefs.and_then(|p| p.lock_rotation).unwrap_or(base_rotation),
+        }
+    }
+
     pub fn resolved_auto_replay(&self, display_name: &str) -> AutoReplayPolicy {
         let g = self.inner.read().expect("settings poisoned");
         if let Some(policy) = g
@@ -1075,6 +1108,38 @@ fillmode = "preserve_aspect_fit"
         let r = store.resolved_layout("eDP-1");
         assert_eq!(r.fillmode, FillMode::PreserveAspectCrop); // override
         assert_eq!(r.location, Location::new(20, 80)); // global
+    }
+
+    #[tokio::test]
+    async fn resolved_lock_layout_falls_back_to_desktop_then_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        let store = SettingsStore::load_or_default(path).await;
+
+        // Desktop override set, no lock override => lock mirrors the desktop.
+        store.update(|s| {
+            s.displays.insert(
+                "eDP-1".into(),
+                DisplayPrefs {
+                    fillmode: Some(FillMode::PreserveAspectCrop),
+                    location: Some(Location::new(20, 80)),
+                    ..Default::default()
+                },
+            );
+        });
+        let r = store.resolved_lock_layout("eDP-1");
+        assert_eq!(r.fillmode, FillMode::PreserveAspectCrop);
+        assert_eq!(r.location, Location::new(20, 80));
+
+        // A lock override wins field by field over the desktop.
+        store.update(|s| {
+            let p = s.displays.get_mut("eDP-1").unwrap();
+            p.lock_fillmode = Some(FillMode::PreserveAspectFit);
+            p.lock_location = Some(Location::new(50, 50));
+        });
+        let r = store.resolved_lock_layout("eDP-1");
+        assert_eq!(r.fillmode, FillMode::PreserveAspectFit); // lock override
+        assert_eq!(r.location, Location::new(50, 50)); // lock override
     }
 
     #[test]

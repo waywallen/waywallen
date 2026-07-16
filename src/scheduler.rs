@@ -19,6 +19,8 @@ pub struct DisplayInfo {
     /// Has the scheduler sent (or is about to send) `bind_buffers` to
     /// this display for the current `active_renderer` buffer pool?
     pub bound: bool,
+    /// True if this consumer registered while locked (the lock-screen surface).
+    pub is_lock_screen: bool,
 }
 
 /// Compact renderer-side buffer-pool description fanned out to clients.
@@ -112,6 +114,7 @@ impl Scheduler {
                 // New displays are bound immediately when an active
                 // renderer already exists.
                 bound: self.active.is_some(),
+                is_lock_screen: false,
             },
         );
         id

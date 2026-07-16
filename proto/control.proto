@@ -613,6 +613,12 @@ enum LayoutSource {
   LAYOUT_SOURCE_WALLPAPER = 3;
 }
 
+// Which layout DisplayLayoutSetRequest mutates: desktop or lock screen.
+enum LayoutLocation {
+  LAYOUT_LOCATION_DESKTOP = 0;
+  LAYOUT_LOCATION_LOCK = 1;
+}
+
 message DisplayInfo {
   uint64 display_id  = 1;
   string name        = 2;
@@ -641,6 +647,10 @@ message DisplayInfo {
   LayoutSource effective_layout_source = 13;
   string lock_wallpaper = 14;
   bool has_lock_screen = 15;
+  // Resolved lock-screen layout; the Displays-tab lock section binds here.
+  LayoutPrefs lock_display_layout = 16;
+  // Sparse per-display lock-screen layout override for the edit form.
+  LayoutOverride lock_layout_override = 17;
 }
 
 message DisplayRenameRequest {
@@ -785,6 +795,8 @@ message DisplayLayoutSetRequest {
   bool clear_rotation = 6;
   uint64 display_id   = 7;
   bool clear_location = 8;
+  // Which layout to mutate; defaults to desktop for older clients.
+  LayoutLocation location = 9;
   reserved 5;
   reserved "clear_clear_rgba";
 }
