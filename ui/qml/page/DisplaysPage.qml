@@ -22,56 +22,6 @@ MD.Page {
     readonly property real displayPaneHeight: detailsVisible ? paneAvailableHeight / 3 : paneAvailableHeight
     readonly property real detailPaneHeight: detailsVisible ? paneAvailableHeight - displayPaneHeight : 0
 
-    // FillMode/Rotation enum values mirror proto::FillMode /
-    // proto::Rotation (control.proto). Keep the *_VALUES
-    // arrays in lockstep with the enum order; *_LABELS is what the UI
-    // shows.
-    readonly property var kFillModeValues: [1 // STRETCHED
-        , 2 // PRESERVE_ASPECT_FIT
-        , 3 // PRESERVE_ASPECT_CROP
-        , 7  // CENTERED
-    ]
-    readonly property var kFillModeLabels: ["Stretch", "Fit", "Crop", "Center"]
-    function fillmodeIndex(value) {
-        const i = root.kFillModeValues.indexOf(value);
-        return i < 0 ? 0 : i;
-    }
-
-    // Rotation segmented values, mirror proto::Rotation:
-    //   1=NORMAL, 2=CW_90, 3=CW_180, 4=CW_270
-    readonly property var kRotationValues: [1, 2, 3, 4]
-    readonly property var kRotationLabels: ["0°", "90°", "180°", "270°"]
-    function rotationIndex(value) {
-        const i = root.kRotationValues.indexOf(value);
-        return i < 0 ? 0 : i;
-    }
-
-    function clampPercent(value) {
-        return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
-    }
-
-    function applyLocation(x, y) {
-        if (!root.selected)
-            return;
-        layoutSetQuery.name = root.selected.name;
-        layoutSetQuery.displayId = root.selected.id;
-        layoutSetQuery.fillmodeSet = false;
-        layoutSetQuery.locationSet = true;
-        layoutSetQuery.locationX = root.clampPercent(x);
-        layoutSetQuery.locationY = root.clampPercent(y);
-        layoutSetQuery.alignSet = false;
-        layoutSetQuery.rotationSet = false;
-        layoutSetQuery.clearFillmode = false;
-        layoutSetQuery.clearLocation = false;
-        layoutSetQuery.clearAlign = false;
-        layoutSetQuery.clearRotation = false;
-        layoutSetQuery.reload();
-    }
-
-    W.DisplayLayoutSetQuery {
-        id: layoutSetQuery
-    }
-
     W.DisplayRenameQuery {
         id: renameQuery
     }
@@ -310,8 +260,13 @@ MD.Page {
                 }
             }
 
-            contentItem: MD.Flickable2 {
+            contentItem: ColumnLayout {
+                spacing: 0
+
+                MD.Flickable2 {
                 id: detailsFlick
+                Layout.fillWidth: true
+                Layout.fillHeight: true
                 clip: true
                 contentWidth: width
                 contentHeight: root.selected ? detailsContent.implicitHeight : 0
@@ -592,7 +547,7 @@ MD.Page {
                         }
                     }
 
-                    // ---- Layout (fillmode + location) ----
+                    // ---- Layout (staged; applied per location on demand) ----
                     MD.Divider {
                         Layout.fillWidth: true
                         Layout.topMargin: 8
@@ -600,229 +555,75 @@ MD.Page {
                         visible: !!root.selected
                     }
 
-                    RowLayout {
+                    MD.Text {
+                        visible: !!root.selected
+                        text: "Layout"
+                        typescale: MD.Token.typescale.title_small
+                        color: MD.Token.color.on_surface
+                    }
+
+                    W.DisplayLayoutSection {
+                        id: desktopLayout
                         Layout.fillWidth: true
                         visible: !!root.selected
-                        spacing: 8
+                        display: root.selected
+                        location: 0
+                        title: "Desktop"
+                    }
 
-                        MD.Text {
-                            Layout.fillWidth: true
-                            text: "Layout"
-                            typescale: MD.Token.typescale.title_small
-                            color: MD.Token.color.on_surface
-                        }
+                    MD.Divider {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 8
+                        Layout.bottomMargin: 4
+                        visible: lockLayout.visible
+                    }
 
-                        MD.AssistChip {
-                            visible: !!root.selected && root.selected.layoutOverriddenByWallpaper
-                            text: "Wallpaper override"
-                        }
+                    W.DisplayLayoutSection {
+                        id: lockLayout
+                        Layout.fillWidth: true
+                        visible: !!root.selected && root.selected.hasLockScreen === true
+                        display: root.selected
+                        location: 1
+                        title: "Lock screen"
+                    }
 
-                        Item {
-                            implicitWidth: children[0].implicitWidth
-                            MD.IconButton {
-                                anchors.verticalCenter: parent.verticalCenter
-                                mdState.size: MD.Enum.XS
-                                enabled: {
-                                    if (!root.selected)
-                                        return false;
-                                    const ovr = root.selected.layoutOverride || ({});
-                                    return ovr.fillmodeSet === true || ovr.locationSet === true || ovr.alignSet === true || ovr.rotationSet === true;
-                                }
-                                icon.name: MD.Token.icon.refresh
-                                MD.ToolTip {
-                                    visible: parent.hovered
-                                    text: "Revert to global default"
-                                }
-                                onClicked: {
-                                    if (!root.selected)
-                                        return;
-                                    layoutSetQuery.name = root.selected.name;
-                                    layoutSetQuery.displayId = root.selected.id;
-                                    layoutSetQuery.fillmodeSet = false;
-                                    layoutSetQuery.locationSet = false;
-                                    layoutSetQuery.alignSet = false;
-                                    layoutSetQuery.clearFillmode = true;
-                                    layoutSetQuery.clearLocation = true;
-                                    layoutSetQuery.clearAlign = true;
-                                    layoutSetQuery.clearRotation = true;
-                                    layoutSetQuery.reload();
-                                }
-                            }
+                }
+                }
+
+                // Pinned action bar so Apply stays reachable when the sections scroll.
+                RowLayout {
+                    id: layoutActions
+                    readonly property bool anyDirty: desktopLayout.dirty || (lockLayout.visible && lockLayout.dirty)
+                    Layout.fillWidth: true
+                    Layout.topMargin: 8
+                    Layout.bottomMargin: 8
+                    visible: !!root.selected
+                    spacing: 8
+
+                    Item {
+                        Layout.fillWidth: true
+                    }
+
+                    MD.Button {
+                        mdState.type: MD.Enum.BtText
+                        text: "Revert"
+                        enabled: layoutActions.anyDirty
+                        onClicked: {
+                            desktopLayout.discard();
+                            if (lockLayout.visible)
+                                lockLayout.discard();
                         }
                     }
 
-                    Flow {
-                        id: layoutFlow
-                        readonly property var displayLayout: root.selected ? (root.selected.displayLayout || root.selected.effectiveLayout || ({})) : ({})
-                        readonly property int currentX: root.clampPercent(displayLayout.locationX ?? 50)
-                        readonly property int currentY: root.clampPercent(displayLayout.locationY ?? 50)
-                        readonly property bool locationEnabled: {
-                            if (!root.selected)
-                                return false;
-                            const layout = root.selected.displayLayout || root.selected.effectiveLayout || ({});
-                            return (layout.fillmode || 0) !== 1;
-                        }
-                        Layout.fillWidth: true
-                        visible: !!root.selected
-                        spacing: 12
-
-                        ColumnLayout {
-                            width: Math.min(layoutFlow.width, 220)
-                            spacing: 4
-
-                            MD.Text {
-                                text: "Fill mode"
-                                typescale: MD.Token.typescale.label_medium
-                                color: MD.Token.color.on_surface_variant
-                            }
-
-                            MD.ComboBox {
-                                id: fillmodeBox
-                                Layout.fillWidth: true
-                                model: root.kFillModeLabels
-                                currentIndex: {
-                                    if (!root.selected)
-                                        return 0;
-                                    const layout = root.selected.displayLayout || root.selected.effectiveLayout || ({});
-                                    return root.fillmodeIndex(layout.fillmode || 0);
-                                }
-                                onActivated: idx => {
-                                    if (!root.selected)
-                                        return;
-                                    layoutSetQuery.name = root.selected.name;
-                                    layoutSetQuery.displayId = root.selected.id;
-                                    layoutSetQuery.fillmodeSet = true;
-                                    layoutSetQuery.fillmode = root.kFillModeValues[idx];
-                                    layoutSetQuery.locationSet = false;
-                                    layoutSetQuery.alignSet = false;
-                                    layoutSetQuery.rotationSet = false;
-                                    layoutSetQuery.clearFillmode = false;
-                                    layoutSetQuery.clearLocation = false;
-                                    layoutSetQuery.clearAlign = false;
-                                    layoutSetQuery.clearRotation = false;
-                                    layoutSetQuery.reload();
-                                }
-                            }
-                        }
-
-                        ColumnLayout {
-                            width: Math.min(layoutFlow.width, 260)
-                            spacing: 4
-
-                            enabled: layoutFlow.locationEnabled
-                            opacity: enabled ? 1.0 : 0.4
-
-                            MD.Text {
-                                text: "Horizontal"
-                                typescale: MD.Token.typescale.label_medium
-                                color: MD.Token.color.on_surface_variant
-                            }
-
-                            W.ValueSlider {
-                                id: horizontalLocation
-                                Layout.fillWidth: true
-                                from: 0
-                                to: 100
-                                stepSize: 1
-                                value: layoutFlow.currentX
-                                valueText: root.clampPercent(value)
-                                valueMaxText: root.clampPercent(to).toString()
-                                valueHorizontalAlignment: Text.AlignLeft
-                                onMoved: root.applyLocation(value, verticalLocation.value)
-                            }
-                        }
-
-                        ColumnLayout {
-                            width: Math.min(layoutFlow.width, 260)
-                            spacing: 4
-
-                            enabled: layoutFlow.locationEnabled
-                            opacity: enabled ? 1.0 : 0.4
-
-                            MD.Text {
-                                text: "Vertical"
-                                typescale: MD.Token.typescale.label_medium
-                                color: MD.Token.color.on_surface_variant
-                            }
-
-                            W.ValueSlider {
-                                id: verticalLocation
-                                Layout.fillWidth: true
-                                from: 0
-                                to: 100
-                                stepSize: 1
-                                value: layoutFlow.currentY
-                                valueText: root.clampPercent(value)
-                                valueMaxText: root.clampPercent(to).toString()
-                                valueHorizontalAlignment: Text.AlignLeft
-                                onMoved: root.applyLocation(horizontalLocation.value, value)
-                            }
-                        }
-
-                        ColumnLayout {
-                            width: Math.min(layoutFlow.width, implicitWidth)
-                            spacing: 4
-
-                            MD.Text {
-                                text: "Rotation"
-                                typescale: MD.Token.typescale.label_medium
-                                color: MD.Token.color.on_surface_variant
-                            }
-
-                            MD.SegmentedButtonGroup {
-                                id: rotationGroup
-                                size: MD.Enum.XS
-
-                                // Inline buttons; SegmentedButtonGroup's
-                                // updatePositions only recognises segmented
-                                // buttons that are direct children — a
-                                // Repeater here ends up in contentModel as
-                                // an extra slot and shifts PosFirst off the
-                                // real first button.
-                                function applyRotation(rotationValue) {
-                                    if (!root.selected)
-                                        return;
-                                    layoutSetQuery.name = root.selected.name;
-                                    layoutSetQuery.displayId = root.selected.id;
-                                    layoutSetQuery.fillmodeSet = false;
-                                    layoutSetQuery.locationSet = false;
-                                    layoutSetQuery.alignSet = false;
-                                    layoutSetQuery.rotationSet = true;
-                                    layoutSetQuery.rotation = rotationValue;
-                                    layoutSetQuery.clearFillmode = false;
-                                    layoutSetQuery.clearLocation = false;
-                                    layoutSetQuery.clearAlign = false;
-                                    layoutSetQuery.clearRotation = false;
-                                    layoutSetQuery.reload();
-                                }
-                                function isChecked(rotationValue) {
-                                    if (!root.selected)
-                                        return rotationValue === 1; // ROTATION_NORMAL
-                                    const layout = root.selected.displayLayout || root.selected.effectiveLayout || ({});
-                                    return (layout.rotation || 0) === rotationValue;
-                                }
-
-                                MD.SegmentedButton {
-                                    text: root.kRotationLabels[0]
-                                    checked: rotationGroup.isChecked(root.kRotationValues[0])
-                                    onClicked: rotationGroup.applyRotation(root.kRotationValues[0])
-                                }
-                                MD.SegmentedButton {
-                                    text: root.kRotationLabels[1]
-                                    checked: rotationGroup.isChecked(root.kRotationValues[1])
-                                    onClicked: rotationGroup.applyRotation(root.kRotationValues[1])
-                                }
-                                MD.SegmentedButton {
-                                    text: root.kRotationLabels[2]
-                                    checked: rotationGroup.isChecked(root.kRotationValues[2])
-                                    onClicked: rotationGroup.applyRotation(root.kRotationValues[2])
-                                }
-                                MD.SegmentedButton {
-                                    text: root.kRotationLabels[3]
-                                    checked: rotationGroup.isChecked(root.kRotationValues[3])
-                                    onClicked: rotationGroup.applyRotation(root.kRotationValues[3])
-                                }
-                            }
+                    MD.Button {
+                        mdState.type: MD.Enum.BtFilledTonal
+                        text: "Apply"
+                        enabled: layoutActions.anyDirty
+                        onClicked: {
+                            if (desktopLayout.dirty)
+                                desktopLayout.apply();
+                            if (lockLayout.visible && lockLayout.dirty)
+                                lockLayout.apply();
                         }
                     }
                 }

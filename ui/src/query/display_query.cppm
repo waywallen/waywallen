@@ -64,6 +64,8 @@ export class DisplayLayoutSetQuery
     Q_PROPERTY(bool clearAlign READ clearAlign WRITE setClearAlign NOTIFY paramsChanged FINAL)
     Q_PROPERTY(
         bool clearRotation READ clearRotation WRITE setClearRotation NOTIFY paramsChanged FINAL)
+    /// 0 = desktop (default), 1 = lock screen. (same proto::LayoutLocation)
+    Q_PROPERTY(int location READ location WRITE setLocation NOTIFY paramsChanged FINAL)
 
 public:
     DisplayLayoutSetQuery(QObject* parent = nullptr);
@@ -98,6 +100,8 @@ public:
     void setClearAlign(bool v);
     auto clearRotation() const -> bool { return m_clear_rotation; }
     void setClearRotation(bool v);
+    auto location() const -> int { return m_location; }
+    void setLocation(int v);
 
     void reload() override;
 
@@ -106,6 +110,7 @@ public:
 private:
     QString m_name;
     quint64 m_display_id { 0 };
+    int     m_location { 0 };
     bool    m_fillmode_set { false };
     int     m_fillmode { 0 };
     bool    m_location_set { false };

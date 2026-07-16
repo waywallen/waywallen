@@ -151,6 +151,7 @@ set(QML_FILES
   qml/component/ThumbnailImage.qml
   qml/component/SearchChip.qml
   qml/component/ValueSlider.qml
+  qml/component/DisplayLayoutSection.qml
   qml/component/filter/StringFilter.qml
   qml/component/filter/IntFilter.qml
   qml/component/filter/WpTypeFilter.qml

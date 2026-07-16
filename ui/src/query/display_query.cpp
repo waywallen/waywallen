@@ -100,6 +100,7 @@ void DisplayLayoutSetQuery::setClearFillmode(bool v) { WW_SET(m_clear_fillmode, 
 void DisplayLayoutSetQuery::setClearLocation(bool v) { WW_SET(m_clear_location, v); }
 void DisplayLayoutSetQuery::setClearAlign(bool v) { WW_SET(m_clear_align, v); }
 void DisplayLayoutSetQuery::setClearRotation(bool v) { WW_SET(m_clear_rotation, v); }
+void DisplayLayoutSetQuery::setLocation(int v) { WW_SET(m_location, v); }
 #undef WW_SET
 
 void DisplayLayoutSetQuery::reload() {
@@ -125,6 +126,7 @@ void DisplayLayoutSetQuery::reload() {
     inner.setClearLocation(m_clear_location);
     inner.setClearAlign(m_clear_align);
     inner.setClearRotation(m_clear_rotation);
+    inner.setLocation(static_cast<proto::LayoutLocation>(m_location));
 
     auto req = proto::Request {};
     req.setDisplayLayoutSet(std::move(inner));

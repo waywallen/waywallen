@@ -145,6 +145,7 @@ using proto::AlignGadget::Align;
 using proto::AutoActionGadget::AutoAction;
 using proto::FillModeGadget::FillMode;
 using proto::LayoutSourceGadget::LayoutSource;
+using proto::LayoutLocationGadget::LayoutLocation;
 using proto::RotationGadget::Rotation;
 
 using proto::FilterLogic;

@@ -75,6 +75,34 @@ auto Display::layoutOverrideFromPb(const proto::DisplayInfo& info) -> QVariantMa
     return m;
 }
 
+auto Display::lockDisplayLayoutFromPb(const proto::DisplayInfo& info) -> QVariantMap {
+    QVariantMap m;
+    if (! info.hasLockDisplayLayout()) return m;
+    const auto& l     = info.lockDisplayLayout();
+    m[u"fillmode"_s]  = static_cast<int>(l.fillmode());
+    m[u"align"_s]     = static_cast<int>(l.align());
+    m[u"locationX"_s] = l.locationX();
+    m[u"locationY"_s] = l.locationY();
+    m[u"rotation"_s]  = static_cast<int>(l.rotation());
+    return m;
+}
+
+auto Display::lockLayoutOverrideFromPb(const proto::DisplayInfo& info) -> QVariantMap {
+    QVariantMap m;
+    if (! info.hasLockLayoutOverride()) return m;
+    const auto& o       = info.lockLayoutOverride();
+    m[u"fillmodeSet"_s] = o.fillmodeSet();
+    m[u"fillmode"_s]    = static_cast<int>(o.fillmode());
+    m[u"alignSet"_s]    = o.alignSet();
+    m[u"align"_s]       = static_cast<int>(o.align());
+    m[u"locationSet"_s] = o.locationSet();
+    m[u"locationX"_s]   = o.locationX();
+    m[u"locationY"_s]   = o.locationY();
+    m[u"rotationSet"_s] = o.rotationSet();
+    m[u"rotation"_s]    = static_cast<int>(o.rotation());
+    return m;
+}
+
 auto Display::playlistStatusFromPb(const proto::PlaylistDisplayStatus* status) -> QVariantMap {
     QVariantMap m;
     if (! status || status->activeId() <= 0) return m;
@@ -99,12 +127,13 @@ Display::Display(const proto::DisplayInfo& info, QObject* parent)
       m_links(linksFromPb(info)),
       m_effective_layout(effectiveLayoutFromPb(info)),
       m_display_layout(displayLayoutFromPb(info)),
-      m_layout_overridden_by_wallpaper(layoutOverriddenByWallpaperFromPb(info)),
       m_layout_override(layoutOverrideFromPb(info)),
       m_drm_render_major(info.drmRenderMajor()),
       m_drm_render_minor(info.drmRenderMinor()),
       m_lock_wallpaper(info.lockWallpaper()),
-      m_has_lock_screen(info.hasLockScreen()) {}
+      m_has_lock_screen(info.hasLockScreen()),
+      m_lock_display_layout(lockDisplayLayoutFromPb(info)),
+      m_lock_layout_override(lockLayoutOverrideFromPb(info)) {}
 
 void Display::updateFrom(const proto::DisplayInfo& info) {
     rstd_assert(info.displayId() == m_id, "Display::updateFrom id mismatch");
@@ -159,6 +188,14 @@ void Display::updateFrom(const proto::DisplayInfo& info) {
     if (m_has_lock_screen != info.hasLockScreen()) {
         m_has_lock_screen = info.hasLockScreen();
         Q_EMIT hasLockScreenChanged();
+    }
+    auto new_lock_layout   = lockDisplayLayoutFromPb(info);
+    auto new_lock_override = lockLayoutOverrideFromPb(info);
+    if (m_lock_display_layout != new_lock_layout ||
+        m_lock_layout_override != new_lock_override) {
+        m_lock_display_layout  = std::move(new_lock_layout);
+        m_lock_layout_override = std::move(new_lock_override);
+        Q_EMIT lockLayoutChanged();
     }
 }
 
