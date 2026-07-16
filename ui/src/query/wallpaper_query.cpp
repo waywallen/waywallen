@@ -434,60 +434,6 @@ void WallpaperPropertySetQuery::reload() {
 }
 
 // ---------------------------------------------------------------------------
-// WallpaperLayoutSetQuery
-// ---------------------------------------------------------------------------
-
-WallpaperLayoutSetQuery::WallpaperLayoutSetQuery(QObject* parent): Query(parent) {}
-
-#define WW_SET(field, val)          \
-    do {                            \
-        if (this->field != val) {   \
-            this->field = val;      \
-            Q_EMIT paramsChanged(); \
-        }                           \
-    } while (0)
-
-void WallpaperLayoutSetQuery::setWallpaperId(const QString& v) { WW_SET(m_wallpaper_id, v); }
-void WallpaperLayoutSetQuery::setClear(bool v) { WW_SET(m_clear, v); }
-void WallpaperLayoutSetQuery::setFillmode(int v) { WW_SET(m_fillmode, v); }
-void WallpaperLayoutSetQuery::setLocationX(int v) { WW_SET(m_location_x, v); }
-void WallpaperLayoutSetQuery::setLocationY(int v) { WW_SET(m_location_y, v); }
-void WallpaperLayoutSetQuery::setRotation(int v) { WW_SET(m_rotation, v); }
-#undef WW_SET
-
-void WallpaperLayoutSetQuery::reload() {
-    if (m_wallpaper_id.isEmpty()) return;
-    setStatus(Status::Querying);
-    auto backend = App::instance()->backend();
-
-    auto inner = proto::WallpaperLayoutSetRequest {};
-    inner.setWallpaperId(m_wallpaper_id);
-    inner.setClear(m_clear);
-    if (! m_clear) {
-        auto layout = proto::LayoutPrefs {};
-        layout.setFillmode(static_cast<proto::FillMode>(m_fillmode));
-        layout.setLocationX(static_cast<quint32>(std::clamp(m_location_x, 0, 100)));
-        layout.setLocationY(static_cast<quint32>(std::clamp(m_location_y, 0, 100)));
-        layout.setLocationSet(true);
-        layout.setRotation(static_cast<proto::Rotation>(m_rotation));
-        inner.setLayout(std::move(layout));
-    }
-
-    auto req = proto::Request {};
-    req.setWallpaperLayoutSet(std::move(inner));
-
-    auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
-        auto result = co_await backend->send(std::move(req));
-        co_await asio::post(asio::bind_executor(QAsyncResult::get_executor(), use_task));
-        if (! self) co_return;
-        self->inspect_set(result, [](const proto::Response&) {
-        });
-        co_return;
-    });
-}
-
-// ---------------------------------------------------------------------------
 // WallpaperApplyQuery
 // ---------------------------------------------------------------------------
 

@@ -21,48 +21,17 @@ Item {
     property var applyTargetIds: []
     property int rendererIndex: 0
     property string applyTarget: "desktop"
-    readonly property bool showLockTarget: {
+    readonly property bool showLockTarget: root.lockTargetIds.length > 0
+    // Apply targets, plus the lock-capable subset used for the lock-screen target.
+    readonly property var lockTargetIds: {
         const all = W.App.displayManager.displays || [];
         const targets = root.applyTargetIds.length === 0
             ? all
             : all.filter(d => root.applyTargetIds.indexOf(d.id) >= 0);
-        return targets.some(d => !!d && d.hasLockScreen === true);
+        return targets.filter(d => !!d && d.hasLockScreen === true).map(d => d.id);
     }
-    readonly property var kFillModeValues: [1, 2, 3, 7]
-    readonly property var kFillModeLabels: ["Stretch", "Fit", "Crop", "Center"]
-    readonly property var kRotationValues: [1, 2, 3, 4]
-    readonly property var kRotationLabels: ["0°", "90°", "180°", "270°"]
-    readonly property bool wallpaperLayoutOverrideSet: root.wp?.wallpaperLayoutOverrideSet ?? false
-    readonly property var wallpaperLayout: wallpaperLayoutOverrideSet
-        ? (root.wp?.wallpaperLayoutOverride ?? ({}))
-        : ({ fillmode: 3, locationX: 50, locationY: 50, rotation: 1, locationSet: true })
 
     function isTargetAll() { return root.applyTargetIds.length === 0; }
-    function fillmodeIndex(value) {
-        const i = root.kFillModeValues.indexOf(value);
-        return i < 0 ? 2 : i;
-    }
-    function clampPercent(value) {
-        return Math.max(0, Math.min(100, Math.round(Number(value) || 0)));
-    }
-    function applyWallpaperLayout(fillmode, x, y, rotation) {
-        if (!root.wp)
-            return;
-        layoutSetQuery.wallpaperId = root.wallpaperId;
-        layoutSetQuery.clear = false;
-        layoutSetQuery.fillmode = fillmode;
-        layoutSetQuery.locationX = root.clampPercent(x);
-        layoutSetQuery.locationY = root.clampPercent(y);
-        layoutSetQuery.rotation = rotation;
-        layoutSetQuery.reload();
-    }
-    function resetWallpaperLayout() {
-        if (!root.wp)
-            return;
-        layoutSetQuery.wallpaperId = root.wallpaperId;
-        layoutSetQuery.clear = true;
-        layoutSetQuery.reload();
-    }
     function toggleTarget(id) {
         const next = root.applyTargetIds.slice();
         const i = next.indexOf(id);
@@ -185,21 +154,6 @@ Item {
         id: setQuery
     }
 
-    W.WallpaperLayoutSetQuery {
-        id: layoutSetQuery
-        wallpaperId: root.wallpaperId
-    }
-
-    Connections {
-        target: layoutSetQuery
-        function onStatusChanged() {
-            if (layoutSetQuery.status === 2)
-                wallpaperGetQuery.reload();
-            else if (layoutSetQuery.status === 3)
-                W.Action.toast("Layout update failed");
-        }
-    }
-
     Connections {
         target: W.Notify
         function onPluginChanged() {
@@ -286,8 +240,9 @@ Item {
                 }
                 applyQuery.reload();
             }
-            if (target === "lock" || target === "both") {
-                lockWallpaperQuery.displayIds = root.applyTargetIds;
+            if ((target === "lock" || target === "both") && root.lockTargetIds.length > 0) {
+                // Only the lock-capable subset of the targeted displays.
+                lockWallpaperQuery.displayIds = root.lockTargetIds;
                 lockWallpaperQuery.wallpaperId = root.wp.id_proto;
                 lockWallpaperQuery.reload();
             }
@@ -567,182 +522,6 @@ Item {
                     }
                 }
 
-                ColumnLayout {
-                    Layout.fillWidth: true
-                    spacing: 8
-                    visible: (root.wp?.id_proto ?? "") !== ""
-
-                    MD.Divider { Layout.fillWidth: true }
-
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 4
-
-                        MD.Text {
-                            Layout.fillWidth: true
-                            text: "Layout override"
-                            typescale: MD.Token.typescale.label_large
-                            color: MD.Token.color.on_surface_variant
-                        }
-
-                        MD.IconButton {
-                            icon.name: MD.Token.icon.restart_alt
-                            mdState.size: MD.Enum.XS
-                            enabled: root.wallpaperLayoutOverrideSet
-                            onClicked: root.resetWallpaperLayout()
-
-                            MD.ToolTip {
-                                visible: parent.hovered
-                                text: "Reset to display layout"
-                            }
-                        }
-                    }
-
-                    Flow {
-                        id: m_wallpaper_layout_flow
-                        Layout.fillWidth: true
-                        spacing: 12
-
-                        readonly property var layout: root.wallpaperLayout || ({})
-                        readonly property int currentFillmode: Number(layout.fillmode ?? 3)
-                        readonly property int currentRotation: Number(layout.rotation ?? 1)
-                        readonly property int currentX: root.clampPercent(layout.locationX ?? 50)
-                        readonly property int currentY: root.clampPercent(layout.locationY ?? 50)
-                        readonly property bool locationEnabled: currentFillmode !== 1
-
-                        ColumnLayout {
-                            width: Math.min(m_wallpaper_layout_flow.width, 220)
-                            spacing: 4
-
-                            MD.Text {
-                                text: "Fill mode"
-                                typescale: MD.Token.typescale.label_medium
-                                color: MD.Token.color.on_surface_variant
-                            }
-
-                            MD.ComboBox {
-                                Layout.fillWidth: true
-                                model: root.kFillModeLabels
-                                currentIndex: root.fillmodeIndex(m_wallpaper_layout_flow.currentFillmode)
-                                onActivated: idx => {
-                                    root.applyWallpaperLayout(
-                                        root.kFillModeValues[idx],
-                                        m_wallpaper_layout_flow.currentX,
-                                        m_wallpaper_layout_flow.currentY,
-                                        m_wallpaper_layout_flow.currentRotation);
-                                }
-                            }
-                        }
-
-                        ColumnLayout {
-                            width: Math.min(m_wallpaper_layout_flow.width, 260)
-                            spacing: 4
-                            enabled: m_wallpaper_layout_flow.locationEnabled
-                            opacity: enabled ? 1.0 : 0.4
-
-                            MD.Text {
-                                text: "Horizontal"
-                                typescale: MD.Token.typescale.label_medium
-                                color: MD.Token.color.on_surface_variant
-                            }
-
-                            W.ValueSlider {
-                                id: wallpaperHorizontalLocation
-                                Layout.fillWidth: true
-                                from: 0
-                                to: 100
-                                stepSize: 1
-                                value: m_wallpaper_layout_flow.currentX
-                                valueText: root.clampPercent(value)
-                                valueMaxText: root.clampPercent(to).toString()
-                                valueHorizontalAlignment: Text.AlignLeft
-                                onMoved: root.applyWallpaperLayout(
-                                    m_wallpaper_layout_flow.currentFillmode,
-                                    value,
-                                    wallpaperVerticalLocation.value,
-                                    m_wallpaper_layout_flow.currentRotation)
-                            }
-                        }
-
-                        ColumnLayout {
-                            width: Math.min(m_wallpaper_layout_flow.width, 260)
-                            spacing: 4
-                            enabled: m_wallpaper_layout_flow.locationEnabled
-                            opacity: enabled ? 1.0 : 0.4
-
-                            MD.Text {
-                                text: "Vertical"
-                                typescale: MD.Token.typescale.label_medium
-                                color: MD.Token.color.on_surface_variant
-                            }
-
-                            W.ValueSlider {
-                                id: wallpaperVerticalLocation
-                                Layout.fillWidth: true
-                                from: 0
-                                to: 100
-                                stepSize: 1
-                                value: m_wallpaper_layout_flow.currentY
-                                valueText: root.clampPercent(value)
-                                valueMaxText: root.clampPercent(to).toString()
-                                valueHorizontalAlignment: Text.AlignLeft
-                                onMoved: root.applyWallpaperLayout(
-                                    m_wallpaper_layout_flow.currentFillmode,
-                                    wallpaperHorizontalLocation.value,
-                                    value,
-                                    m_wallpaper_layout_flow.currentRotation)
-                            }
-                        }
-
-                        ColumnLayout {
-                            width: Math.min(m_wallpaper_layout_flow.width, implicitWidth)
-                            spacing: 4
-
-                            MD.Text {
-                                text: "Rotation"
-                                typescale: MD.Token.typescale.label_medium
-                                color: MD.Token.color.on_surface_variant
-                            }
-
-                            MD.SegmentedButtonGroup {
-                                id: wallpaperRotationGroup
-                                size: MD.Enum.XS
-
-                                function applyRotation(rotationValue) {
-                                    root.applyWallpaperLayout(
-                                        m_wallpaper_layout_flow.currentFillmode,
-                                        m_wallpaper_layout_flow.currentX,
-                                        m_wallpaper_layout_flow.currentY,
-                                        rotationValue);
-                                }
-                                function isChecked(rotationValue) {
-                                    return m_wallpaper_layout_flow.currentRotation === rotationValue;
-                                }
-
-                                MD.SegmentedButton {
-                                    text: root.kRotationLabels[0]
-                                    checked: wallpaperRotationGroup.isChecked(root.kRotationValues[0])
-                                    onClicked: wallpaperRotationGroup.applyRotation(root.kRotationValues[0])
-                                }
-                                MD.SegmentedButton {
-                                    text: root.kRotationLabels[1]
-                                    checked: wallpaperRotationGroup.isChecked(root.kRotationValues[1])
-                                    onClicked: wallpaperRotationGroup.applyRotation(root.kRotationValues[1])
-                                }
-                                MD.SegmentedButton {
-                                    text: root.kRotationLabels[2]
-                                    checked: wallpaperRotationGroup.isChecked(root.kRotationValues[2])
-                                    onClicked: wallpaperRotationGroup.applyRotation(root.kRotationValues[2])
-                                }
-                                MD.SegmentedButton {
-                                    text: root.kRotationLabels[3]
-                                    checked: wallpaperRotationGroup.isChecked(root.kRotationValues[3])
-                                    onClicked: wallpaperRotationGroup.applyRotation(root.kRotationValues[3])
-                                }
-                            }
-                        }
-                    }
-                }
             }
 
             section.property: "section"

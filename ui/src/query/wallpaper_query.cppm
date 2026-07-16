@@ -218,48 +218,6 @@ private:
     bool    m_reset { false };
 };
 
-export class WallpaperLayoutSetQuery
-    : public Query,
-      public QueryExtra<control::v1::Response, WallpaperLayoutSetQuery> {
-    Q_OBJECT
-    QML_ELEMENT
-
-    Q_PROPERTY(QString wallpaperId READ wallpaperId WRITE setWallpaperId NOTIFY paramsChanged FINAL)
-    Q_PROPERTY(bool clear READ clear WRITE setClear NOTIFY paramsChanged FINAL)
-    Q_PROPERTY(int fillmode READ fillmode WRITE setFillmode NOTIFY paramsChanged FINAL)
-    Q_PROPERTY(int locationX READ locationX WRITE setLocationX NOTIFY paramsChanged FINAL)
-    Q_PROPERTY(int locationY READ locationY WRITE setLocationY NOTIFY paramsChanged FINAL)
-    Q_PROPERTY(int rotation READ rotation WRITE setRotation NOTIFY paramsChanged FINAL)
-
-public:
-    WallpaperLayoutSetQuery(QObject* parent = nullptr);
-
-    auto wallpaperId() const -> const QString& { return m_wallpaper_id; }
-    void setWallpaperId(const QString& v);
-    auto clear() const -> bool { return m_clear; }
-    void setClear(bool v);
-    auto fillmode() const -> int { return m_fillmode; }
-    void setFillmode(int v);
-    auto locationX() const -> int { return m_location_x; }
-    void setLocationX(int v);
-    auto locationY() const -> int { return m_location_y; }
-    void setLocationY(int v);
-    auto rotation() const -> int { return m_rotation; }
-    void setRotation(int v);
-
-    void reload() override;
-
-    Q_SIGNAL void paramsChanged();
-
-private:
-    QString m_wallpaper_id;
-    bool    m_clear { false };
-    int     m_fillmode { 3 };
-    int     m_location_x { 50 };
-    int     m_location_y { 50 };
-    int     m_rotation { 1 };
-};
-
 export class WallpaperApplyQuery : public Query,
                                    public QueryExtra<control::v1::Response, WallpaperApplyQuery> {
     Q_OBJECT
