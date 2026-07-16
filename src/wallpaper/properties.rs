@@ -1,9 +1,5 @@
 use std::collections::HashMap;
 
-use crate::display::layout::{FillMode, Location, Rotation};
-use crate::settings::ResolvedLayout;
-use serde::{Deserialize, Serialize};
-
 const SCHEME_COLOR_KEY: &str = "waywallen.scheme_color";
 const ENABLE_AUDIO_KEY: &str = "waywallen.enable_audio";
 const FILL_MODE_KEY: &str = "waywallen.fill_mode";
@@ -15,77 +11,6 @@ const LEGACY_SCHEME_COLOR_KEY: &str = "schemecolor";
 
 const DAEMON_LAYOUT_SCHEMA_KEYS: &[&str] =
     &[FILL_MODE_KEY, ROTATION_KEY, LOCATION_X_KEY, LOCATION_Y_KEY];
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
-#[serde(default)]
-pub struct WallpaperLayoutOverride {
-    pub fillmode: Option<FillMode>,
-    pub location: Option<Location>,
-    pub rotation: Option<Rotation>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-struct PersistedWallpaperLayoutOverride {
-    fillmode: FillMode,
-    location: Location,
-    rotation: Rotation,
-}
-
-impl WallpaperLayoutOverride {
-    pub fn from_resolved(layout: ResolvedLayout) -> Self {
-        Self {
-            fillmode: Some(layout.fillmode),
-            location: Some(layout.location),
-            rotation: Some(layout.rotation),
-        }
-    }
-
-    pub fn materialize(self) -> ResolvedLayout {
-        self.apply_to(ResolvedLayout {
-            fillmode: FillMode::default(),
-            location: Location::default(),
-            rotation: Rotation::default(),
-        })
-    }
-
-    pub fn apply_to(self, base: ResolvedLayout) -> ResolvedLayout {
-        ResolvedLayout {
-            fillmode: self.fillmode.unwrap_or(base.fillmode),
-            location: self.location.unwrap_or(base.location),
-            rotation: self.rotation.unwrap_or(base.rotation),
-        }
-    }
-
-    pub fn is_empty(self) -> bool {
-        self.fillmode.is_none() && self.location.is_none() && self.rotation.is_none()
-    }
-}
-
-pub fn wallpaper_layout_override_from_json(raw: &str) -> Option<WallpaperLayoutOverride> {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    if let Ok(persisted) = serde_json::from_str::<PersistedWallpaperLayoutOverride>(raw) {
-        return Some(WallpaperLayoutOverride::from_resolved(ResolvedLayout {
-            fillmode: persisted.fillmode,
-            location: persisted.location,
-            rotation: persisted.rotation,
-        }));
-    }
-    let parsed = serde_json::from_str::<WallpaperLayoutOverride>(raw).ok()?;
-    (!parsed.is_empty()).then_some(parsed)
-}
-
-pub fn wallpaper_layout_override_to_json(
-    layout: ResolvedLayout,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(&PersistedWallpaperLayoutOverride {
-        fillmode: layout.fillmode,
-        location: layout.location,
-        rotation: layout.rotation,
-    })
-}
 
 pub fn is_daemon_display_property_key(key: &str) -> bool {
     matches!(
@@ -231,83 +156,21 @@ pub fn normalize_user_property_overrides_json(raw: &str) -> String {
     serde_json::to_string(&value).unwrap_or_else(|_| raw.to_string())
 }
 
-pub fn split_renderer_properties(raw: Option<&str>) -> (Option<String>, WallpaperLayoutOverride) {
-    let Some(raw) = raw.filter(|v| !v.trim().is_empty()) else {
-        return (None, WallpaperLayoutOverride::default());
-    };
+pub fn strip_daemon_layout_props(raw: Option<&str>) -> Option<String> {
+    let raw = raw.filter(|v| !v.trim().is_empty())?;
     let Ok(map) = serde_json::from_str::<HashMap<String, String>>(raw) else {
-        return (Some(raw.to_string()), WallpaperLayoutOverride::default());
+        return Some(raw.to_string());
     };
 
-    let mut renderer = HashMap::new();
-    let mut fillmode = None;
-    let mut rotation = None;
-    let mut location_x = None;
-    let mut location_y = None;
-
-    for (key, value) in map {
-        match key.as_str() {
-            FILL_MODE_KEY => fillmode = parse_fillmode(&value),
-            ROTATION_KEY => rotation = parse_rotation(&value),
-            LOCATION_X_KEY => location_x = parse_percent(&value),
-            LOCATION_Y_KEY => location_y = parse_percent(&value),
-            _ => {
-                renderer.insert(key, value);
-            }
-        }
-    }
-
-    let location = if location_x.is_some() || location_y.is_some() {
-        Some(Location::new(
-            location_x.unwrap_or(50),
-            location_y.unwrap_or(50),
-        ))
-    } else {
-        None
-    };
-    let layout = WallpaperLayoutOverride {
-        fillmode,
-        location,
-        rotation,
-    };
-    let renderer_json = if renderer.is_empty() {
+    let renderer: HashMap<String, String> = map
+        .into_iter()
+        .filter(|(key, _)| !is_daemon_display_property_key(key))
+        .collect();
+    if renderer.is_empty() {
         None
     } else {
         serde_json::to_string(&renderer).ok()
-    };
-    (renderer_json, layout)
-}
-
-fn parse_fillmode(value: &str) -> Option<FillMode> {
-    match value {
-        "stretched" => Some(FillMode::Stretched),
-        "preserve_aspect_fit" => Some(FillMode::PreserveAspectFit),
-        "preserve_aspect_crop" => Some(FillMode::PreserveAspectCrop),
-        "centered" => Some(FillMode::Centered),
-        _ => None,
     }
-}
-
-fn parse_rotation(value: &str) -> Option<Rotation> {
-    match value {
-        "normal" => Some(Rotation::Normal),
-        "cw_90" => Some(Rotation::Cw90),
-        "cw_180" => Some(Rotation::Cw180),
-        "cw_270" => Some(Rotation::Cw270),
-        _ => None,
-    }
-}
-
-fn parse_percent(value: &str) -> Option<u8> {
-    let value = value.trim();
-    if value.is_empty() {
-        return None;
-    }
-    let parsed = value.parse::<f32>().ok()?;
-    if !parsed.is_finite() {
-        return None;
-    }
-    Some(parsed.round().clamp(0.0, 100.0) as u8)
 }
 
 #[cfg(test)]
@@ -322,9 +185,7 @@ mod tests {
             "waywallen.location_y": "75",
             "speed": "2"
         }"#;
-        let (renderer, layout) = split_renderer_properties(Some(raw));
-        assert_eq!(layout.fillmode, Some(FillMode::Centered));
-        assert_eq!(layout.location, Some(Location::new(25, 75)));
+        let renderer = strip_daemon_layout_props(Some(raw));
         assert_eq!(renderer.as_deref(), Some(r#"{"speed":"2"}"#));
     }
 
@@ -364,9 +225,7 @@ mod tests {
             "waywallen.enable_audio": "false",
             "waywallen.fill_mode": "centered"
         }"#;
-        let (renderer, layout) = split_renderer_properties(Some(raw));
-        assert_eq!(layout.fillmode, Some(FillMode::Centered));
-        let renderer = renderer.unwrap();
+        let renderer = strip_daemon_layout_props(Some(raw)).unwrap();
         let value: serde_json::Value = serde_json::from_str(&renderer).unwrap();
         assert_eq!(
             value

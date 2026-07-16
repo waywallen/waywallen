@@ -926,16 +926,12 @@ async fn apply_shared_renderer(
     spawn_req: renderer_manager::SpawnRequest,
     target: Option<&[DisplayId]>,
     target_ids: &[DisplayId],
-    wallpaper_layout_override: crate::wallpaper::properties::WallpaperLayoutOverride,
     first_frame_timeout: Option<Duration>,
 ) -> Result<String> {
     let renderer_id = match reusable_renderer_for_target(app, &spawn_req, target_ids, false).await {
         Some(existing) => existing,
         None => spawn_renderer_for_target(app, spawn_req, target).await?,
     };
-    app.router
-        .set_renderer_wallpaper_layout_override(&renderer_id, wallpaper_layout_override)
-        .await;
     match target {
         None => app.router.relink_all_displays_to(&renderer_id).await,
         Some(ids) => app.router.relink_displays_to(ids, &renderer_id).await,
@@ -948,7 +944,6 @@ async fn apply_duplicate_renderers(
     app: &Arc<AppState>,
     spawn_req: &renderer_manager::SpawnRequest,
     target_ids: &[DisplayId],
-    wallpaper_layout_override: crate::wallpaper::properties::WallpaperLayoutOverride,
     first_frame_timeout: Option<Duration>,
 ) -> Result<String> {
     let mut first_renderer_id: Option<String> = None;
@@ -958,9 +953,6 @@ async fn apply_duplicate_renderers(
             Some(existing) => existing,
             None => spawn_renderer_for_target(app, spawn_req.clone(), Some(&single)).await?,
         };
-        app.router
-            .set_renderer_wallpaper_layout_override(&renderer_id, wallpaper_layout_override)
-            .await;
         app.router.relink_displays_to(&single, &renderer_id).await;
         wait_for_apply_frame(app, &renderer_id, first_frame_timeout).await?;
         first_renderer_id.get_or_insert(renderer_id);
@@ -998,7 +990,7 @@ pub async fn apply_wallpaper_with_options(
         .settings
         .plugin(&renderer_plugin_name)
         .unwrap_or_default();
-    let (user_properties_json, wallpaper_layout_override) =
+    let user_properties_json =
         repo::get_wallpaper_render_properties(&app.db, entry.item_id).await?;
     let spawn_req = renderer_manager::SpawnRequest {
         wp_type: entry.wp_type.clone(),
@@ -1020,21 +1012,13 @@ pub async fn apply_wallpaper_with_options(
     let duplicate_renderers =
         app.settings.global().duplicate_renderers_for_same_wallpaper && !target_ids.is_empty();
     let renderer_id = if duplicate_renderers {
-        apply_duplicate_renderers(
-            app,
-            &spawn_req,
-            &target_ids,
-            wallpaper_layout_override,
-            options.first_frame_timeout,
-        )
-        .await?
+        apply_duplicate_renderers(app, &spawn_req, &target_ids, options.first_frame_timeout).await?
     } else {
         apply_shared_renderer(
             app,
             spawn_req,
             target,
             &target_ids,
-            wallpaper_layout_override,
             options.first_frame_timeout,
         )
         .await?

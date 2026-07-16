@@ -1011,92 +1011,25 @@ pub async fn get_user_property_overrides_raw(
         .map(|raw| crate::wallpaper::properties::normalize_user_property_overrides_json(&raw)))
 }
 
-fn parse_wallpaper_layout_override_raw(
-    item_id: i64,
-    raw: Option<&str>,
-) -> Option<crate::wallpaper::properties::WallpaperLayoutOverride> {
-    let raw = raw?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    let parsed = crate::wallpaper::properties::wallpaper_layout_override_from_json(raw);
-    if parsed.is_none() {
-        log::warn!("item {item_id}: wallpaper_layout_override JSON unparseable; ignoring");
-    }
-    parsed
-}
-
-/// Read renderer-owned user properties and daemon-owned layout data for
-/// renderer spawn/apply paths.
+/// Renderer user properties for spawn/apply, with daemon layout keys stripped out.
 pub async fn get_wallpaper_render_properties(
     db: &DatabaseConnection,
     item_id: i64,
-) -> Result<(
-    Option<String>,
-    crate::wallpaper::properties::WallpaperLayoutOverride,
-)> {
+) -> Result<Option<String>> {
     let row = item::Entity::find_by_id(item_id)
         .one(db)
         .await
         .with_context(|| format!("select item by id={item_id} for render properties"))?;
     let Some(item) = row else {
-        return Ok((None, Default::default()));
+        return Ok(None);
     };
     let raw_user_properties = item
         .user_property_overrides
         .as_deref()
         .map(crate::wallpaper::properties::normalize_user_property_overrides_json);
-    let (renderer_json, legacy_layout) =
-        crate::wallpaper::properties::split_renderer_properties(raw_user_properties.as_deref());
-    let layout =
-        parse_wallpaper_layout_override_raw(item_id, item.wallpaper_layout_override.as_deref())
-            .unwrap_or(legacy_layout);
-    Ok((renderer_json, layout))
-}
-
-/// Same layout read as `get_wallpaper_render_properties`, without the
-/// renderer-property payload. Used by detail responses.
-pub async fn get_wallpaper_layout_override_with_legacy(
-    db: &DatabaseConnection,
-    item_id: i64,
-) -> Result<Option<crate::wallpaper::properties::WallpaperLayoutOverride>> {
-    let (_, layout) = get_wallpaper_render_properties(db, item_id).await?;
-    Ok((!layout.is_empty()).then_some(layout))
-}
-
-pub async fn set_wallpaper_layout_override(
-    db: &DatabaseConnection,
-    item_id: i64,
-    layout: Option<crate::settings::ResolvedLayout>,
-) -> Result<()> {
-    let clearing = layout.is_none();
-    let serialized = layout
-        .map(crate::wallpaper::properties::wallpaper_layout_override_to_json)
-        .transpose()
-        .context("serialize wallpaper_layout_override")?;
-    let user_property_overrides = if clearing {
-        let mut current = get_user_property_overrides(db, item_id).await?;
-        current.retain(|k, _| !crate::wallpaper::properties::is_daemon_display_property_key(k));
-        let serialized = if current.is_empty() {
-            None
-        } else {
-            Some(serde_json::to_string(&current).context("serialize user_property_overrides")?)
-        };
-        Set(serialized)
-    } else {
-        NotSet
-    };
-    let active = item::ActiveModel {
-        id: Set(item_id),
-        wallpaper_layout_override: Set(serialized),
-        user_property_overrides,
-        ..Default::default()
-    };
-    item::Entity::update(active)
-        .exec(db)
-        .await
-        .with_context(|| format!("update item {item_id} wallpaper_layout_override"))?;
-    Ok(())
+    let renderer_json =
+        crate::wallpaper::properties::strip_daemon_layout_props(raw_user_properties.as_deref());
+    Ok(renderer_json)
 }
 
 /// Set or reset one item user-property override and rewrite the column.

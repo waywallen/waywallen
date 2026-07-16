@@ -25,7 +25,8 @@ message ServerFrame {
 }
 
 message Request {
-  reserved 55, 56;
+  reserved 55, 56, 59;
+  reserved "wallpaper_layout_set";
 
   uint64 request_id = 1;
   oneof payload {
@@ -76,7 +77,6 @@ message Request {
     RemoteUninstallRequest    remote_uninstall = 53;
     RemoteDetailsRequest      remote_details = 54;
     PlaylistJumpToRequest     playlist_jump_to = 58;
-    WallpaperLayoutSetRequest wallpaper_layout_set = 59;
     PluginDeleteRequest       plugin_delete = 60;
     WallpaperRemoveRequest    wallpaper_remove = 61;
     PluginInspectRequest      plugin_inspect = 62;
@@ -88,7 +88,8 @@ message Request {
 }
 
 message Response {
-  reserved 55, 56;
+  reserved 55, 56, 59;
+  reserved "wallpaper_layout_set";
 
   uint64 request_id = 1;
   // Coarse status class, kept for back-compat with clients that haven't
@@ -147,7 +148,6 @@ message Response {
     RemoteUninstallResponse    remote_uninstall = 53;
     RemoteDetailsResponse      remote_details = 54;
     Empty                      playlist_jump_to = 58;
-    WallpaperLayoutSetResponse wallpaper_layout_set = 59;
     PluginDeleteResponse       plugin_delete = 60;
     WallpaperRemoveResponse    wallpaper_remove = 61;
     PluginInspectResponse      plugin_inspect = 62;
@@ -370,10 +370,9 @@ message WallpaperEntry {
   // Stable source/plugin identifier (e.g. Wallpaper Engine workshop id).
   // Empty when the source didn't set one.
   string external_id = 15;
-  // Per-wallpaper display layout override. When set, this whole layout
-  // wins over the display's own layout while the wallpaper is active.
-  LayoutPrefs wallpaper_layout_override = 16;
-  bool wallpaper_layout_override_set = 17;
+  // 16, 17 were a per-wallpaper layout override, now replaced by per-display layout.
+  reserved 16, 17;
+  reserved "wallpaper_layout_override", "wallpaper_layout_override_set";
   // True when the source plugin can remove this item from its backing
   // storage. The daemon still owns the DB row deletion after plugin success.
   bool supports_item_remove = 18;
@@ -433,18 +432,6 @@ message WallpaperPropertySetRequest {
   }
 }
 message WallpaperPropertySetResponse {}
-
-// Commit or clear the per-wallpaper display layout override. Unlike
-// `WallpaperPropertySetRequest`, this is daemon-owned data and is
-// persisted outside renderer user-property overrides.
-message WallpaperLayoutSetRequest {
-  string wallpaper_id = 1;
-  bool clear = 2;
-  LayoutPrefs layout = 3;
-}
-message WallpaperLayoutSetResponse {
-  WallpaperEntry entry = 1;
-}
 
 message WallpaperRemoveRequest {
   string wallpaper_id = 1;

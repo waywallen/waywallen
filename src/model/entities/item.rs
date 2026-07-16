@@ -38,9 +38,6 @@ pub struct Model {
     /// JSON map of per-item user-property overrides. Each key is the
     /// shader's `u_*` uniform name (matches keys in the renderer's
     pub user_property_overrides: Option<String>,
-    /// JSON map of daemon-owned per-wallpaper display layout override.
-    /// This is intentionally separate from renderer user properties.
-    pub wallpaper_layout_override: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

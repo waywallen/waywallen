@@ -15,7 +15,6 @@ use crate::ipc::proto::{ControlMsg, EventMsg};
 use crate::renderer_manager::{DrmNode, RendererHandle, RendererId, RendererManager};
 use crate::scheduler::{DisplayId, DisplayInfo, ProjectedConfig};
 use crate::settings::{AutoAction, AutoReplayPolicy, ResolvedLayout, SettingsStore};
-use crate::wallpaper::properties::WallpaperLayoutOverride;
 
 use super::auto_replay;
 use super::table::{Link, LinkDstRect, LinkId, LinkSrcRect, RoutingTable};
@@ -246,7 +245,6 @@ struct Inner {
     /// Per-renderer set of (display_id, buffer_generation) pairs we've
     /// emitted `Unbind` for and are waiting to be acked.
     unbind_acks_pending: HashMap<RendererId, HashSet<(DisplayId, u64)>>,
-    wallpaper_layout_overrides: HashMap<RendererId, WallpaperLayoutOverride>,
     next_display_id: u64,
     next_config_generation: u64,
 }
@@ -285,7 +283,6 @@ impl Router {
                 renderer_states: HashMap::new(),
                 orphan_timers: HashMap::new(),
                 unbind_acks_pending: HashMap::new(),
-                wallpaper_layout_overrides: HashMap::new(),
                 next_display_id: 0,
                 next_config_generation: 0,
                 session_locked: false,
@@ -553,7 +550,7 @@ impl Router {
         inner.next_config_generation += 1;
         let cfg_gen = inner.next_config_generation;
         let info = inner.displays.get(&display_id).unwrap().info.clone();
-        let layout = self.resolved_layout_for_renderer(&info, &link.renderer_id, &inner);
+        let layout = self.resolved_layout(&info);
         let cfg = project_link(&link, &renderer, &info, cfg_gen, &layout);
         if let Some(state) = inner.displays.get(&display_id) {
             let _ = state.tx.send(DisplayOutEvent::SetConfig(cfg));
@@ -662,7 +659,6 @@ impl Router {
         let affected: Vec<DisplayId> = {
             let mut inner = self.inner.lock().await;
             let removed = inner.table.remove_renderer(id);
-            inner.wallpaper_layout_overrides.remove(id);
             if let Some(task) = inner.renderer_tasks.remove(id) {
                 task.abort();
             }
@@ -682,41 +678,6 @@ impl Router {
             let all = self.snapshot_displays().await;
             self.emit(RouterEvent::DisplaysReplace(all));
         }
-    }
-
-    pub async fn set_renderer_wallpaper_layout_override(
-        self: &Arc<Self>,
-        renderer_id: &str,
-        layout: WallpaperLayoutOverride,
-    ) -> bool {
-        let display_ids: Vec<DisplayId> = {
-            let mut inner = self.inner.lock().await;
-            if inner.table.get_renderer(renderer_id).is_none() {
-                return false;
-            }
-            if layout.is_empty() {
-                inner.wallpaper_layout_overrides.remove(renderer_id);
-            } else {
-                inner
-                    .wallpaper_layout_overrides
-                    .insert(renderer_id.to_string(), layout);
-            }
-            inner
-                .table
-                .links_for_renderer(renderer_id)
-                .into_iter()
-                .filter(|l| l.enabled)
-                .map(|l| l.display_id)
-                .collect()
-        };
-        for did in &display_ids {
-            self.resync_display_set_config(*did).await;
-        }
-        if !display_ids.is_empty() {
-            let all = self.snapshot_displays().await;
-            self.emit(RouterEvent::DisplaysReplace(all));
-        }
-        true
     }
 
     /// Arm `unbind_done` ack tracking for `renderer_id`. MUST be called
@@ -1464,19 +1425,7 @@ impl Router {
             .collect();
         let display_layout = self.resolved_layout(&s.info);
         let display_layout_source = self.display_layout_source(&s.info);
-        let wallpaper_layout_override = link_rows.first().and_then(|l| {
-            inner
-                .wallpaper_layout_overrides
-                .get(&l.renderer_id)
-                .copied()
-                .filter(|layout| !layout.is_empty())
-        });
-        let (effective_layout, effective_layout_source) =
-            if let Some(layout) = wallpaper_layout_override {
-                (layout.apply_to(display_layout), LayoutSource::Wallpaper)
-            } else {
-                (display_layout, display_layout_source)
-            };
+        let (effective_layout, effective_layout_source) = (display_layout, display_layout_source);
         let links = link_rows
             .into_iter()
             .map(|l| DisplayLinkSnapshot {
@@ -1571,19 +1520,8 @@ impl Router {
                     .collect();
                 let display_layout = self.resolved_layout(&s.info);
                 let display_layout_source = self.display_layout_source(&s.info);
-                let wallpaper_layout_override = link_rows.first().and_then(|l| {
-                    inner
-                        .wallpaper_layout_overrides
-                        .get(&l.renderer_id)
-                        .copied()
-                        .filter(|layout| !layout.is_empty())
-                });
                 let (effective_layout, effective_layout_source) =
-                    if let Some(layout) = wallpaper_layout_override {
-                        (layout.apply_to(display_layout), LayoutSource::Wallpaper)
-                    } else {
-                        (display_layout, display_layout_source)
-                    };
+                    (display_layout, display_layout_source);
                 let links = link_rows
                     .into_iter()
                     .map(|l| DisplayLinkSnapshot {
@@ -1805,7 +1743,7 @@ impl Router {
             }
             inner.next_config_generation += 1;
             let cfg_gen = inner.next_config_generation;
-            let layout = self.resolved_layout_for_renderer(&info, &link.renderer_id, &inner);
+            let layout = self.resolved_layout(&info);
             let cfg = project_link(&link, &renderer, &info, cfg_gen, &layout);
             Some((link.display_id, cfg))
         };
@@ -2260,7 +2198,7 @@ impl Router {
         if let Some((link, renderer, new_g)) = target {
             inner.next_config_generation += 1;
             let cfg_gen = inner.next_config_generation;
-            let layout = self.resolved_layout_for_renderer(&info, &link.renderer_id, &inner);
+            let layout = self.resolved_layout(&info);
             let cfg = project_link(&link, &renderer, &info, cfg_gen, &layout);
             let new_r = link.renderer_id.clone();
             let replay = renderer

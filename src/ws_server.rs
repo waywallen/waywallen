@@ -28,7 +28,6 @@ use crate::settings::{SettingsStore, WallpaperFilterState, WallpaperSortRuleStat
 use crate::tasks;
 use crate::wallpaper::properties::{
     dedupe_predefined_schema, is_daemon_display_property_key, user_property_default_wire_value,
-    WallpaperLayoutOverride,
 };
 use crate::wallpaper::sort::apply_wallpaper_sorts;
 use crate::AppState;
@@ -618,20 +617,6 @@ fn align_from_pb(v: i32) -> Option<crate::display::layout::Align> {
 
 fn location_from_pb(x: u32, y: u32) -> crate::display::layout::Location {
     crate::display::layout::Location::new(x.min(100) as u8, y.min(100) as u8)
-}
-
-fn resolved_layout_from_pb(p: &pb::LayoutPrefs) -> crate::settings::ResolvedLayout {
-    crate::settings::ResolvedLayout {
-        fillmode: fillmode_from_pb(p.fillmode).unwrap_or_default(),
-        location: if p.location_set {
-            location_from_pb(p.location_x, p.location_y)
-        } else {
-            align_from_pb(p.align)
-                .map(crate::display::layout::Location::from_align)
-                .unwrap_or_default()
-        },
-        rotation: rotation_from_pb(p.rotation).unwrap_or_default(),
-    }
 }
 
 fn auto_action_to_pb(v: crate::settings::AutoAction) -> pb::AutoAction {
@@ -1673,7 +1658,6 @@ async fn dispatch_inner(
                         tags,
                         String::new(),
                         String::new(),
-                        None,
                         remove_support_by_item
                             .get(&e.item_id)
                             .copied()
@@ -1711,8 +1695,6 @@ async fn dispatch_inner(
             let overrides = repo::get_user_property_overrides_raw(&state.db, entry.item_id)
                 .await?
                 .unwrap_or_default();
-            let layout_override =
-                repo::get_wallpaper_layout_override_with_legacy(&state.db, entry.item_id).await?;
 
             Res::WallpaperGet(pb::WallpaperGetResponse {
                 entry: Some(entry_to_pb(
@@ -1720,7 +1702,6 @@ async fn dispatch_inner(
                     tags,
                     schema,
                     overrides,
-                    layout_override,
                     supports_item_remove,
                 )),
             })
@@ -1776,15 +1757,9 @@ async fn dispatch_inner(
                 .find_by_resource(&entry.resource)
                 .await;
             let push_tag = if is_daemon_display_property_key(&r.key) {
+                // Per-wallpaper layout overrides are gone, so this no longer pushes to a live renderer.
                 if let Some(h) = live_renderer {
-                    let (_, wallpaper_layout_override) =
-                        repo::get_wallpaper_render_properties(&state.db, entry.item_id).await?;
-                    let id = h.id.clone();
-                    state
-                        .router
-                        .set_renderer_wallpaper_layout_override(&id, wallpaper_layout_override)
-                        .await;
-                    format!("display-layout={id}")
+                    format!("display-layout={}", h.id)
                 } else {
                     String::from("offline")
                 }
@@ -1842,55 +1817,6 @@ async fn dispatch_inner(
                 push_tag
             );
             Res::WallpaperPropertySet(pb::WallpaperPropertySetResponse {})
-        }
-
-        Req::WallpaperLayoutSet(r) => {
-            let entry = match r.wallpaper_id.parse::<i64>() {
-                Ok(iid) => repo::get_entry(&state.db, iid).await?,
-                Err(_) => None,
-            };
-            let entry = entry.ok_or_else(|| Error::WallpaperNotFound(r.wallpaper_id.clone()))?;
-            let layout = if r.clear {
-                None
-            } else {
-                let Some(layout) = r.layout.as_ref() else {
-                    return Err(Error::InvalidArgument(
-                        "wallpaper_layout_set requires layout unless clear=true".to_string(),
-                    ));
-                };
-                Some(resolved_layout_from_pb(layout))
-            };
-            repo::set_wallpaper_layout_override(&state.db, entry.item_id, layout).await?;
-
-            let live_renderer = state
-                .renderer_manager
-                .find_by_resource(&entry.resource)
-                .await;
-            if let Some(h) = live_renderer {
-                let override_layout = layout
-                    .map(WallpaperLayoutOverride::from_resolved)
-                    .unwrap_or_default();
-                state
-                    .router
-                    .set_renderer_wallpaper_layout_override(&h.id, override_layout)
-                    .await;
-            }
-
-            let layout_override = layout.map(WallpaperLayoutOverride::from_resolved);
-            let supports_item_remove = {
-                let sm = state.source_manager.lock().await;
-                sm.supports_item_remove(&entry.plugin_name)
-            };
-            Res::WallpaperLayoutSet(pb::WallpaperLayoutSetResponse {
-                entry: Some(entry_to_pb(
-                    &entry,
-                    entry.tags.clone(),
-                    String::new(),
-                    String::new(),
-                    layout_override,
-                    supports_item_remove,
-                )),
-            })
         }
 
         Req::WallpaperScan(_) => {
@@ -2795,12 +2721,10 @@ fn entry_to_pb(
     tags: Vec<String>,
     user_properties_schema: String,
     user_property_overrides: String,
-    wallpaper_layout_override: Option<WallpaperLayoutOverride>,
     supports_item_remove: bool,
 ) -> pb::WallpaperEntry {
     // `e` is reconstructed from the DB (the source of truth), so its
     // fields are already the freshest values — no overlay needed.
-    let wallpaper_layout_override_set = wallpaper_layout_override.is_some();
     pb::WallpaperEntry {
         id: e.item_id.to_string(),
         name: e.name.clone(),
@@ -2819,9 +2743,6 @@ fn entry_to_pb(
         user_property_overrides,
         description: e.description.clone().unwrap_or_default(),
         external_id: e.external_id.clone().unwrap_or_default(),
-        wallpaper_layout_override: wallpaper_layout_override
-            .map(|layout| layout_prefs_to_pb_resolved(&layout.materialize())),
-        wallpaper_layout_override_set,
         supports_item_remove,
     }
 }
