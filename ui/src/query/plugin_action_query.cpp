@@ -41,7 +41,7 @@ void PluginActionQuery::reload() {
     auto self = QWatcher { this };
     spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
-        co_await asio::post(asio::bind_executor(QAsyncResult::get_executor(), use_task));
+        if (! co_await QAsyncResult::qexecutor()) co_return;
         if (! self) co_return;
         self->inspect_set(result, [](const proto::Response&) {});
         co_return;
