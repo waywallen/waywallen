@@ -10,6 +10,7 @@ MD.Dialog {
     id: control
 
     property var allTags: []
+    property var tagLabels: []
     property var selected: []
     property string dialogTitle: qsTr("Select tags")
     signal commit(var tags)
@@ -29,6 +30,11 @@ MD.Dialog {
         else
             next.push(tag);
         control.pending = next;
+    }
+    function labelFor(tag) {
+        const index = (control.allTags || []).indexOf(tag);
+        return index >= 0 && index < (control.tagLabels || []).length
+            ? String(control.tagLabels[index]) : String(tag);
     }
 
     // True when the pending selection actually differs from what was
@@ -93,7 +99,7 @@ MD.Dialog {
                     delegate: MD.FilterChip {
                         required property var modelData
                         checkable: false
-                        text: modelData
+                        text: control.labelFor(modelData)
                         checked: (control.pending || []).indexOf(modelData) >= 0
                         onClicked: control.togglePending(modelData)
                     }

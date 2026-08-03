@@ -36,6 +36,15 @@ MD.Dialog {
     function filterValues(filter) {
         return sanitize(filter && filter.values ? filter.values : []);
     }
+    function filterLabels(filter) {
+        const values = filterValues(filter);
+        const labels = Array.from(filter && filter.valueLabels ? filter.valueLabels : [], label => String(label));
+        return labels.length === values.length ? labels : values;
+    }
+    function labelFor(filter, value) {
+        const index = filterValues(filter).indexOf(value);
+        return index >= 0 ? filterLabels(filter)[index] : String(value);
+    }
     function selectedMap() {
         let allowed = {};
         for (const filter of filters ?? []) {
@@ -80,7 +89,7 @@ MD.Dialog {
         root.apply(collect(filter, values));
     }
     function selectOptions(filter) {
-        return [qsTr("Any")].concat(filterValues(filter));
+        return [qsTr("Any")].concat(filterLabels(filter));
     }
     function selectIndex(filter) {
         const selected = selectedFor(filter);
@@ -128,6 +137,7 @@ MD.Dialog {
         W.TagPickerDialog {
             dialogTitle: root.activeFilter ? String(root.activeFilter.title ?? "") : qsTr("Select values")
             allTags: root.filterValues(root.activeFilter)
+            tagLabels: root.filterLabels(root.activeFilter)
             selected: root.selectedFor(root.activeFilter)
             onCommit: function (values) {
                 root.setFilterValues(root.activeFilter, values);
@@ -228,7 +238,7 @@ MD.Dialog {
                                 model: root.selectedFor(filterRow.modelData)
                                 delegate: W.Tag {
                                     required property var modelData
-                                    text: modelData
+                                    text: root.labelFor(filterRow.modelData, modelData)
                                 }
                             }
                         }

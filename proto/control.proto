@@ -738,6 +738,8 @@ message RemoteFilterDef {
   repeated string values = 4;
   string description = 5;
   string confirmation = 6;
+  // Optional display labels parallel to values. Clients submit values, never labels.
+  repeated string value_labels = 7;
 }
 
 message RemoteSourceInfo {

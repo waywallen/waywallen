@@ -172,6 +172,7 @@ pub struct DiscoverFilter {
     pub title: String,
     pub ty: DiscoverFilterType,
     pub values: Vec<String>,
+    pub value_labels: Vec<String>,
     pub description: String,
     pub confirmation: String,
 }
@@ -833,6 +834,7 @@ impl LuaPluginRuntime {
             title: "Tags".to_string(),
             ty: DiscoverFilterType::MultiSelect,
             values: tags,
+            value_labels: Vec::new(),
             description: String::new(),
             confirmation: String::new(),
         }]
@@ -881,6 +883,7 @@ impl LuaPluginRuntime {
                 }
             };
             let values = Self::require_string_sequence(&filter, "values", &context)?;
+            let value_labels = Self::optional_string_sequence(&filter, "value_labels", &context)?;
             if values.is_empty() {
                 return Err(Error::Internal(anyhow!(
                     "{context}.values must not be empty"
@@ -889,6 +892,16 @@ impl LuaPluginRuntime {
             if ty == DiscoverFilterType::Toggle && values.len() != 1 {
                 return Err(Error::Internal(anyhow!(
                     "{context}.values must contain exactly one value for a toggle"
+                )));
+            }
+            if !value_labels.is_empty() && value_labels.len() != values.len() {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.value_labels must be empty or contain one label per value"
+                )));
+            }
+            if value_labels.iter().any(String::is_empty) {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.value_labels must not contain an empty label"
                 )));
             }
             for value in &values {
@@ -916,6 +929,7 @@ impl LuaPluginRuntime {
                 title,
                 ty,
                 values,
+                value_labels,
                 description,
                 confirmation,
             });
@@ -4995,7 +5009,13 @@ function M.info()
             discover = {
                 search = true,
                 filters = {
-                    { id = "kind", title = "Kind", type = "select", values = { "A", "B" } },
+                    {
+                        id = "kind",
+                        title = "Kind",
+                        type = "select",
+                        values = { "A", "B" },
+                        value_labels = { "Alpha", "Beta" },
+                    },
                     { id = "tags", title = "Tags", type = "multi_select", values = { "X", "Y" } },
                 },
             },
@@ -5012,6 +5032,10 @@ return M
         let mgr = SourceManager::new().unwrap();
         mgr.load_plugin(&path, "test.plugin", "1.0", ENTRY_VERSION_V3)
             .unwrap();
+        assert_eq!(
+            mgr.discover_sources().unwrap()[0].filters[0].value_labels,
+            vec!["Alpha", "Beta"]
+        );
         assert!(block_value(async {
             mgr.call_discover("filters", "", "", 1, &["A".to_string(), "X".to_string()])
                 .await

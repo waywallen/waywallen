@@ -57,10 +57,13 @@ void RemoteAvailabilityQuery::reload() {
                     QVariantMap fm;
                     QStringList values;
                     for (const auto& value : filter.values()) values.push_back(value);
+                    QStringList valueLabels;
+                    for (const auto& label : filter.valueLabels()) valueLabels.push_back(label);
                     fm[u"id"_s]           = filter.id_proto();
                     fm[u"title"_s]        = filter.title();
                     fm[u"type"_s]         = static_cast<int>(filter.type());
                     fm[u"values"_s]       = values;
+                    fm[u"valueLabels"_s]  = valueLabels;
                     fm[u"description"_s]  = filter.description();
                     fm[u"confirmation"_s] = filter.confirmation();
                     filters.push_back(fm);

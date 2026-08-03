@@ -2243,6 +2243,7 @@ async fn dispatch_inner(
                                         }
                                     },
                                     values: filter.values,
+                                    value_labels: filter.value_labels,
                                     description: filter.description,
                                     confirmation: filter.confirmation,
                                 })
