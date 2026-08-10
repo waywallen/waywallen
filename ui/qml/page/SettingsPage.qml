@@ -112,8 +112,7 @@ MD.Page {
         target: W.Notify
         function onDaemonReady() {
             getQ.reload();
-            if (W.Util.isFlatpak)
-                autostartGetQ.reload();
+            autostartGetQ.reload();
         }
         function onSettingsChanged() {
             getQ.reload();
@@ -124,8 +123,7 @@ MD.Page {
         W.App.refreshNetworkCacheSize();
         if (W.Notify.daemonPhase === W.Notify.DaemonPhase.Ready) {
             getQ.reload();
-            if (W.Util.isFlatpak)
-                autostartGetQ.reload();
+            autostartGetQ.reload();
         }
     }
 
@@ -525,7 +523,6 @@ MD.Page {
             SettingItem {
                 first: false
                 last: false
-                visible: W.Util.isFlatpak
 
                 RowLayout {
                     Layout.fillWidth: true

@@ -1376,8 +1376,9 @@ message SettingsChanged {
   map<string, PluginSettings> plugins = 2;
 }
 
-// Flatpak-only login startup integration through
-// org.freedesktop.portal.Background.
+// Login startup integration. Sandboxed builds go through
+// org.freedesktop.portal.Background; host builds write an XDG
+// autostart entry directly.
 message AutostartGetRequest {}
 message AutostartGetResponse {
   bool enabled = 1;
