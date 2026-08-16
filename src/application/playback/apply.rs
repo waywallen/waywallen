@@ -283,6 +283,7 @@ pub async fn apply_wallpaper(
     let spawn_settings = app.settings.resolved_renderer_settings(&renderer);
     let (user_property_overrides, wallpaper_layout_override) =
         repo::get_wallpaper_render_properties(&app.db, entry.item_id).await?;
+    // `apply_assignment` resolves display_size per renderer.
     let spawn_req = renderer_manager::SpawnRequest {
         wp_type: entry.wp_type.clone(),
         extras: apply.extras,
@@ -291,6 +292,7 @@ pub async fn apply_wallpaper(
         renderer_name: Some(renderer_plugin_name.clone()),
         user_property_overrides,
         default_user_properties: apply.default_user_properties,
+        display_size: None,
     };
     let target = request.display_ids.as_deref();
     let target_ids = app.router.registered_display_ids(target).await;

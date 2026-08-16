@@ -12,7 +12,7 @@ bin = "../../../../bin/waywallen-image-renderer"
 types = ["image"]
 priority = 100
 activity = "on_demand"
-spawn_version = 10
+spawn_version = 11
 
 [renderers.waywallen-image.settings]
 fps = { type = "u32", default = 30, min = 1, max = 240, step = 1, identity = true, label_key = "settings.image.fps", group = "render", order = 10 }

@@ -356,7 +356,7 @@ void ww_bridge_control_free(ww_bridge_control_t* msg);
  * validates the value sent by the daemon matches and returns -EPROTO
  * otherwise. */
 #define WW_BRIDGE_SUPPORTED_PROTOCOL_VERSION 3u
-#define WW_BRIDGE_SUPPORTED_SPAWN_VERSION    10u
+#define WW_BRIDGE_SUPPORTED_SPAWN_VERSION    11u
 
 /* Receive the daemon's typed `init` request and copy it into `out`.
  *

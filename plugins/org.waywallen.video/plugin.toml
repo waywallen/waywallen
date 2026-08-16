@@ -17,7 +17,7 @@ bin = "../../../../bin/waywallen-video-renderer"
 types = ["video"]
 priority = 100
 activity = "continuous"
-spawn_version = 10
+spawn_version = 11
 
 [renderers.waywallen-video.settings]
 loop_file = { type = "string", default = "inf", choices = ["inf", "no"], identity = false, label_key = "settings.video.loop_file", group = "playback", order = 10 }

@@ -83,6 +83,9 @@
     <field name="settings" type="kv_list"/>
     <!-- Raw user_property_overrides JSON; empty when unavailable. -->
     <field name="user_properties" type="string"/>
+    <!-- Real size (px) of the renderer's single linked display; both zero if unknown. -->
+    <field name="display_width" type="u32"/>
+    <field name="display_height" type="u32"/>
   </struct>
 
   <struct name="control_transition">
