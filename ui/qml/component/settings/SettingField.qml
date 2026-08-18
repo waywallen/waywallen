@@ -7,6 +7,15 @@ import waywallen.ui as W
 
 // Renders one schema-driven control. The schema dict comes from
 // `RendererPluginListQuery.renderers[i].settings[j]`.
+//
+// `schema.label` does not always carry human text. When a manifest
+// declares no translated `label`, `pluginMessageFromPb` substitutes the
+// raw `label_key` (`renderer_query.cpp`), and `W.I18n.tr` returns a
+// plain string unchanged -- so a manifest still on the deprecated
+// `label_key` form puts `settings.video.hwdec` where the name belongs.
+// A dotted, space-free value is therefore treated as an unresolved key
+// and falls through to the `key` transform. Real translations and the
+// human labels source plugins supply contain spaces and pass through.
 ColumnLayout {
     id: root
 
@@ -27,12 +36,17 @@ ColumnLayout {
     readonly property int kBool: 4
     readonly property int kI32: 5
 
+    // A dotted, space-free token is an unresolved i18n key, not a label.
+    function isUnresolvedKey(s) {
+        return s.indexOf(".") >= 0 && !/\s/.test(s);
+    }
+
     readonly property string label: {
         const translated = W.I18n.tr(schema.label);
-        if (translated.length > 0)
+        if (translated.length > 0 && !root.isUnresolvedKey(translated))
             return translated;
         const sk = schema.label_key || "";
-        if (sk.length > 0)
+        if (sk.length > 0 && !root.isUnresolvedKey(sk))
             return sk;
         const raw = schema.key || "";
         if (raw.length === 0)
@@ -44,7 +58,10 @@ ColumnLayout {
 
     readonly property string description: {
         const translated = W.I18n.tr(schema.description);
-        return translated.length > 0 ? translated : (schema.description_key || "");
+        if (translated.length > 0 && !root.isUnresolvedKey(translated))
+            return translated;
+        const dk = schema.description_key || "";
+        return root.isUnresolvedKey(dk) ? "" : dk;
     }
     // Bare http(s) URLs in the description become clickable links
     readonly property string descriptionHtml: {
