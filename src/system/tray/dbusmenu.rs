@@ -5,6 +5,7 @@ use std::sync::Arc;
 use zbus::{interface, zvariant};
 use zvariant::{OwnedValue, StructureBuilder, Value};
 
+use super::i18n::tr;
 use crate::application;
 use crate::DaemonContext;
 
@@ -334,12 +335,12 @@ pub async fn notify_menu_changed(app: &Arc<DaemonContext>) {
 
 fn build_root(menu: &MenuState) -> ItemStruct {
     let children: Vec<OwnedValue> = vec![
-        item_to_value(make_leaf(ID_OPEN_UI, "Open UI", None)),
-        item_to_value(make_leaf(ID_NEXT, "Next", None)),
-        item_to_value(make_leaf(ID_PREV, "Previous", None)),
+        item_to_value(make_leaf(ID_OPEN_UI, tr("Open UI"), None)),
+        item_to_value(make_leaf(ID_NEXT, tr("Next"), None)),
+        item_to_value(make_leaf(ID_PREV, tr("Previous"), None)),
         item_to_value(make_leaf(ID_SEP1, "", Some("separator"))),
-        item_to_value(make_checkmark(ID_SHUFFLE, "Shuffle", menu.is_shuffle)),
-        item_to_value(make_submenu_parent(ID_ROTATE, "Rotate")),
+        item_to_value(make_checkmark(ID_SHUFFLE, tr("Shuffle"), menu.is_shuffle)),
+        item_to_value(make_submenu_parent(ID_ROTATE, tr("Rotate"))),
         item_to_value(make_leaf(ID_SEP_PL, "", Some("separator"))),
         item_to_value(make_leaf(
             ID_PAUSE,
@@ -352,9 +353,9 @@ fn build_root(menu: &MenuState) -> ItemStruct {
             None,
         )),
         item_to_value(make_leaf(ID_SEP2, "", Some("separator"))),
-        item_to_value(make_leaf(ID_RESCAN, "Rescan wallpapers", None)),
+        item_to_value(make_leaf(ID_RESCAN, tr("Rescan wallpapers"), None)),
         item_to_value(make_leaf(ID_SEP3, "", Some("separator"))),
-        item_to_value(make_leaf(ID_QUIT, "Quit", None)),
+        item_to_value(make_leaf(ID_QUIT, tr("Quit"), None)),
     ];
     (ID_ROOT, root_props(), children)
 }
@@ -362,12 +363,14 @@ fn build_root(menu: &MenuState) -> ItemStruct {
 fn build_rotate_submenu(menu: &MenuState) -> ItemStruct {
     let children: Vec<OwnedValue> = rotate_options()
         .iter()
-        .map(|(id, label, secs)| item_to_value(make_radio(*id, label, menu.rotation_secs == *secs)))
+        .map(|(id, label, secs)| {
+            item_to_value(make_radio(*id, tr(label), menu.rotation_secs == *secs))
+        })
         .collect();
     let mut props = HashMap::new();
     props.insert(
         "label".into(),
-        OwnedValue::try_from(Value::from("Rotate")).unwrap(),
+        OwnedValue::try_from(Value::from(tr("Rotate"))).unwrap(),
     );
     props.insert(
         "children-display".into(),
@@ -443,17 +446,17 @@ fn make_radio(id: i32, label: &str, on: bool) -> ItemStruct {
 
 fn pause_action_label(paused: bool) -> &'static str {
     if paused {
-        "Resume"
+        tr("Resume")
     } else {
-        "Pause"
+        tr("Pause")
     }
 }
 
 fn mute_action_label(muted: bool) -> &'static str {
     if muted {
-        "Unmute"
+        tr("Unmute")
     } else {
-        "Mute"
+        tr("Mute")
     }
 }
 
@@ -478,23 +481,23 @@ fn make_submenu_parent(id: i32, label: &str) -> ItemStruct {
 fn props_for(id: i32, menu: &MenuState) -> Option<HashMap<String, OwnedValue>> {
     match id {
         ID_ROOT => Some(root_props()),
-        ID_OPEN_UI => Some(make_leaf(id, "Open UI", None).1),
-        ID_NEXT => Some(make_leaf(id, "Next", None).1),
-        ID_PREV => Some(make_leaf(id, "Previous", None).1),
+        ID_OPEN_UI => Some(make_leaf(id, tr("Open UI"), None).1),
+        ID_NEXT => Some(make_leaf(id, tr("Next"), None).1),
+        ID_PREV => Some(make_leaf(id, tr("Previous"), None).1),
         ID_SEP1 | ID_SEP2 | ID_SEP3 | ID_SEP_PL => Some(make_leaf(id, "", Some("separator")).1),
-        ID_SHUFFLE => Some(make_checkmark(id, "Shuffle", menu.is_shuffle).1),
-        ID_ROTATE => Some(make_submenu_parent(id, "Rotate").1),
+        ID_SHUFFLE => Some(make_checkmark(id, tr("Shuffle"), menu.is_shuffle).1),
+        ID_ROTATE => Some(make_submenu_parent(id, tr("Rotate")).1),
         ID_ROT_OFF | ID_ROT_30S | ID_ROT_1M | ID_ROT_5M | ID_ROT_15M | ID_ROT_1H => {
             let (_, label, secs) = rotate_options()
                 .iter()
                 .copied()
                 .find(|(rid, _, _)| *rid == id)?;
-            Some(make_radio(id, label, menu.rotation_secs == secs).1)
+            Some(make_radio(id, tr(label), menu.rotation_secs == secs).1)
         }
         ID_PAUSE => Some(make_leaf(id, pause_action_label(menu.manual_paused), None).1),
         ID_MUTE => Some(make_leaf(id, mute_action_label(menu.manual_muted), None).1),
-        ID_RESCAN => Some(make_leaf(id, "Rescan wallpapers", None).1),
-        ID_QUIT => Some(make_leaf(id, "Quit", None).1),
+        ID_RESCAN => Some(make_leaf(id, tr("Rescan wallpapers"), None).1),
+        ID_QUIT => Some(make_leaf(id, tr("Quit"), None).1),
         _ => None,
     }
 }

@@ -1,4 +1,5 @@
 pub mod dbusmenu;
+mod i18n;
 mod sni;
 
 use std::sync::Arc;

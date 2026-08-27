@@ -96,7 +96,7 @@ impl StatusNotifierItem {
             String::new(),
             Vec::new(),
             "waywallen".to_string(),
-            "Linux wallpaper daemon".to_string(),
+            super::i18n::tr("Linux wallpaper daemon").to_string(),
         )
     }
 
