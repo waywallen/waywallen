@@ -174,7 +174,7 @@ source = "git+https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.
 [[packages]]
 name = "wavsen"
 version = "0.1.0"
-source = "git+https://github.com/hypengw/wavsen.git#77dfd33d07112c05df4682e08b98e19153ebe3ab"
+source = "git+https://github.com/hypengw/wavsen.git#74506b689d232a7853492271149026239c5709f3"
 dependencies = [
   "rstd-core",
   "rstd-cppstd",

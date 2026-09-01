@@ -1343,7 +1343,9 @@ int run(int argc, char** argv) {
         });
     }
     wavsen::video::Nv12Frame frame;
-    rstd::f64                prev_pts { -1.0 };      // for loop-boundary detection (PTS regression)
+    rstd::f64                prev_pts { -1.0 }; // for loop-boundary detection (PTS regression)
+    rstd::f64                last_submitted_pts { -1.0 };
+    rstd::f64                pause_resume_pts { -1.0 };
     uint32_t                 stall_warn_counter = 0; // throttle ETIME log spam during backpressure
     bool                     submitted_since_negotiate = false;
 
@@ -1413,8 +1415,13 @@ int run(int argc, char** argv) {
         const bool     audio_gate_open = host.audio_gate_open.load(std::memory_order_acquire);
         const bool     paused_now      = host.paused.load(std::memory_order_acquire);
         const bool     muted_now = ! audio_gate_open || host.muted.load(std::memory_order_acquire);
+        const bool     pause_started = ! audio_runtime.paused && paused_now;
         const bool     resumed_now   = audio_runtime.paused && ! paused_now;
         const uint64_t frame_request = pending_frame_request(host);
+        if (pause_started) pause_resume_pts = last_submitted_pts;
+        if (resumed_now && audio_runtime.enabled && pause_resume_pts >= rstd::f64()) {
+            if (auto* player = current_av_player()) player->seek_to(pause_resume_pts);
+        }
         sync_audio_state(current_av_player(),
                          audio_runtime,
                          paused_now,
@@ -1422,7 +1429,10 @@ int run(int argc, char** argv) {
                          host.pause_fade_ms.load(std::memory_order_acquire),
                          host.mute_fade_ms.load(std::memory_order_acquire),
                          Clock::now());
-        if (resumed_now) presenter.reset();
+        if (resumed_now) {
+            pause_resume_pts = rstd::f64(-1.0);
+            presenter.reset();
+        }
 
         /* hwdec change requested — apply at this loop boundary by
          * tearing down + reopening the decoder. The reopen runs the
@@ -1736,6 +1746,7 @@ int run(int argc, char** argv) {
             break;
         }
         submitted_since_negotiate = true;
+        if (frame_pts >= rstd::f64()) last_submitted_pts = frame_pts;
         complete_frame_request(host, frame_request);
     }
 
