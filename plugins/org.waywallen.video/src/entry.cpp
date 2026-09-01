@@ -1413,6 +1413,7 @@ int run(int argc, char** argv) {
         const bool     audio_gate_open = host.audio_gate_open.load(std::memory_order_acquire);
         const bool     paused_now      = host.paused.load(std::memory_order_acquire);
         const bool     muted_now = ! audio_gate_open || host.muted.load(std::memory_order_acquire);
+        const bool     resumed_now   = audio_runtime.paused && ! paused_now;
         const uint64_t frame_request = pending_frame_request(host);
         sync_audio_state(current_av_player(),
                          audio_runtime,
@@ -1421,6 +1422,7 @@ int run(int argc, char** argv) {
                          host.pause_fade_ms.load(std::memory_order_acquire),
                          host.mute_fade_ms.load(std::memory_order_acquire),
                          Clock::now());
+        if (resumed_now) presenter.reset();
 
         /* hwdec change requested — apply at this loop boundary by
          * tearing down + reopening the decoder. The reopen runs the
