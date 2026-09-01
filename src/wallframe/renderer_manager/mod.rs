@@ -25,7 +25,7 @@ use crate::wallframe::ipc::uds::{recv_event, send_control};
 
 /// Renderer IPC compatibility version the daemon currently emits. Bump
 /// this when the daemon/renderer wire contract changes.
-pub const SPAWN_VERSION: u32 = 10;
+pub const SPAWN_VERSION: u32 = 11;
 use crate::catalog::entry::WallpaperType;
 use crate::plugin::renderer_registry::{RendererActivityMode, RendererDef, RendererRegistry};
 use crate::settings::SettingsStore;
@@ -300,6 +300,8 @@ pub struct SpawnRequest {
     /// Source-authored defaults for renderer-owned user properties.
     /// Persisted overrides take precedence when the Init payload is built.
     pub default_user_properties: HashMap<String, String>,
+    /// Real (width, height) of this spawn's single target display, if known.
+    pub display_size: Option<(u32, u32)>,
 }
 
 /// Immutable renderer publication created from one `BindBuffers` event.
@@ -2546,6 +2548,7 @@ mod init_handshake_tests {
             renderer_name: None,
             user_property_overrides: HashMap::new(),
             default_user_properties: HashMap::new(),
+            display_size: None,
         };
         let msg = build_init_msg(&req, &def_mpv_schema());
         match msg {
@@ -2560,6 +2563,50 @@ mod init_handshake_tests {
                     vec![("loop_file".to_string(), "inf".to_string())]
                 );
                 assert_eq!(config.user_properties, "");
+            }
+            other => panic!("expected ControlMsg::Init, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn init_carries_display_size_when_set() {
+        let req = SpawnRequest {
+            extras: HashMap::new(),
+            wp_type: "web".into(),
+            settings: HashMap::new(),
+            test_pattern: false,
+            renderer_name: None,
+            user_property_overrides: HashMap::new(),
+            default_user_properties: HashMap::new(),
+            display_size: Some((3440, 1440)),
+        };
+        let msg = build_init_msg(&req, &def_mpv_schema());
+        match msg {
+            ControlMsg::Init { config } => {
+                assert_eq!(config.display_width, 3440);
+                assert_eq!(config.display_height, 1440);
+            }
+            other => panic!("expected ControlMsg::Init, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn init_defaults_display_size_to_zero() {
+        let req = SpawnRequest {
+            extras: HashMap::new(),
+            wp_type: "web".into(),
+            settings: HashMap::new(),
+            test_pattern: false,
+            renderer_name: None,
+            user_property_overrides: HashMap::new(),
+            default_user_properties: HashMap::new(),
+            ..Default::default()
+        };
+        let msg = build_init_msg(&req, &def_mpv_schema());
+        match msg {
+            ControlMsg::Init { config } => {
+                assert_eq!(config.display_width, 0);
+                assert_eq!(config.display_height, 0);
             }
             other => panic!("expected ControlMsg::Init, got {other:?}"),
         }
@@ -2724,6 +2771,7 @@ mod init_handshake_tests {
             renderer_name: None,
             user_property_overrides: HashMap::new(),
             default_user_properties: HashMap::new(),
+            display_size: None,
         };
         let init = build_init_msg(&req, &def_legacy("wescene-renderer"));
         let err =

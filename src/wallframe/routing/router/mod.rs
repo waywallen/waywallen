@@ -3828,6 +3828,56 @@ mod tests {
         display.id
     }
 
+    #[tokio::test]
+    async fn duplicate_renderers_each_get_their_own_display_size() {
+        let router = Router::new(Arc::new(RendererManager::new_default()));
+        let a = router.register_display(reg("DP-1", 1920, 1080)).await;
+        let b = router.register_display(reg("DP-2", 3440, 1440)).await;
+
+        // Start attempt fails (no registered renderer def); irrelevant here.
+        let _ = router
+            .apply_assignment(ApplyAssignment {
+                spawn_request: crate::wallframe::renderer_manager::SpawnRequest {
+                    wp_type: "web".into(),
+                    renderer_name: Some("web".into()),
+                    ..Default::default()
+                },
+                display_ids: vec![a.id, b.id],
+                duplicate_renderers: true,
+                wallpaper_layout_override: WallpaperLayoutOverride::default(),
+                preempt_pending_start: false,
+            })
+            .await;
+
+        let inner = router.inner.lock().await;
+        let renderer_for = |display_id: DisplayId| {
+            inner
+                .table
+                .links_for_display(display_id)
+                .first()
+                .expect("display linked")
+                .renderer_id
+                .clone()
+        };
+        let size_for = |renderer_id: &str| {
+            inner
+                .renderer_slots
+                .get(renderer_id)
+                .expect("renderer slot")
+                .spawn_request
+                .display_size
+        };
+
+        let renderer_a = renderer_for(a.id);
+        let renderer_b = renderer_for(b.id);
+        assert_ne!(
+            renderer_a, renderer_b,
+            "duplicate_renderers must not share one renderer"
+        );
+        assert_eq!(size_for(&renderer_a), Some((1920, 1080)));
+        assert_eq!(size_for(&renderer_b), Some((3440, 1440)));
+    }
+
     #[tokio::test(start_paused = true)]
     async fn auto_replay_start_waits_for_a_stable_window() {
         let mgr = Arc::new(RendererManager::new_default());

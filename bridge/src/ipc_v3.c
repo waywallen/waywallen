@@ -1097,6 +1097,8 @@ static int w_renderer_init(ww_buf_t *b, const waywallen_renderer_init_t *v) {
     if ((rc = w_u32(b, v->spawn_version))) return rc;
     if ((rc = w_kv_list(b, &v->settings))) return rc;
     if ((rc = w_string(b, v->user_properties))) return rc;
+    if ((rc = w_u32(b, v->display_width))) return rc;
+    if ((rc = w_u32(b, v->display_height))) return rc;
     return WW_OK;
 }
 
@@ -1106,6 +1108,8 @@ static int rd_renderer_init(ww_rd_t *r, waywallen_renderer_init_t *v) {
     if ((rc = rd_u32(r, &v->spawn_version))) return rc;
     if ((rc = rd_kv_list(r, &v->settings))) return rc;
     if ((rc = rd_string(r, &v->user_properties))) return rc;
+    if ((rc = rd_u32(r, &v->display_width))) return rc;
+    if ((rc = rd_u32(r, &v->display_height))) return rc;
     return WW_OK;
 }
 

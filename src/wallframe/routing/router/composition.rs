@@ -181,13 +181,18 @@ impl Router {
                 let renderer_id = reusable_running
                     .or(reusable_terminal)
                     .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                // Singleton groups get their own display's real size.
+                let mut group_spawn_request = request.spawn_request.clone();
+                if let [only_id] = group[..] {
+                    if let Some(display) = inner.displays.get(&only_id) {
+                        group_spawn_request.display_size =
+                            Some((display.info.metrics.width, display.info.metrics.height));
+                    }
+                }
                 if !inner.renderer_slots.contains_key(&renderer_id) {
                     inner.renderer_slots.insert(
                         renderer_id.clone(),
-                        RendererSlot::retained(
-                            request.spawn_request.clone(),
-                            renderer_name.clone(),
-                        ),
+                        RendererSlot::retained(group_spawn_request.clone(), renderer_name.clone()),
                     );
                 } else if !inner
                     .renderer_slots
@@ -199,7 +204,7 @@ impl Router {
                         .get_mut(&renderer_id)
                         .expect("selected renderer slot disappeared")
                         .replace_spec(
-                            request.spawn_request.clone(),
+                            group_spawn_request.clone(),
                             renderer_name.clone(),
                             request.preempt_pending_start,
                         );
