@@ -7,6 +7,16 @@ import waywallen.ui as W
 
 // Renders one schema-driven control. The schema dict comes from
 // `RendererPluginListQuery.renderers[i].settings[j]`.
+//
+// `schema.label` does not always carry human text. When a manifest
+// declares a translated `label` it arrives as a PluginMessage object;
+// when it does not, `pluginMessageFromPb` substitutes the raw
+// `label_key` string (`renderer_query.cpp`) and `W.I18n.tr` returns it
+// unchanged -- so a manifest still on the deprecated `label_key` form
+// puts `settings.video.hwdec` where the name belongs. Only that second,
+// string form is examined: a dotted, space-free value there is treated
+// as an unresolved key and falls through to the `key` transform. A
+// resolved PluginMessage is printed as it comes, whatever it contains.
 ColumnLayout {
     id: root
 
@@ -27,12 +37,24 @@ ColumnLayout {
     readonly property int kBool: 4
     readonly property int kI32: 5
 
+    // A PluginMessage carries a msgid the catalog resolved; a bare string
+    // is the raw manifest value `pluginMessageFromPb` fell back to.
+    function isPluginMessage(v) {
+        return v !== null && typeof v === "object" && !!v.msgid;
+    }
+
+    // A dotted, space-free token is an unresolved i18n key, not a label.
+    // Never applied to text that came from a PluginMessage.
+    function isUnresolvedKey(source, s) {
+        return !root.isPluginMessage(source) && s.indexOf(".") >= 0 && !/\s/.test(s);
+    }
+
     readonly property string label: {
         const translated = W.I18n.tr(schema.label);
-        if (translated.length > 0)
+        if (translated.length > 0 && !root.isUnresolvedKey(schema.label, translated))
             return translated;
         const sk = schema.label_key || "";
-        if (sk.length > 0)
+        if (sk.length > 0 && !root.isUnresolvedKey(sk, sk))
             return sk;
         const raw = schema.key || "";
         if (raw.length === 0)
@@ -44,7 +66,10 @@ ColumnLayout {
 
     readonly property string description: {
         const translated = W.I18n.tr(schema.description);
-        return translated.length > 0 ? translated : (schema.description_key || "");
+        if (translated.length > 0 && !root.isUnresolvedKey(schema.description, translated))
+            return translated;
+        const dk = schema.description_key || "";
+        return root.isUnresolvedKey(dk, dk) ? "" : dk;
     }
     // Bare http(s) URLs in the description become clickable links
     readonly property string descriptionHtml: {
