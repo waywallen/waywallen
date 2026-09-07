@@ -27,6 +27,20 @@ Item {
                                            : Qt.url("file://" + root.source))
                                         : req.cachePath
 
+    // How large the preview is decoded. A card shows a few hundred pixels while
+    // previews are routinely 1080 px wide, so bound the decode by the item's own
+    // size: rounded up to a 64 px step, so a smooth resize does not re-decode on
+    // every pixel, and doubled for the cropping fill mode, so a preview whose
+    // aspect differs from the item still covers it.
+    //
+    // Animated sources keep their own size on purpose: QMovie scales the movie
+    // to sourceSize instead of clamping it to the file, so a preview smaller
+    // than the item would be decoded up and cost more than it saves.
+    readonly property bool _animated: /\.(gif|apng|webp)(\?|#|$)/i.test(root.source)
+    readonly property int  _decodeWidth: _animated ? -1
+        : 64 * Math.max(1, Math.ceil(Math.max(root.width, root.height)
+                                     * (root.fillMode === Image.PreserveAspectCrop ? 2 : 1) / 64))
+
     readonly property int    state    : _useDirect ? W.ThumbnailRequest.Ready : req.state
     readonly property url    cachePath: _displayUrl
 
@@ -50,6 +64,7 @@ Item {
         fillMode: root.fillMode
         asynchronous: true
         cache: true
+        sourceSize.width: root._decodeWidth
         playing: true
         // Loading a non-animated image flips `playing` to false; re-arm
         // it on every Ready so a later animated source resumes playback.
