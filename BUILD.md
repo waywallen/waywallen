@@ -50,6 +50,18 @@ lito test -p waywallen-bridge --profile debug
 installed by the normal Lito flow; packaging that bundles the display backend builds it from the
 `waywallen-display` repository.
 
+## Checking the QML
+
+The build lays out `waywallen.ui` as a QML module under the generated tree, so `qmllint` and
+`qmlls` can resolve it:
+
+```bash
+lito build -p waywallen-ui --profile debug
+qmllint -I build/debug/generated/waywallen-ui/lito-qml \
+        -I build/debug/dependencies/cmake/qml_material-*/query/build/qml_modules \
+        ui/qml/page/StatusPage.qml
+```
+
 ## Launching
 
 ```bash

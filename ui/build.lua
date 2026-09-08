@@ -30,11 +30,12 @@ qt.translations({
   resource_prefix = "/i18n",
 })
 
-qt.qml_module({
+local qml_module = {
   target = ui,
   qt = qt6,
   uri = "waywallen.ui",
   version = "0.3",
+  output = "lito-qml/waywallen/ui",
   resource_prefix = "/",
   qml_files = {
     "qml/Window.qml",
@@ -292,4 +293,17 @@ qt.qml_module({
       compile = false,
     },
   },
-})
+}
+
+qt.qml_module(qml_module)
+
+-- Copy the QML sources next to the generated qmldir so the module directory is
+-- a complete QML module on disk. This makes
+-- build/<profile>/generated/waywallen-ui/lito-qml a usable QML import path, so
+-- qmllint and qmlls can resolve waywallen.ui when checking ui/qml.
+for _, path in ipairs(qml_module.qml_files) do
+  lito.target_add_metadata(ui, lito.copy({
+    input = path,
+    output = qml_module.output .. "/" .. path,
+  }).output)
+end
