@@ -231,8 +231,18 @@ MD.Page {
 
     Component.onCompleted: {
         applySort();
-        if (W.Notify.daemonPhase === W.Notify.DaemonPhase.Ready)
+        if (W.Notify.daemonPhase === W.Notify.DaemonPhase.Ready) {
             reloadAll();
+            // The daemon scans libraries once at startup and afterwards
+            // only when something asks it to, so a library that changed
+            // underneath a long-running daemon — a Workshop item the
+            // Steam client downloaded, files dropped into a folder —
+            // stays missing until the user finds Refresh. Opening the
+            // window is where that staleness shows up, so scan here too.
+            // `scanInProgress` mirrors the guard on refreshAction.
+            if (!W.Notify.scanInProgress)
+                scanQuery.reload();
+        }
     }
 
     MD.Action {
