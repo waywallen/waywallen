@@ -551,6 +551,7 @@ mod sync_fd_fanout {
                 renderer_name: None,
                 user_property_overrides: std::collections::HashMap::new(),
                 default_user_properties: std::collections::HashMap::new(),
+                display_size: None,
             })
             .await;
         let renderer_id = match spawn_res {
@@ -654,6 +655,7 @@ mod sync_fd_single {
                 renderer_name: None,
                 user_property_overrides: std::collections::HashMap::new(),
                 default_user_properties: std::collections::HashMap::new(),
+                display_size: None,
             })
             .await;
         let renderer_id = match spawn_res {

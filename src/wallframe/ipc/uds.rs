@@ -308,6 +308,8 @@ mod tests {
                 spawn_version: 10,
                 settings: vec![("fps".into(), "60".into()), ("volume".into(), "1.0".into())],
                 user_properties: String::new(),
+                display_width: 0,
+                display_height: 0,
             },
         };
         let _ = PROTOCOL_VERSION; // silence unused-import warning

@@ -298,6 +298,8 @@ typedef struct waywallen_renderer_init {
     uint32_t spawn_version;
     ww_kv_list_t settings;
     char * user_properties;
+    uint32_t display_width;
+    uint32_t display_height;
 } waywallen_renderer_init_t;
 
 typedef struct waywallen_rgba_color {

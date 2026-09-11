@@ -88,6 +88,8 @@ fn release_syncobj_round_trip() {
                 spawn_version: waywallen::wallframe::renderer_manager::SPAWN_VERSION,
                 settings: Vec::new(),
                 user_properties: String::new(),
+                display_width: 0,
+                display_height: 0,
             },
         },
         &[],

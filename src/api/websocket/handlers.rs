@@ -153,6 +153,7 @@ pub(super) async fn dispatch_inner(
                 renderer_name: Some(renderer_name),
                 user_property_overrides: Default::default(),
                 default_user_properties: Default::default(),
+                display_size: None,
             };
             // Wallframe returns typed spawn errors directly.
             let id = state.router.spawn_renderer(spawn_req).await?;

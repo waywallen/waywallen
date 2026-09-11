@@ -10,6 +10,8 @@ pub(crate) fn build_init_msg(req: &SpawnRequest, def: &RendererDef) -> ControlMs
     let mut settings: Vec<(String, String)> = settings_kv.into_iter().collect();
     settings.sort_by(|a, b| a.0.cmp(&b.0));
 
+    // Wire has no optional-scalar encoding; None -> 0,0.
+    let (display_width, display_height) = req.display_size.unwrap_or((0, 0));
     ControlMsg::Init {
         config: RendererInit {
             protocol_version: crate::wallframe::ipc::proto::PROTOCOL_VERSION,
@@ -19,6 +21,8 @@ pub(crate) fn build_init_msg(req: &SpawnRequest, def: &RendererDef) -> ControlMs
                 &req.default_user_properties,
                 &req.user_property_overrides,
             ),
+            display_width,
+            display_height,
         },
     }
 }
