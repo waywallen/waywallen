@@ -12,6 +12,7 @@ MD.ItemDelegate {
     required property var popupWindow
     property var supportedTypes: []
     property var allTags: []
+    property var valueLabels: ({})
     property var allContentRatings: []
     property WC.wallpaperStringFilter emptyStringFilter
     property WC.wallpaperIntFilter emptyIntFilter
@@ -82,12 +83,14 @@ MD.ItemDelegate {
         popupWindow: root.popupWindow
         filter: root.currentOption && root.currentOption.kind === "tag" ? root.model : null
         allTags: root.allTags
+        valueLabels: root.valueLabels
         availableWidth: chipFlow.width
     }
     W.ContentRatingFilter {
         id: ratingSpec
         filter: root.currentOption && root.currentOption.kind === "rating" ? root.model : null
         allRatings: root.allContentRatings
+        valueLabels: root.valueLabels
     }
     W.EmptyFilter { id: emptySpec }
 

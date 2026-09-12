@@ -11,6 +11,7 @@ Item {
     property string wallpaperId: ""
     property var fallbackWallpaper: null
     property bool showApply: true
+    property var valueLabels: ({})
     property bool unsubscribeAccepted: false
     property var infoPresentation: null
 
@@ -91,7 +92,8 @@ Item {
             source: 'waywallen.ui/WallpaperInfoPage',
             props: {
                 wallpaper: root.wp,
-                sizeBytes: root.infoSizeOf(root.wp)
+                sizeBytes: root.infoSizeOf(root.wp),
+                valueLabels: root.valueLabels
             }
         });
     }
@@ -555,7 +557,7 @@ Item {
                         model: root.wp?.tags ?? []
                         delegate: W.Tag {
                             required property string modelData
-                            text: modelData
+                            text: W.I18n.valueLabel(root.valueLabels, modelData)
                         }
                     }
                 }

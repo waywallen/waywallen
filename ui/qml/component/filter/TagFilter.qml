@@ -16,6 +16,8 @@ QtObject {
     property int condition: WC.StringCondition.STRING_CONDITION_UNSPECIFIED
     // All DB tag names, supplied by the host for the picker dialog.
     property var allTags: []
+    // Source-declared labels for those names, display only.
+    property var valueLabels: ({})
     // Width the inline tag flow may use before wrapping (rule row width).
     property int availableWidth: 0
     property WC.wallpaperTagFilter subfilter
@@ -58,7 +60,7 @@ QtObject {
                 model: root.values
                 delegate: W.Tag {
                     required property var modelData
-                    text: modelData
+                    text: W.I18n.valueLabel(root.valueLabels, modelData)
                 }
             }
 
@@ -76,6 +78,7 @@ QtObject {
 
                 W.TagPickerDialog {
                     allTags: root.allTags
+                    tagLabels: root.valueLabels
                     selected: root.values
                     onCommit: function (tags) {
                         root.values = tags;

@@ -220,6 +220,7 @@ MD.Page {
         }
         function onPluginChanged() {
             pluginQuery.reload();
+            sourceFilterQuery.reload();
         }
     }
 
@@ -227,6 +228,7 @@ MD.Page {
         pluginQuery.reload();
         playlistListQuery.reload();
         filterSettingsGet.reload();
+        sourceFilterQuery.reload();
     }
 
     Component.onCompleted: {
@@ -326,6 +328,34 @@ MD.Page {
         id: pluginQuery
     }
 
+    // Sources already declare `{ value, label }` for their filter values.
+    // Downloaded items keep the raw value as their tag / content rating, so
+    // the library view borrows those labels for display only.
+    W.RemoteAvailabilityQuery {
+        id: sourceFilterQuery
+    }
+
+    readonly property var sourceValueLabels: root.buildSourceValueLabels(sourceFilterQuery.sources)
+
+    function buildSourceValueLabels(sources) {
+        const labels = {};
+        for (const source of sources ?? []) {
+            for (const filter of source.filters ?? []) {
+                for (const option of filter.options ?? []) {
+                    const value = String(option.value ?? "");
+                    if (value.length === 0 || labels[value] !== undefined)
+                        continue;
+                    // `labelText` is a plugin message, `label` a plain string.
+                    const label = option.labelText ?? option.label;
+                    if (label === undefined || label === null || label === "")
+                        continue;
+                    labels[value] = label;
+                }
+            }
+        }
+        return labels;
+    }
+
     W.LibraryAutoDetectQuery {
         id: autoDetectQuery
     }
@@ -392,6 +422,7 @@ MD.Page {
             popupWindow: root.Window.window
             model: wallpaperFilterModel
             supportedTypes: pluginQuery.supportedTypes || []
+            valueLabels: root.sourceValueLabels
             skipTypes: wallpaperQuery.skipTypes
             onToggleSkip: function (ty) {
                 const next = (wallpaperQuery.skipTypes || []).slice();
@@ -1138,6 +1169,7 @@ MD.Page {
             contentItem: WallpaperDetailPanel {
                 wallpaperId: root.selectedWallpaper?.id_proto ?? ""
                 fallbackWallpaper: root.selectedWallpaper
+                valueLabels: root.sourceValueLabels
                 showApply: true
                 onBack: root.selectedWallpaper = null
             }

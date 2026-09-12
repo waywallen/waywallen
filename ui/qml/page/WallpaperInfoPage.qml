@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Qcm.Material as MD
+import waywallen.ui as W
 
 MD.Page {
     id: root
@@ -10,8 +11,9 @@ MD.Page {
 
     property var wallpaper: null
     property real sizeBytes: 0
+    property var valueLabels: ({})
 
-    readonly property string tagsText: formatList(wallpaper?.tags)
+    readonly property string tagsText: formatTagList(wallpaper?.tags)
     readonly property string metadataText: formatObject(wallpaper?.metadata)
     readonly property string overridesText: formatJson(wallpaper?.userPropertyOverrides)
     readonly property string formatText: value(wallpaper?.format).toLowerCase()
@@ -24,12 +26,12 @@ MD.Page {
         return value(v).length > 0;
     }
 
-    function formatList(v) {
-        if (!v || v.length === 0)
+    function formatTagList(tags) {
+        if (!tags || tags.length === 0)
             return "";
         const out = [];
-        for (let i = 0; i < v.length; ++i)
-            out.push(String(v[i]));
+        for (const tag of tags)
+            out.push(W.I18n.valueLabel(root.valueLabels, tag));
         return out.join(", ");
     }
 
@@ -181,7 +183,7 @@ MD.Page {
             }
             InfoValue {
                 visible: root.hasText(root.wallpaper?.contentRating)
-                text: root.value(root.wallpaper?.contentRating)
+                text: W.I18n.valueLabel(root.valueLabels, root.wallpaper?.contentRating)
             }
 
             InfoLabel {

@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQml
 import QtQuick
 import waywallen.control as WC
+import waywallen.ui as W
 import Qcm.Material as MD
 
 // Content-rating rule. Single value matched against item.content_rating.
@@ -13,6 +14,8 @@ QtObject {
     property WC.wallpaperStringFilter subfilter
     // Available content-rating values, supplied by the host for the menu.
     property var allRatings: []
+    // Source-declared labels for those values, display only.
+    property var valueLabels: ({})
     property bool _syncing: false
 
     readonly property var conditionModel: [
@@ -25,14 +28,14 @@ QtObject {
         const src = allRatings && allRatings.length > 0
                   ? allRatings
                   : ["Everyone", "Questionable", "Mature"];
-        return src.map(r => ({ name: r, value: r }));
+        return src.map(r => ({ name: W.I18n.valueLabel(root.valueLabels, r), value: r }));
     }
 
     readonly property Component valueDelegate: Component {
         MD.InputChip {
             id: valueChip
             visible: root.condition !== WC.StringCondition.STRING_CONDITION_UNSPECIFIED
-            text: root.value
+            text: W.I18n.valueLabel(root.valueLabels, root.value)
             onClicked: valueMenu.open()
 
             MD.Menu {

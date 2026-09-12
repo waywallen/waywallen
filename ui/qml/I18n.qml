@@ -16,4 +16,11 @@ QtObject {
         const label = tr(option?.labelText ?? option?.label ?? fallback ?? raw);
         return label.length > 0 ? label : raw;
     }
+
+    // Library rows carry no options of their own: the value stored in the
+    // DB is the key, and `labels` only maps it to what a source called it.
+    function valueLabel(labels, value) {
+        const raw = value === undefined || value === null ? "" : String(value);
+        return optionLabel(null, raw, labels?.[raw]);
+    }
 }
