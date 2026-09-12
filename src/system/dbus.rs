@@ -27,6 +27,20 @@ impl Daemon1 {
         env!("CARGO_PKG_VERSION")
     }
 
+    /// Control-plane revision plus the optional features this daemon
+    /// serves. First entry is the revision (`control.v1`); a client
+    /// gates on that instead of on `Version`, then checks optional
+    /// features by name before using them. A daemon that predates the
+    /// property answers `UnknownProperty`, which means "old daemon",
+    /// not "no capabilities".
+    #[zbus(property)]
+    fn capabilities(&self) -> Vec<String> {
+        crate::api::CONTROL_CAPABILITIES
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect()
+    }
+
     #[zbus(property)]
     fn display_socket_path(&self) -> &str {
         &self.display_socket_path

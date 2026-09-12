@@ -19,6 +19,8 @@ constexpr const char* kObjectPath              = "/org/waywallen/waywallen/Daemo
 constexpr const char* kInterface               = "org.waywallen.waywallen.Daemon1";
 constexpr const char* kPropsIface              = "org.freedesktop.DBus.Properties";
 constexpr const char* kQuitOnDaemonShutdownKey = "quitOnDaemonShutdown";
+/// Control-plane revision this build speaks; see `Daemon1.Capabilities`.
+constexpr const char* kControlRevision = "control.v1";
 
 DaemonDBusClient* g_instance { nullptr };
 
@@ -182,14 +184,39 @@ quint16 DaemonDBusClient::refreshWsPort() {
         const auto args = ver_reply.arguments();
         if (args.isEmpty()) {
             m_daemon_version.clear();
+            m_daemon_capabilities.clear();
             set_status(VersionMissing);
             return m_ws_port;
         }
-        const QString version = unwrap_variant(args.front()).toString();
-        m_daemon_version      = version;
-        set_status(version == QCoreApplication::applicationVersion() ? Connected : VersionMismatch);
+        m_daemon_version = unwrap_variant(args.front()).toString();
     }
+
+    // Step 3: Capabilities. The daemon names the control-plane revision it
+    // speaks, then its optional features; gate on the revision rather than on
+    // the release string. A daemon that predates the property answers
+    // UnknownProperty and leaves the list empty — keep comparing versions
+    // there, so an old daemon is treated exactly as before.
+    m_daemon_capabilities = read_capabilities();
+    const bool compatible = m_daemon_capabilities.isEmpty()
+                                ? m_daemon_version == QCoreApplication::applicationVersion()
+                                : m_daemon_capabilities.contains(QLatin1String(kControlRevision));
+    set_status(compatible ? Connected : VersionMismatch);
     return m_ws_port;
+}
+
+QStringList DaemonDBusClient::read_capabilities() {
+    QDBusMessage reply = call_get(QStringLiteral("Capabilities"));
+    if (reply.type() != QDBusMessage::ReplyMessage) {
+        if (! is_unknown_property_error(reply.errorName())) {
+            qDebug("DaemonDBusClient: Capabilities read failed: %s (%s)",
+                   qPrintable(reply.errorName()),
+                   qPrintable(reply.errorMessage()));
+        }
+        return {};
+    }
+    const auto args = reply.arguments();
+    if (args.isEmpty()) return {};
+    return unwrap_variant(args.front()).toStringList();
 }
 
 bool DaemonDBusClient::refreshDisplays() {
@@ -289,6 +316,7 @@ void DaemonDBusClient::on_service_unregistered(const QString& service) {
     qDebug("DaemonDBusClient: daemon unregistered from bus");
     set_ws_port(0);
     m_daemon_version.clear();
+    m_daemon_capabilities.clear();
     set_status(Disconnected);
 }
 

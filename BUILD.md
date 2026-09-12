@@ -74,3 +74,9 @@ is only used internally by source dependency providers.
 The protocol XMLs (`protocol/*.xml`) and `proto/control.proto` / `proto/filter.proto` are build-time
 codegen inputs and are not shipped in the package. Read them from the source tree if you need to
 implement a third-party client.
+
+A third-party client asks the daemon what it speaks instead of comparing release strings: read the
+`Capabilities` property of `org.waywallen.waywallen.Daemon1`. The first entry is the control-plane
+revision (`control.v1`), the rest are optional features to check by name before use. An
+`UnknownProperty` error means a daemon older than the property; `Version` identifies a build, not a
+contract.
