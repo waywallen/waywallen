@@ -75,6 +75,19 @@ pub struct PluginScan {
     pub plugins: Vec<PluginMeta>,
     pub inactive_system: Vec<String>,
     pub inactive_user: Vec<String>,
+    /// Plugins that are installed and selected, but declare a contract this
+    /// daemon does not implement. Kept so the refusal can be reported once,
+    /// with a reason, instead of surfacing as a log line and silence.
+    pub incompatible: Vec<PluginIncompat>,
+}
+
+/// An installed plugin this daemon cannot serve, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginIncompat {
+    pub plugin_id: String,
+    /// Human-readable, daemon-authored; names what was declared and what is
+    /// supported, so a client can show it without inventing wording.
+    pub reason: String,
 }
 
 impl PluginScan {
@@ -84,6 +97,7 @@ impl PluginScan {
         self.plugins.extend(other.plugins);
         self.inactive_system.extend(other.inactive_system);
         self.inactive_user.extend(other.inactive_user);
+        self.incompatible.extend(other.incompatible);
     }
 
     /// Installable-plugin view of the scan.
@@ -98,6 +112,11 @@ impl PluginScan {
                 update: m.update.clone(),
                 has_entry: self.entries.iter().any(|s| s.plugin_id == m.id),
                 system: m.system,
+                incompat: self
+                    .incompatible
+                    .iter()
+                    .find(|i| i.plugin_id == m.id)
+                    .map(|i| i.reason.clone()),
             })
             .collect()
     }
@@ -124,6 +143,9 @@ pub struct PluginPackageMeta {
     pub has_entry: bool,
     /// Discovered from a system scan root.
     pub system: bool,
+    /// `Some(reason)` when the plugin is installed but declares a contract
+    /// this daemon does not implement; `None` when it can be served.
+    pub incompat: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -655,17 +677,42 @@ pub fn scan_plugins(dir: &Path, system: bool) -> PluginScan {
 
         if let Some(entry) = meta.entry.take() {
             match meta.entry_version {
-                Some(entry_version) => out.entries.push(EntryRef {
-                    plugin_id: meta.id.clone(),
-                    plugin_version: meta.version.clone(),
-                    plugin_system: meta.system,
-                    entry: resolve_rel(&plugin_dir, entry),
-                    entry_version,
-                }),
-                None => log::warn!(
-                    "plugin {}: plugin.entry requires plugin.entry_version",
-                    meta.id
-                ),
+                // Decide here whether the declared entry ABI is one this
+                // daemon implements. Queueing an entry that is certain to be
+                // refused at load time is what made the refusal invisible:
+                // `packages()` counts queued entries, so the plugin looked
+                // exactly like a working one while its Lua never ran.
+                Some(entry_version)
+                    if crate::plugin::source::supports_entry_version(entry_version) =>
+                {
+                    out.entries.push(EntryRef {
+                        plugin_id: meta.id.clone(),
+                        plugin_version: meta.version.clone(),
+                        plugin_system: meta.system,
+                        entry: resolve_rel(&plugin_dir, entry),
+                        entry_version,
+                    });
+                }
+                Some(entry_version) => {
+                    let reason = format!(
+                        "plugin entry_version {entry_version} is unsupported; \
+                         this daemon supports {:?}",
+                        crate::plugin::source::SUPPORTED_ENTRY_VERSIONS
+                    );
+                    log::warn!("plugin {}: {reason}", meta.id);
+                    out.incompatible.push(PluginIncompat {
+                        plugin_id: meta.id.clone(),
+                        reason,
+                    });
+                }
+                None => {
+                    let reason = "plugin.entry requires plugin.entry_version".to_string();
+                    log::warn!("plugin {}: {reason}", meta.id);
+                    out.incompatible.push(PluginIncompat {
+                        plugin_id: meta.id.clone(),
+                        reason,
+                    });
+                }
             }
         } else if meta.entry_version.is_some() {
             log::warn!(
@@ -801,6 +848,12 @@ fn select_active_plugins(mut scan: PluginScan) -> PluginScan {
             r.plugin_system,
         ))
     });
+    // Only report a refusal for a plugin that actually won the id: a shadowed
+    // copy is already accounted for as inactive.
+    let retained: HashSet<String> = scan.plugins.iter().map(|m| m.id.clone()).collect();
+    scan.incompatible
+        .retain(|i| retained.contains(&i.plugin_id));
+
     scan.inactive_system = inactive_system.into_iter().collect();
     scan.inactive_user = inactive_user.into_iter().collect();
     scan
@@ -1027,6 +1080,96 @@ events = ["pointer"]
         let scan = scan_plugin_roots(&[PluginRoot::system(plugins)]);
         assert_eq!(scan.plugins.len(), 1);
         assert!(scan.renderers.is_empty());
+    }
+
+    /// Writes a plugin whose manifest declares a Lua entry at `entry_version`.
+    fn write_entry_plugin(plugins_dir: &Path, id: &str, entry_version: Option<u32>) {
+        write_test_plugin(plugins_dir, id);
+        let declared = match entry_version {
+            Some(v) => format!("entry_version = {v}\n"),
+            None => String::new(),
+        };
+        std::fs::write(
+            plugins_dir.join(id).join("plugin.toml"),
+            format!(
+                r#"[plugin]
+id = "{id}"
+name = "{id}"
+version = "1.0.0"
+entry = "main.lua"
+{declared}"#
+            ),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn scan_reports_unsupported_entry_version_instead_of_queueing_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugins = tmp.path().join("plugins");
+        // 2 predates SUPPORTED_ENTRY_VERSIONS; loading it could only ever fail.
+        write_entry_plugin(&plugins, "org.test.oldabi", Some(2));
+
+        let scan = scan_plugin_roots(&[PluginRoot::system(plugins)]);
+
+        assert_eq!(scan.plugins.len(), 1);
+        assert!(
+            scan.entries.is_empty(),
+            "an entry that cannot be served must not be queued as if it could"
+        );
+        assert_eq!(scan.incompatible.len(), 1);
+        let reason = &scan.incompatible[0].reason;
+        assert!(
+            reason.contains('2'),
+            "reason should name what was declared: {reason}"
+        );
+        assert!(
+            reason.contains(&format!(
+                "{:?}",
+                crate::plugin::source::SUPPORTED_ENTRY_VERSIONS
+            )),
+            "reason should name what the daemon supports: {reason}"
+        );
+
+        // The package view is what a client reads; it must not look healthy.
+        let pkg = &scan.packages()[0];
+        assert!(!pkg.has_entry);
+        assert_eq!(pkg.incompat.as_deref(), Some(reason.as_str()));
+    }
+
+    #[test]
+    fn scan_reports_entry_declared_without_a_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugins = tmp.path().join("plugins");
+        write_entry_plugin(&plugins, "org.test.noabi", None);
+
+        let scan = scan_plugin_roots(&[PluginRoot::system(plugins)]);
+
+        assert!(scan.entries.is_empty());
+        assert_eq!(scan.incompatible.len(), 1);
+        assert_eq!(
+            scan.packages()[0].incompat.as_deref(),
+            Some("plugin.entry requires plugin.entry_version")
+        );
+    }
+
+    #[test]
+    fn scan_keeps_a_supported_entry_version_compatible() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugins = tmp.path().join("plugins");
+        write_entry_plugin(
+            &plugins,
+            "org.test.currentabi",
+            Some(crate::plugin::source::ENTRY_VERSION),
+        );
+
+        let scan = scan_plugin_roots(&[PluginRoot::system(plugins)]);
+
+        assert_eq!(scan.entries.len(), 1);
+        assert!(scan.incompatible.is_empty());
+        let pkg = &scan.packages()[0];
+        assert!(pkg.has_entry);
+        assert!(pkg.incompat.is_none());
     }
 
     #[test]

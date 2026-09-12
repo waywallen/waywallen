@@ -156,6 +156,7 @@ using proto::GpuInfo;
 using proto::GpuListRequest;
 using proto::GpuListResponse;
 
+using proto::PluginCompat;
 using proto::PluginDeleteRequest;
 using proto::PluginDeleteResponse;
 using proto::PluginInfo;

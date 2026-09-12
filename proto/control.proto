@@ -1935,6 +1935,16 @@ message PluginUpdateInstallResponse {
   string query_id = 1;
 }
 
+// Whether this daemon can actually serve the plugin as installed. A plugin
+// declares the contract it was built against (`plugin.entry_version`); the
+// daemon knows which ones it implements. When they do not meet, the plugin
+// stays listed — it is installed — but says so, with the daemon's own words.
+message PluginCompat {
+  bool compatible = 1;
+  // Empty when compatible. Daemon-authored, meant to be shown as sent.
+  string reason = 2;
+}
+
 // Installable-plugin (package) view: one entry per `[plugin]`, with the
 // renderer components it provides (carrying their settings schema so a UI
 // can offer per-plugin configuration). Source presence is a flag.
@@ -1947,6 +1957,7 @@ message PluginInfo {
   bool system = 6;
   string update = 7;
   PluginUpdateInfo update_info = 8;
+  PluginCompat compat = 9;
 }
 
 message PluginListRequest {}
@@ -1954,6 +1965,11 @@ message PluginListResponse {
   repeated PluginInfo plugins = 1;
   repeated string inactive_system = 2;
   repeated string inactive_user = 3;
+  // What this daemon implements, so a client can explain a mismatch and a
+  // packager can check before shipping. Mirrors `SUPPORTED_ENTRY_VERSIONS`
+  // and `SPAWN_VERSION`.
+  repeated uint32 supported_entry_versions = 4;
+  uint32 spawn_version = 5;
 }
 
 message PluginTranslationListRequest {}

@@ -310,12 +310,18 @@ pub(super) async fn dispatch_inner(
                     system: pkg.system,
                     update: pkg.update.clone().unwrap_or_default(),
                     update_info: Some(plugin_update_info_to_pb(update_info)),
+                    compat: Some(pb::PluginCompat {
+                        compatible: pkg.incompat.is_none(),
+                        reason: pkg.incompat.clone().unwrap_or_default(),
+                    }),
                 });
             }
             Res::PluginList(pb::PluginListResponse {
                 plugins,
                 inactive_system,
                 inactive_user,
+                supported_entry_versions: crate::plugin::source::SUPPORTED_ENTRY_VERSIONS.to_vec(),
+                spawn_version: crate::wallframe::renderer_manager::SPAWN_VERSION,
             })
         }
 

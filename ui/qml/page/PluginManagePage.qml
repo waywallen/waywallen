@@ -519,6 +519,27 @@ MD.Page {
                 z: 2
 
                 W.Tag {
+                    id: pluginCompatTag
+                    readonly property var compat: pluginItem.modelData.compat
+                    readonly property string reason: root.foldMessage(pluginCompatTag.compat && pluginCompatTag.compat.reason ? String(pluginCompatTag.compat.reason) : "", 64)
+
+                    // The daemon reports a plugin it cannot serve; say so on the
+                    // plugin itself rather than leaving it looking installed and
+                    // working. The reason is backend text, shown as sent.
+                    visible: !!pluginCompatTag.compat && pluginCompatTag.compat.compatible === false
+                    text: qsTr("Incompatible")
+                    bgColor: MD.Token.color.error_container
+                    fgColor: MD.Token.color.on_error_container
+
+                    HoverHandler {
+                        id: pluginCompatTagHover
+                    }
+
+                    MD.ToolTip.visible: pluginCompatTagHover.hovered && pluginCompatTag.reason.length > 0
+                    MD.ToolTip.delay: 300
+                    MD.ToolTip.text: pluginCompatTag.reason
+                }
+                W.Tag {
                     id: pluginUpdateTag
                     readonly property string reason: root.updateTagTooltip(pluginItem.modelData.updateInfo)
 

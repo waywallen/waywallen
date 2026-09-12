@@ -447,6 +447,7 @@ mod tests {
             update: Some("https://example.invalid/update.json".into()),
             has_entry: false,
             system: true,
+            incompat: None,
         };
         let manifest = PluginUpdateManifest {
             version: "2.0.0".into(),
@@ -469,6 +470,7 @@ mod tests {
             update: Some("https://example.invalid/update.json".into()),
             has_entry: true,
             system: true,
+            incompat: None,
         };
         let package = PluginUpdatePackage {
             zip_url: "https://example.invalid/plugin.zip".into(),
@@ -510,6 +512,7 @@ mod tests {
             update: Some("https://example.invalid/update.json".into()),
             has_entry: false,
             system: true,
+            incompat: None,
         };
         let manifest = PluginUpdateManifest {
             version: "1.0.0".into(),
@@ -533,6 +536,7 @@ mod tests {
             update: None,
             has_entry: false,
             system: true,
+            incompat: None,
         };
         let b = PluginPackageMeta {
             id: "org.b".into(),
@@ -541,6 +545,7 @@ mod tests {
             update: None,
             has_entry: false,
             system: true,
+            incompat: None,
         };
 
         check_packages(&store, vec![a.clone(), b.clone()], true).await;

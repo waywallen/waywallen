@@ -69,6 +69,13 @@ static auto plugin_update_to_map(const proto::PluginUpdateInfo& info) -> QVarian
     return m;
 }
 
+static auto plugin_compat_to_map(const proto::PluginCompat& compat) -> QVariantMap {
+    QVariantMap m;
+    m[u"compatible"_s] = compat.compatible();
+    m[u"reason"_s]     = compat.reason();
+    return m;
+}
+
 // --- PluginListQuery --------------------------------------------------------
 
 PluginListQuery::PluginListQuery(QObject* parent): Query(parent) {}
@@ -102,6 +109,7 @@ void PluginListQuery::reload() {
                 m[u"system"_s]     = p.system();
                 m[u"section"_s]    = p.system() ? u"system"_s : u"user"_s;
                 m[u"updateInfo"_s] = plugin_update_to_map(p.updateInfo());
+                m[u"compat"_s]     = plugin_compat_to_map(p.compat());
                 QVariantList renderers;
                 for (const auto& r : p.renderers()) {
                     renderers.append(renderer_to_map(r));
