@@ -14,7 +14,7 @@ pub use generated::{
     DecodeError, DisplayErrorCode, DisplayMetrics, Event, PauseEffectConfig, PauseEffectKind,
     PauseEffectState, PointerAxisSource, PointerButtonState, PresentationCapabilities,
     PresentationConfig, PresentationSnapshot, PresentationState, Rect, Request, RgbaColor,
-    PROTOCOL_NAME, PROTOCOL_VERSION,
+    TransitionConfig, TransitionKind, PROTOCOL_NAME, PROTOCOL_VERSION,
 };
 
 #[cfg(test)]
@@ -101,6 +101,7 @@ mod tests {
                     a: 1.0,
                 },
             },
+            transition: true,
         };
         // expected fds = count * planes_per_buffer = 3 * 1 = 3
         assert_eq!(evt.expected_fds(), 3);
@@ -152,6 +153,13 @@ mod tests {
                         kind: PauseEffectKind::Blur,
                         blur: BlurEffectConfig { radius: 40 },
                     },
+                    transition: TransitionConfig {
+                        kind: TransitionKind::Wipe,
+                        duration_ms: 750,
+                        angle: 90,
+                        origin_x: 0.5,
+                        origin_y: 0.25,
+                    },
                 },
                 state,
             },
@@ -166,6 +174,17 @@ mod tests {
             Err(DecodeError::UnknownEnumValue {
                 enum_name: "pause_effect_kind",
                 value: 7
+            })
+        ));
+
+        let mut transition_buf = Vec::new();
+        accepted.encode(&mut transition_buf);
+        transition_buf[24..28].copy_from_slice(&9_u32.to_le_bytes());
+        assert!(matches!(
+            Event::decode(accepted.opcode(), &transition_buf),
+            Err(DecodeError::UnknownEnumValue {
+                enum_name: "transition_kind",
+                value: 9
             })
         ));
 

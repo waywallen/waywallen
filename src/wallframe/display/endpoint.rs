@@ -368,7 +368,7 @@ async fn handshake_steps(
             format!("register_display has unknown window flags 0x{window_state_flags:x}"),
         ));
     }
-    if presentation_caps.flags & !crate::wallframe::routing::PRESENTATION_CAP_PAUSE_BLUR != 0 {
+    if presentation_caps.flags & !crate::wallframe::routing::PRESENTATION_CAPS_KNOWN != 0 {
         return Err(reject(
             wire::DisplayErrorCode::ProtocolViolation,
             format!(
@@ -477,6 +477,7 @@ async fn run_frame_loop(
                     pool,
                     buffer_generation,
                     initial_config,
+                    transition,
                 }) => {
                     bound_renderer = Some(Arc::clone(&renderer));
                     latest_config = Some(initial_config.clone());
@@ -485,6 +486,7 @@ async fn run_frame_loop(
                         &pool,
                         buffer_generation,
                         &initial_config,
+                        transition,
                     ).await {
                         break Err(e);
                     }
@@ -879,6 +881,13 @@ fn presentation_to_wire(snapshot: PresentationSnapshot) -> wire::PresentationSna
         crate::settings::PauseEffectKind::None => wire::PauseEffectKind::None,
         crate::settings::PauseEffectKind::Blur => wire::PauseEffectKind::Blur,
     };
+    let transition = snapshot.config.transition;
+    let transition_kind = match transition.kind {
+        crate::settings::TransitionKind::None => wire::TransitionKind::None,
+        crate::settings::TransitionKind::Fade => wire::TransitionKind::Fade,
+        crate::settings::TransitionKind::Wipe => wire::TransitionKind::Wipe,
+        crate::settings::TransitionKind::Grow => wire::TransitionKind::Grow,
+    };
     wire::PresentationSnapshot {
         config: wire::PresentationConfig {
             generation: snapshot.config.generation,
@@ -887,6 +896,13 @@ fn presentation_to_wire(snapshot: PresentationSnapshot) -> wire::PresentationSna
                 blur: wire::BlurEffectConfig {
                     radius: snapshot.config.pause_effect.blur.radius,
                 },
+            },
+            transition: wire::TransitionConfig {
+                kind: transition_kind,
+                duration_ms: transition.duration_ms,
+                angle: transition.angle,
+                origin_x: transition.origin.x as f32 / 100.0,
+                origin_y: transition.origin.y as f32 / 100.0,
             },
         },
         state: presentation_state_to_wire(snapshot.state),
@@ -1003,8 +1019,9 @@ async fn send_bind(
     pool: &PublishedPool,
     buffer_generation: u64,
     initial_config: &CompositionConfig,
+    transition: bool,
 ) -> Result<()> {
-    let (event, dup_fds) = build_bind_event(pool, buffer_generation, initial_config)?;
+    let (event, dup_fds) = build_bind_event(pool, buffer_generation, initial_config, transition)?;
     let s = stream.try_clone().context("clone for bind")?;
     let event_for_send = event.clone();
     let dup_for_send = dup_fds.clone();
@@ -1027,6 +1044,7 @@ fn build_bind_event(
     pool: &PublishedPool,
     buffer_generation: u64,
     initial_config: &CompositionConfig,
+    transition: bool,
 ) -> Result<(Event, Vec<RawFd>)> {
     if initial_config.buffer_generation != buffer_generation {
         return Err(Error::Internal(anyhow!(
@@ -1077,10 +1095,11 @@ fn build_bind_event(
         plane_offset: pool.plane_offset.clone(),
         size: pool.size.clone(),
         initial_config: composition_to_wire(initial_config),
+        transition,
     };
     log::debug!(
         "display::endpoint: build_bind_event gen={} count={} planes={} {}x{} \
-         fourcc=0x{:08x} mod=0x{:016x}",
+         fourcc=0x{:08x} mod=0x{:016x} transition={}",
         buffer_generation,
         count,
         planes_per_buffer,
@@ -1088,6 +1107,7 @@ fn build_bind_event(
         pool.height,
         pool.fourcc,
         pool.modifier,
+        transition,
     );
     for i in 0..n {
         let bi = i / (planes_per_buffer as usize).max(1);
@@ -1285,7 +1305,7 @@ mod tests {
             transform: 0,
             clear_rgba: [0.0, 0.0, 0.0, 1.0],
         };
-        let (event, dup_fds) = build_bind_event(&pool, 11, &config).unwrap();
+        let (event, dup_fds) = build_bind_event(&pool, 11, &config, false).unwrap();
         assert_eq!(dup_fds.len(), 2);
         match event {
             Event::BindBuffers {
@@ -1300,8 +1320,10 @@ mod tests {
                 plane_offset,
                 size,
                 initial_config,
+                transition,
             } => {
                 assert_eq!(buffer_generation, 11);
+                assert!(!transition);
                 assert_eq!(count, 2);
                 assert_eq!(width, 800);
                 assert_eq!(height, 600);

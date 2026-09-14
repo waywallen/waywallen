@@ -226,6 +226,71 @@ impl PauseEffectConfig {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TransitionKind {
+    #[default]
+    None,
+    Fade,
+    Wipe,
+    Grow,
+}
+
+/// Grow transition center as percentages of the display surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TransitionOrigin {
+    pub x: u32,
+    pub y: u32,
+}
+
+impl Default for TransitionOrigin {
+    fn default() -> Self {
+        Self {
+            x: DEFAULT_TRANSITION_ORIGIN_PERCENT,
+            y: DEFAULT_TRANSITION_ORIGIN_PERCENT,
+        }
+    }
+}
+
+/// Animation used when a display switches to different wallpaper content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TransitionConfig {
+    pub kind: TransitionKind,
+    pub duration_ms: u32,
+    /// Wipe direction in degrees, clockwise; 0 wipes left to right.
+    pub angle: u32,
+    pub origin: TransitionOrigin,
+}
+
+impl Default for TransitionConfig {
+    fn default() -> Self {
+        Self {
+            kind: TransitionKind::None,
+            duration_ms: DEFAULT_TRANSITION_DURATION_MS,
+            angle: 0,
+            origin: TransitionOrigin::default(),
+        }
+    }
+}
+
+impl TransitionConfig {
+    pub fn effective(self) -> Self {
+        Self {
+            kind: self.kind,
+            duration_ms: self
+                .duration_ms
+                .clamp(MIN_TRANSITION_DURATION_MS, MAX_TRANSITION_DURATION_MS),
+            angle: self.angle % 360,
+            origin: TransitionOrigin {
+                x: self.origin.x.min(100),
+                y: self.origin.y.min(100),
+            },
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GlobalRendererSettings {
@@ -278,6 +343,7 @@ pub struct GlobalSettings {
     )]
     pub auto_replay: Option<AutoReplayPolicy>,
     pub pause_effect: PauseEffectConfig,
+    pub transition: TransitionConfig,
     /// Structured wallpaper-browser filter state.
     /// Kept typed in memory but serialized as a JSON string.
     #[serde(
@@ -339,6 +405,7 @@ impl Default for GlobalSettings {
             layout: LayoutDefaults::default(),
             auto_replay: None,
             pause_effect: PauseEffectConfig::default(),
+            transition: TransitionConfig::default(),
             wallpaper_filter: WallpaperFilterState::default(),
             wallpaper_sorts: Vec::new(),
             wallpaper_skip_types: Vec::new(),

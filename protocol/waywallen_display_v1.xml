@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  waywallen-display-v1, protocol version 8
+  waywallen-display-v1, protocol version 9
 
   Wire protocol between a display consumer and the waywallen daemon over
   SOCK_STREAM Unix Domain Socket at $XDG_RUNTIME_DIR/waywallen/display.sock.
@@ -19,7 +19,7 @@
 
   Connection contract:
     - `hello` is the first request and `welcome` is the first reply.
-    - The daemon accepts exactly protocol v8 and rejects other versions
+    - The daemon accepts exactly protocol v9 and rejects other versions
       before reading registration capabilities or creating router state.
     - Every protocol refusal that can still be written to the peer is answered
       with `error` before the connection closes. An undecodable handshake frame
@@ -41,6 +41,11 @@
 
   Buffer/release contract:
     - `bind_buffers` atomically carries one pool and its initial composition.
+    - `bind_buffers.transition` is set only when the pool shows different
+      wallpaper content than the one it replaces and the current
+      presentation config names a transition kind. The consumer keeps the
+      content it last presented and animates from it to the pool's first
+      presented frame.
     - A later `set_composition_config` may only target the current pool.
     - `frame_ready` carries acquire sync_file then release syncobj fds.
     - The consumer attaches or signals the release fence, then sends
@@ -58,7 +63,7 @@
   Removed development messages keep their request opcodes reserved:
     4 = historical buffer_release, 5 = bye, 6 = consumer_caps.
 -->
-<protocol name="waywallen_display" version="8">
+<protocol name="waywallen_display" version="9">
 
   <!-- ==================================================================
        SHARED ENUMS AND STRUCTURES
@@ -67,6 +72,13 @@
   <enum name="pause_effect_kind">
     <entry name="none" value="0"/>
     <entry name="blur" value="1"/>
+  </enum>
+
+  <enum name="transition_kind">
+    <entry name="none" value="0"/>
+    <entry name="fade" value="1"/>
+    <entry name="wipe" value="2"/>
+    <entry name="grow" value="3"/>
   </enum>
 
   <enum name="buffer_import_failure_kind">
@@ -133,7 +145,13 @@
   </struct>
 
   <struct name="presentation_capabilities">
-    <!-- bit 0 = Pause Blur; all other bits are reserved and must be zero. -->
+    <!--
+      bit 0 = Pause Blur
+      bit 1 = Fade Transition
+      bit 2 = Wipe Transition
+      bit 3 = Grow Transition
+      All other bits are reserved and must be zero.
+    -->
     <field name="flags" type="u32"/>
   </struct>
 
@@ -150,9 +168,28 @@
     <field name="active" type="bool"/>
   </struct>
 
+  <!--
+    Animation used when a bind replaces the presented wallpaper content.
+    The daemon only names a kind the consumer declared in
+    presentation_capabilities; every field carries a valid value even when
+    kind is none.
+      duration_ms: 100..=10000.
+      angle: wipe direction in degrees, 0..=359, clockwise in surface
+             space; 0 moves the edge left to right, 90 top to bottom.
+      origin_x/origin_y: grow center in surface space, 0.0..=1.0.
+  -->
+  <struct name="transition_config">
+    <field name="kind" type="transition_kind"/>
+    <field name="duration_ms" type="u32"/>
+    <field name="angle" type="u32"/>
+    <field name="origin_x" type="f32"/>
+    <field name="origin_y" type="f32"/>
+  </struct>
+
   <struct name="presentation_config">
     <field name="generation" type="u64"/>
     <field name="pause_effect" type="pause_effect_config"/>
+    <field name="transition" type="transition_config"/>
   </struct>
 
   <struct name="presentation_state">
@@ -285,6 +322,9 @@
     Atomically publish one imported pool and its initial composition.
     The attached DMA-BUF fds are buffer-major, plane-minor. stride,
     plane_offset and size have count * planes_per_buffer entries.
+    `transition` asks the consumer to animate from its presented content
+    to this pool using the current presentation transition config. It is
+    never set while that config's kind is none.
   -->
   <event name="bind_buffers" opcode="3">
     <arg name="buffer_generation" type="u64"/>
@@ -298,6 +338,7 @@
     <arg name="plane_offset" type="array" element="u32"/>
     <arg name="size" type="array" element="u64"/>
     <arg name="initial_config" type="composition_config"/>
+    <arg name="transition" type="bool"/>
     <fds count_expr="count * planes_per_buffer"/>
   </event>
 

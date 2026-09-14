@@ -680,6 +680,42 @@ fn pause_effect_defaults_to_none_and_clamps_blur_radius() {
     );
 }
 
+#[test]
+fn transition_defaults_to_none_and_clamps() {
+    let config = TransitionConfig::default();
+    assert_eq!(config.kind, TransitionKind::None);
+    assert_eq!(config.effective(), config);
+
+    let clamped = TransitionConfig {
+        kind: TransitionKind::Grow,
+        duration_ms: 5,
+        angle: 725,
+        origin: TransitionOrigin { x: 101, y: 400 },
+    }
+    .effective();
+    assert_eq!(clamped.duration_ms, MIN_TRANSITION_DURATION_MS);
+    assert_eq!(clamped.angle, 5);
+    assert_eq!(clamped.origin, TransitionOrigin { x: 100, y: 100 });
+}
+
+#[test]
+fn transition_setting_roundtrip() {
+    let src = r#"
+[global.transition]
+kind = "wipe"
+duration_ms = 800
+angle = 90
+"#;
+    let s: Settings = toml::from_str(src).unwrap();
+    assert_eq!(s.global.transition.kind, TransitionKind::Wipe);
+    assert_eq!(s.global.transition.duration_ms, 800);
+    assert_eq!(s.global.transition.angle, 90);
+    assert_eq!(s.global.transition.origin, TransitionOrigin::default());
+    let serialized = toml::to_string(&s).unwrap();
+    let reparsed: Settings = toml::from_str(&serialized).unwrap();
+    assert_eq!(reparsed.global.transition, s.global.transition);
+}
+
 #[tokio::test]
 async fn resolved_last_wallpaper_prefers_per_display_then_global() {
     let tmp = tempfile::tempdir().unwrap();

@@ -202,6 +202,7 @@ MD.Page {
 
     property int autoReplayRevision: 0
     property int pauseEffectRevision: 0
+    property int transitionRevision: 0
 
     readonly property var kAutoReplayRows: [
         { key: "anyWindow",       label: qsTr("Any window") },
@@ -256,6 +257,7 @@ MD.Page {
         return {
             autoReplay: root._defaultAutoReplay(),
             pauseEffect: root._defaultPauseEffect(),
+            transition: root._defaultTransition(),
             queueMode: "sequential",
             rotationSecs: 0,
             audioFadeMs: 500,
@@ -291,6 +293,7 @@ MD.Page {
             W.Global.toastError(qsTr("Failed to change language"));
         root.autoReplayRevision += 1;
         root.pauseEffectRevision += 1;
+        root.transitionRevision += 1;
         setQ.global = nextGlobal;
         setQ.plugins = getQ.plugins;
         setQ.reload();
@@ -302,6 +305,7 @@ MD.Page {
         return JSON.stringify({
             autoReplay: root._normalizedAutoReplay(g.autoReplay || ({})),
             pauseEffect: root._normalizedPauseEffect(g.pauseEffect || ({})),
+            transition: root._normalizedTransition(g.transition || ({})),
             queueMode: g.queueMode ?? "sequential",
             rotationSecs: Number(g.rotationSecs ?? 0),
             audioFadeMs: Number(g.audioFadeMs ?? 500),
@@ -347,6 +351,59 @@ MD.Page {
             g.pauseEffect = config;
         });
         root.pauseEffectRevision += 1;
+    }
+
+    readonly property var kTransitionKinds: [
+        { value: WC.TransitionKind.TRANSITION_KIND_NONE, label: qsTr("None") },
+        { value: WC.TransitionKind.TRANSITION_KIND_FADE, label: qsTr("Fade") },
+        { value: WC.TransitionKind.TRANSITION_KIND_WIPE, label: qsTr("Wipe") },
+        { value: WC.TransitionKind.TRANSITION_KIND_GROW, label: qsTr("Grow") }
+    ]
+
+    // Angles are clockwise with 0 wiping left to right.
+    readonly property var kWipeDirections: [
+        { value: 0,   label: qsTr("Left to right") },
+        { value: 45,  label: qsTr("Top left to bottom right") },
+        { value: 90,  label: qsTr("Top to bottom") },
+        { value: 135, label: qsTr("Top right to bottom left") },
+        { value: 180, label: qsTr("Right to left") },
+        { value: 225, label: qsTr("Bottom right to top left") },
+        { value: 270, label: qsTr("Bottom to top") },
+        { value: 315, label: qsTr("Bottom left to top right") }
+    ]
+
+    function _wipeDirectionIndex(angle) {
+        const steps = Math.round((Number(angle) || 0) / 45);
+        return ((steps % 8) + 8) % 8;
+    }
+
+    function _defaultTransition() {
+        return {
+            kind: WC.TransitionKind.TRANSITION_KIND_NONE,
+            durationMs: 500,
+            angle: 0,
+            originX: 50,
+            originY: 50
+        };
+    }
+
+    function _normalizedTransition(config) {
+        return Object.assign(root._defaultTransition(), config || ({}));
+    }
+
+    function _transition() {
+        root.transitionRevision;
+        const g = root._currentGlobal();
+        return root._normalizedTransition(g?.transition || ({}));
+    }
+
+    function _mutTransition(fn) {
+        root._mut(g => {
+            const config = root._normalizedTransition(g.transition || ({}));
+            fn(config);
+            g.transition = config;
+        });
+        root.transitionRevision += 1;
     }
 
     function _rendererAudioEnabled(globalSettings) {
@@ -990,6 +1047,197 @@ MD.Page {
 
                     MD.Text {
                         text: qsTr("px")
+                        typescale: MD.Token.typescale.body_medium
+                        color: MD.Token.color.on_surface_variant
+                    }
+                }
+            }
+
+            SettingHeader { text: qsTr("Transition") }
+
+            SettingItem {
+                first: true
+                last: false
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    FieldLabel {
+                        Layout.fillWidth: true
+                        text: qsTr("Wallpaper transition")
+                    }
+
+                    MD.ComboBox {
+                        id: m_transition_kind
+                        Layout.preferredWidth: 180
+                        mdState.size: MD.Enum.S
+                        model: root.kTransitionKinds.map(o => o.label)
+                        onActivated: idx => root._mutTransition(config => {
+                            config.kind = root.kTransitionKinds[idx].value;
+                        })
+                    }
+                    Binding {
+                        target: m_transition_kind
+                        property: "currentIndex"
+                        value: root._listIndex(root.kTransitionKinds, root._transition().kind)
+                    }
+                }
+            }
+
+            SettingItem {
+                readonly property int kind: root._transition().kind
+                first: false
+                last: kind !== WC.TransitionKind.TRANSITION_KIND_WIPE
+                    && kind !== WC.TransitionKind.TRANSITION_KIND_GROW
+                enabled: kind !== WC.TransitionKind.TRANSITION_KIND_NONE
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    FieldLabel {
+                        Layout.fillWidth: true
+                        text: qsTr("Transition duration")
+                    }
+
+                    W.ValueSlider {
+                        id: m_transition_duration
+                        Layout.preferredWidth: 220
+                        from: 100
+                        to: 3000
+                        stepSize: 100
+                        snapMode: T.Slider.SnapAlways
+                        maxVisibleStops: 10
+                        valueText: Math.round(value).toString()
+                        valueMaxText: "3000"
+                        onMoved: root._mutTransition(config => {
+                            config.durationMs = Math.round(value);
+                        })
+                    }
+                    Binding {
+                        target: m_transition_duration
+                        property: "value"
+                        value: root._transition().durationMs
+                    }
+
+                    MD.Text {
+                        text: qsTr("ms")
+                        typescale: MD.Token.typescale.body_medium
+                        color: MD.Token.color.on_surface_variant
+                    }
+                }
+            }
+
+            SettingItem {
+                first: false
+                last: true
+                visible: root._transition().kind === WC.TransitionKind.TRANSITION_KIND_WIPE
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    FieldLabel {
+                        Layout.fillWidth: true
+                        text: qsTr("Wipe direction")
+                    }
+
+                    MD.ComboBox {
+                        id: m_transition_wipe_direction
+                        Layout.preferredWidth: 220
+                        mdState.size: MD.Enum.S
+                        model: root.kWipeDirections.map(o => o.label)
+                        onActivated: idx => root._mutTransition(config => {
+                            config.angle = root.kWipeDirections[idx].value;
+                        })
+                    }
+                    Binding {
+                        target: m_transition_wipe_direction
+                        property: "currentIndex"
+                        value: root._wipeDirectionIndex(root._transition().angle)
+                    }
+                }
+            }
+
+            SettingItem {
+                first: false
+                last: false
+                visible: root._transition().kind === WC.TransitionKind.TRANSITION_KIND_GROW
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    FieldLabel {
+                        Layout.fillWidth: true
+                        text: qsTr("Grow center, horizontal")
+                    }
+
+                    W.ValueSlider {
+                        id: m_transition_origin_x
+                        Layout.preferredWidth: 220
+                        from: 0
+                        to: 100
+                        stepSize: 5
+                        snapMode: T.Slider.SnapAlways
+                        maxVisibleStops: 10
+                        valueText: Math.round(value).toString()
+                        valueMaxText: "100"
+                        onMoved: root._mutTransition(config => {
+                            config.originX = Math.round(value);
+                        })
+                    }
+                    Binding {
+                        target: m_transition_origin_x
+                        property: "value"
+                        value: root._transition().originX
+                    }
+
+                    MD.Text {
+                        text: qsTr("%")
+                        typescale: MD.Token.typescale.body_medium
+                        color: MD.Token.color.on_surface_variant
+                    }
+                }
+            }
+
+            SettingItem {
+                first: false
+                last: true
+                visible: root._transition().kind === WC.TransitionKind.TRANSITION_KIND_GROW
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    FieldLabel {
+                        Layout.fillWidth: true
+                        text: qsTr("Grow center, vertical")
+                    }
+
+                    W.ValueSlider {
+                        id: m_transition_origin_y
+                        Layout.preferredWidth: 220
+                        from: 0
+                        to: 100
+                        stepSize: 5
+                        snapMode: T.Slider.SnapAlways
+                        maxVisibleStops: 10
+                        valueText: Math.round(value).toString()
+                        valueMaxText: "100"
+                        onMoved: root._mutTransition(config => {
+                            config.originY = Math.round(value);
+                        })
+                    }
+                    Binding {
+                        target: m_transition_origin_y
+                        property: "value"
+                        value: root._transition().originY
+                    }
+
+                    MD.Text {
+                        text: qsTr("%")
                         typescale: MD.Token.typescale.body_medium
                         color: MD.Token.color.on_surface_variant
                     }

@@ -12,6 +12,8 @@ pub use router::{
     RendererActivity, RendererExitSnapshot, RendererLifecycleState, RendererSnapshot,
     ResolvedConfigMember, ResolvedConfigTarget, Router, RouterEvent, RuntimeCondition,
     RuntimeConditionKind, RuntimeConditionOrigin, WallpaperPresentationInfo,
-    WallpaperPresentationState, WallpaperPresentationTarget, PRESENTATION_CAP_PAUSE_BLUR,
+    WallpaperPresentationState, WallpaperPresentationTarget, PRESENTATION_CAPS_KNOWN,
+    PRESENTATION_CAP_FADE_TRANSITION, PRESENTATION_CAP_GROW_TRANSITION,
+    PRESENTATION_CAP_PAUSE_BLUR, PRESENTATION_CAP_WIPE_TRANSITION,
 };
 pub use table::{Link, LinkId, RoutingTable};

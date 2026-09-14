@@ -1611,6 +1611,9 @@ message GlobalSettings {
   // Raise the daemon and renderer log levels to debug. Honored unless
   // WW_LOG is set. Applied live.
   bool debug_logging_enabled = 27;
+
+  // Animation shown when a display switches to a different wallpaper.
+  TransitionConfig transition = 28;
 }
 
 enum AutoAction {
@@ -1643,6 +1646,24 @@ message BlurEffectConfig {
 message PauseEffectConfig {
   PauseEffectKind kind = 1;
   BlurEffectConfig blur = 2;
+}
+
+enum TransitionKind {
+  TRANSITION_KIND_NONE = 0;
+  TRANSITION_KIND_FADE = 1;
+  TRANSITION_KIND_WIPE = 2;
+  TRANSITION_KIND_GROW = 3;
+}
+
+message TransitionConfig {
+  TransitionKind kind = 1;
+  // Clamped to 100..=10000.
+  uint32 duration_ms = 2;
+  // Wipe direction in degrees, clockwise; 0 wipes left to right.
+  uint32 angle = 3;
+  // Grow center as percentages of the display surface, 0..=100.
+  uint32 origin_x = 4;
+  uint32 origin_y = 5;
 }
 
 // One plugin's settings table. Wire format is string→string for

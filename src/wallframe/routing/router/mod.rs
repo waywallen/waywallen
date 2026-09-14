@@ -23,7 +23,7 @@ use crate::catalog::properties::WallpaperLayoutOverride;
 use crate::plugin::renderer_registry::RendererActivityMode;
 use crate::settings::{
     AutoAction, AutoReplayPolicy, PauseEffectConfig as StoredPauseEffectConfig, PauseEffectKind,
-    ResolvedLayout, SettingsStore,
+    ResolvedLayout, SettingsStore, TransitionConfig, TransitionKind,
 };
 use crate::wallframe::display::layout::{FillMode, LayoutInput};
 use crate::wallframe::display::placement::{CanvasRect, CanvasSize};
@@ -65,6 +65,8 @@ pub enum DisplayOutEvent {
         pool: Arc<PublishedPool>,
         buffer_generation: u64,
         initial_config: CompositionConfig,
+        /// Animate from the presented content to this pool.
+        transition: bool,
     },
     /// Retire the named buffer pool generation.
     Unbind { buffer_generation: u64 },
@@ -87,6 +89,13 @@ pub enum DisplayOutEvent {
 }
 
 pub const PRESENTATION_CAP_PAUSE_BLUR: u32 = 1 << 0;
+pub const PRESENTATION_CAP_FADE_TRANSITION: u32 = 1 << 1;
+pub const PRESENTATION_CAP_WIPE_TRANSITION: u32 = 1 << 2;
+pub const PRESENTATION_CAP_GROW_TRANSITION: u32 = 1 << 3;
+pub const PRESENTATION_CAPS_KNOWN: u32 = PRESENTATION_CAP_PAUSE_BLUR
+    | PRESENTATION_CAP_FADE_TRANSITION
+    | PRESENTATION_CAP_WIPE_TRANSITION
+    | PRESENTATION_CAP_GROW_TRANSITION;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConsumerImportFailureKind {
@@ -122,6 +131,7 @@ pub struct PauseEffectState {
 pub struct PresentationConfig {
     pub generation: u64,
     pub pause_effect: PauseEffectConfig,
+    pub transition: TransitionConfig,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -463,6 +473,10 @@ struct DisplayState {
     failed_binding_generation: Option<u64>,
     presentation_caps: u32,
     presentation: PresentationSnapshot,
+    /// Renderer id and spec revision of the content last bound to this
+    /// display. Survives unbind so a later bind can tell whether it
+    /// replaces the wallpaper still on screen.
+    presented_content: Option<(RendererId, u64)>,
     accepted: bool,
     /// Per-display auto replay machine driven by display facts and
     /// the resolved rule policy.
@@ -936,6 +950,33 @@ impl Router {
                 },
             },
         }
+    }
+
+    fn resolved_transition(&self, presentation_caps: u32) -> TransitionConfig {
+        let stored = self
+            .settings
+            .get()
+            .map(|settings| settings.global().transition)
+            .unwrap_or_default()
+            .effective();
+        let supported = |kind| {
+            let cap = match kind {
+                TransitionKind::None => return true,
+                TransitionKind::Fade => PRESENTATION_CAP_FADE_TRANSITION,
+                TransitionKind::Wipe => PRESENTATION_CAP_WIPE_TRANSITION,
+                TransitionKind::Grow => PRESENTATION_CAP_GROW_TRANSITION,
+            };
+            presentation_caps & cap != 0
+        };
+        // A consumer that cannot draw the configured shape still gets a fade.
+        let kind = if supported(stored.kind) {
+            stored.kind
+        } else if supported(TransitionKind::Fade) {
+            TransitionKind::Fade
+        } else {
+            TransitionKind::None
+        };
+        TransitionConfig { kind, ..stored }
     }
 
     fn pause_effect_active(inner: &Inner, display: &DisplayState, kind: PauseEffectKind) -> bool {
@@ -1683,10 +1724,12 @@ impl Router {
             };
             let canvas = self.canvas_for_info(&info);
             let pause_effect = self.resolved_pause_effect(reg.presentation_caps);
+            let transition = self.resolved_transition(reg.presentation_caps);
             let presentation = PresentationSnapshot {
                 config: PresentationConfig {
                     generation: 1,
                     pause_effect,
+                    transition,
                 },
                 state: PresentationState {
                     generation: 1,
@@ -1718,6 +1761,7 @@ impl Router {
                     failed_binding_generation: None,
                     presentation_caps: reg.presentation_caps,
                     presentation,
+                    presented_content: None,
                     accepted: false,
                     auto_replay: auto_replay::State::new(),
                     consumption_epoch: Arc::new(AtomicU64::new(1)),
@@ -2093,6 +2137,7 @@ impl Router {
             return;
         };
         let desired_config = self.resolved_pause_effect(current.presentation_caps);
+        let desired_transition = self.resolved_transition(current.presentation_caps);
         let desired_dynamic = PauseEffectState {
             active: Self::pause_effect_active(&inner, current, desired_config.kind),
         };
@@ -2101,7 +2146,20 @@ impl Router {
             .get_mut(&display_id)
             .expect("display checked above");
 
-        if state.presentation.config.pause_effect != desired_config {
+        let mut refresh_renderer = None;
+        if state.presentation.config.pause_effect != desired_config
+            || state.presentation.config.transition != desired_transition
+        {
+            // Consumers only retain presented content while a transition is
+            // configured, so enabling one needs a fresh frame to animate from.
+            if state.presentation.config.transition.kind == TransitionKind::None
+                && desired_transition.kind != TransitionKind::None
+            {
+                refresh_renderer = state
+                    .binding
+                    .as_ref()
+                    .map(|binding| binding.renderer.id.clone());
+            }
             let config_generation = state
                 .presentation
                 .config
@@ -2118,6 +2176,7 @@ impl Router {
                 config: PresentationConfig {
                     generation: config_generation,
                     pause_effect: desired_config,
+                    transition: desired_transition,
                 },
                 state: PresentationState {
                     generation: dynamic_generation,
@@ -2145,6 +2204,14 @@ impl Router {
                 let _ = state.tx.send(DisplayOutEvent::SetPresentationState(
                     state.presentation.state,
                 ));
+            }
+        }
+        drop(inner);
+        if let Some(renderer_id) = refresh_renderer {
+            if let Err(error) = self.mgr.request_frame(&renderer_id).await {
+                log::warn!(
+                    "router: request current frame from renderer {renderer_id} after enabling transitions: {error}"
+                );
             }
         }
     }
@@ -5934,6 +6001,7 @@ mod tests {
                     pool: _,
                     buffer_generation,
                     initial_config: _,
+                    transition: _,
                 } => {
                     assert_eq!(renderer.id, "r1");
                     assert!(buffer_generation > 1);
@@ -6156,6 +6224,7 @@ mod tests {
                         kind: PauseEffectKind::Blur,
                         blur: BlurEffectConfig { radius: 42 },
                     },
+                    transition: TransitionConfig::default(),
                 },
                 state: PresentationState {
                     generation: 1,
@@ -6192,6 +6261,151 @@ mod tests {
             .expect("disabling the effect should send an atomic presentation snapshot");
         assert_eq!(snapshot.config.pause_effect.kind, PauseEffectKind::None);
         assert!(!snapshot.state.pause_effect.active);
+    }
+
+    async fn settings_with_transition(kind: TransitionKind) -> Arc<SettingsStore> {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = SettingsStore::load_or_default(tmp.path().join("settings.toml")).await;
+        store.update(|s| s.global.transition.kind = kind);
+        std::mem::forget(tmp);
+        store
+    }
+
+    fn bind_transitions(rx: &mut mpsc::UnboundedReceiver<DisplayOutEvent>) -> Vec<bool> {
+        drain_display_events(rx)
+            .into_iter()
+            .filter_map(|event| match event {
+                DisplayOutEvent::Bind { transition, .. } => Some(transition),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn transition_kind_falls_back_to_consumer_capabilities() {
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr);
+        router.attach_settings(settings_with_transition(TransitionKind::Wipe).await);
+
+        assert_eq!(
+            router
+                .resolved_transition(PRESENTATION_CAP_WIPE_TRANSITION)
+                .kind,
+            TransitionKind::Wipe
+        );
+        assert_eq!(
+            router
+                .resolved_transition(PRESENTATION_CAP_FADE_TRANSITION)
+                .kind,
+            TransitionKind::Fade
+        );
+        assert_eq!(
+            router.resolved_transition(PRESENTATION_CAP_PAUSE_BLUR).kind,
+            TransitionKind::None
+        );
+    }
+
+    #[tokio::test]
+    async fn bind_requests_transition_only_when_content_changes() {
+        let store = settings_with_transition(TransitionKind::Fade).await;
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+        router.attach_settings(store.clone());
+
+        let r1 = RendererHandle::test_stub("r1", "image");
+        r1.test_publish_pool(fake_published_pool(1, 1920, 1080));
+        mgr.register_test_handle(r1.clone()).await;
+        router.register_renderer(r1.clone()).await;
+        let r2 = RendererHandle::test_stub("r2", "image");
+        r2.test_publish_pool(fake_published_pool(1, 1920, 1080));
+        mgr.register_test_handle(r2.clone()).await;
+        router.register_renderer(r2.clone()).await;
+
+        let mut registration = reg("HDMI-A-1", 1920, 1080);
+        registration.presentation_caps = PRESENTATION_CAP_FADE_TRANSITION;
+        let mut display = router.register_display(registration).await;
+        assert_eq!(
+            display.presentation.config.transition.kind,
+            TransitionKind::Fade
+        );
+        assert_eq!(
+            bind_transitions(&mut display.rx),
+            vec![false],
+            "the first content on a display has nothing to animate from"
+        );
+        // Registration links every display to r1. Anchor r2 on its own
+        // display so relinking the display under test never orphans it.
+        let _anchor_r1 = router.register_display(reg("DP-1", 1920, 1080)).await;
+        let anchor_r2 = router.register_display(reg("DP-2", 1920, 1080)).await;
+        router.relink_displays_to(&[anchor_r2.id], "r2").await;
+        let _ = drain_display_events(&mut display.rx);
+
+        r1.test_publish_pool(fake_published_pool(2, 3840, 2160));
+        router.on_renderer_bind("r1").await;
+        assert_eq!(bind_transitions(&mut display.rx), vec![false]);
+
+        router.relink_displays_to(&[display.id], "r2").await;
+        assert_eq!(bind_transitions(&mut display.rx), vec![true]);
+
+        router.relink_displays_to(&[display.id], "r1").await;
+        assert_eq!(bind_transitions(&mut display.rx), vec![true]);
+
+        store.update(|s| s.global.transition.kind = TransitionKind::None);
+        router.resync_presentation_configs().await;
+        router.relink_displays_to(&[display.id], "r2").await;
+        assert_eq!(bind_transitions(&mut display.rx), vec![false]);
+    }
+
+    #[tokio::test]
+    async fn enabling_transitions_requests_a_current_frame() {
+        let store = settings_with_transition(TransitionKind::None).await;
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+        router.attach_settings(store.clone());
+        let (renderer, peer) = RendererHandle::test_stub_with_peer("r1", "image");
+        renderer.test_publish_pool(fake_published_pool(1, 1920, 1080));
+        mgr.register_test_handle(renderer.clone()).await;
+        router.register_renderer(renderer).await;
+
+        let mut registration = reg("HDMI-A-1", 1920, 1080);
+        registration.presentation_caps = PRESENTATION_CAP_FADE_TRANSITION;
+        let mut display = router.register_display(registration).await;
+        let _ = drain_display_events(&mut display.rx);
+        drain_renderer_controls(&peer);
+
+        store.update(|s| s.global.transition.kind = TransitionKind::Fade);
+        router.resync_presentation_configs().await;
+        let snapshot = last_presentation_config(&mut display.rx)
+            .expect("enabling transitions should send a presentation snapshot");
+        assert_eq!(snapshot.config.transition.kind, TransitionKind::Fade);
+        let (message, _) = crate::wallframe::ipc::uds::recv_control(&peer)
+            .expect("enabling transitions should request a current frame");
+        assert_eq!(message, ControlMsg::RequestFrame);
+
+        store.update(|s| s.global.transition.duration_ms = 900);
+        router.resync_presentation_configs().await;
+        let snapshot = last_presentation_config(&mut display.rx)
+            .expect("duration change should send a presentation snapshot");
+        assert_eq!(snapshot.config.transition.duration_ms, 900);
+        peer.set_read_timeout(Some(Duration::from_millis(10)))
+            .unwrap();
+        let extra = crate::wallframe::ipc::uds::recv_control(&peer);
+        assert!(
+            matches!(
+                &extra,
+                Err(crate::wallframe::ipc::uds::CodecError::Io(error))
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    )
+            ) || matches!(
+                &extra,
+                Err(crate::wallframe::ipc::uds::CodecError::Nix(
+                    nix::errno::Errno::EAGAIN
+                ))
+            ),
+            "retuning an enabled transition should not request a frame: {extra:?}"
+        );
     }
 
     #[tokio::test]

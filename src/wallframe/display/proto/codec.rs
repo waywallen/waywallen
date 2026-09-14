@@ -271,6 +271,7 @@ mod tests {
                     a: 1.0,
                 },
             },
+            transition: false,
         };
         assert_eq!(sent.expected_fds(), 3);
         send_event(&a, &sent, &raw_fds).unwrap();

@@ -1888,6 +1888,7 @@ pub(super) async fn dispatch_inner(
             let prev_layout = previous_settings.global.layout.clone();
             let prev_auto_replay = previous_settings.global.auto_replay;
             let prev_pause_effect = previous_settings.global.pause_effect;
+            let prev_transition = previous_settings.global.transition;
             let prev_queue_mode = previous_settings.global.queue_mode.clone();
             let prev_rotation_secs = previous_settings.global.rotation_secs;
             let prev_hide_tray = previous_settings.global.hide_tray_icon;
@@ -1936,6 +1937,9 @@ pub(super) async fn dispatch_inner(
                     }
                     if let Some(config) = g.pause_effect.as_ref() {
                         s.global.pause_effect = pause_effect_from_pb(config);
+                    }
+                    if let Some(config) = g.transition.as_ref() {
+                        s.global.transition = transition_from_pb(config);
                     }
                     if !g.queue_mode.is_empty() {
                         s.global.queue_mode = g.queue_mode.clone();
@@ -1996,7 +2000,9 @@ pub(super) async fn dispatch_inner(
             if current_settings.global.auto_replay != prev_auto_replay {
                 state.router.resync_auto_replay().await;
             }
-            if current_settings.global.pause_effect != prev_pause_effect {
+            if current_settings.global.pause_effect != prev_pause_effect
+                || current_settings.global.transition != prev_transition
+            {
                 state.router.resync_presentation_configs().await;
             }
             // Hot-apply queue mode and rotation interval; auto replay re-reads

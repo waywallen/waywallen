@@ -667,6 +667,48 @@ pub(super) fn pause_effect_from_pb(
     }
 }
 
+pub(super) fn transition_kind_to_pb(kind: crate::settings::TransitionKind) -> pb::TransitionKind {
+    match kind {
+        crate::settings::TransitionKind::None => pb::TransitionKind::None,
+        crate::settings::TransitionKind::Fade => pb::TransitionKind::Fade,
+        crate::settings::TransitionKind::Wipe => pb::TransitionKind::Wipe,
+        crate::settings::TransitionKind::Grow => pb::TransitionKind::Grow,
+    }
+}
+
+pub(super) fn transition_kind_from_pb(value: i32) -> crate::settings::TransitionKind {
+    match pb::TransitionKind::try_from(value).unwrap_or_default() {
+        pb::TransitionKind::None => crate::settings::TransitionKind::None,
+        pb::TransitionKind::Fade => crate::settings::TransitionKind::Fade,
+        pb::TransitionKind::Wipe => crate::settings::TransitionKind::Wipe,
+        pb::TransitionKind::Grow => crate::settings::TransitionKind::Grow,
+    }
+}
+
+pub(super) fn transition_to_pb(config: crate::settings::TransitionConfig) -> pb::TransitionConfig {
+    let config = config.effective();
+    pb::TransitionConfig {
+        kind: transition_kind_to_pb(config.kind) as i32,
+        duration_ms: config.duration_ms,
+        angle: config.angle,
+        origin_x: config.origin.x,
+        origin_y: config.origin.y,
+    }
+}
+
+pub(super) fn transition_from_pb(p: &pb::TransitionConfig) -> crate::settings::TransitionConfig {
+    crate::settings::TransitionConfig {
+        kind: transition_kind_from_pb(p.kind),
+        duration_ms: p.duration_ms,
+        angle: p.angle,
+        origin: crate::settings::TransitionOrigin {
+            x: p.origin_x,
+            y: p.origin_y,
+        },
+    }
+    .effective()
+}
+
 pub(super) fn global_to_pb(g: &crate::settings::GlobalSettings) -> pb::GlobalSettings {
     let (wallpaper_filters, wallpaper_filter_logics) = g.wallpaper_filter.to_catalog();
     let wallpaper_filters = wallpaper_filters.iter().map(filter_rule_to_pb).collect();
@@ -715,6 +757,7 @@ pub(super) fn global_to_pb(g: &crate::settings::GlobalSettings) -> pb::GlobalSet
         }),
         auto_replay: Some(auto_replay_to_pb(&g.effective_auto_replay())),
         pause_effect: Some(pause_effect_to_pb(g.pause_effect)),
+        transition: Some(transition_to_pb(g.transition)),
         queue_mode: g.queue_mode.clone(),
         rotation_secs: g.rotation_secs,
         audio_fade_ms: g.effective_audio_fade_ms(),

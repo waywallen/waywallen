@@ -214,12 +214,14 @@ using proto::SettingsChanged;
 using proto::SettingsGetRequest;
 using proto::SettingsGetResponse;
 using proto::SettingsSetRequest;
+using proto::TransitionConfig;
 using proto::AlignGadget::Align;
 using proto::AutoActionGadget::AutoAction;
 using proto::FillModeGadget::FillMode;
 using proto::LayoutSourceGadget::LayoutSource;
 using proto::PauseEffectKindGadget::PauseEffectKind;
 using proto::RotationGadget::Rotation;
+using proto::TransitionKindGadget::TransitionKind;
 
 using proto::FilterLogic;
 using proto::PlaylistActivateRequest;

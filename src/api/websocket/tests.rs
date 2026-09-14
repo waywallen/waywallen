@@ -59,6 +59,56 @@ fn pause_effect_settings_round_trip_and_clamp() {
 }
 
 #[test]
+fn transition_settings_round_trip_and_clamp() {
+    use crate::settings::{TransitionConfig, TransitionKind, TransitionOrigin};
+
+    for kind in [
+        TransitionKind::None,
+        TransitionKind::Fade,
+        TransitionKind::Wipe,
+        TransitionKind::Grow,
+    ] {
+        let config = TransitionConfig {
+            kind,
+            duration_ms: 1200,
+            angle: 270,
+            origin: TransitionOrigin { x: 10, y: 90 },
+        };
+        assert_eq!(transition_from_pb(&transition_to_pb(config)), config);
+    }
+
+    let clamped = transition_from_pb(&pb::TransitionConfig {
+        kind: pb::TransitionKind::Grow as i32,
+        duration_ms: u32::MAX,
+        angle: 450,
+        origin_x: 250,
+        origin_y: 101,
+    });
+    assert_eq!(
+        clamped.duration_ms,
+        crate::settings::MAX_TRANSITION_DURATION_MS
+    );
+    assert_eq!(clamped.angle, 90);
+    assert_eq!(clamped.origin, TransitionOrigin { x: 100, y: 100 });
+
+    let minimum = transition_from_pb(&pb::TransitionConfig {
+        kind: pb::TransitionKind::Fade as i32,
+        duration_ms: 0,
+        ..Default::default()
+    });
+    assert_eq!(
+        minimum.duration_ms,
+        crate::settings::MIN_TRANSITION_DURATION_MS
+    );
+
+    let unknown = transition_from_pb(&pb::TransitionConfig {
+        kind: 99,
+        ..Default::default()
+    });
+    assert_eq!(unknown.kind, TransitionKind::None);
+}
+
+#[test]
 fn catalog_filter_mapping_preserves_legacy_tag_payload() {
     let wire = pb::WallpaperFilterRule {
         r#type: pb::WallpaperFilterType::Tag as i32,

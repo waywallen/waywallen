@@ -84,6 +84,26 @@ auto map_to_pause_effect(const QVariantMap& m) -> proto::PauseEffectConfig {
     return p;
 }
 
+auto transition_to_map(const proto::TransitionConfig& p) -> QVariantMap {
+    QVariantMap m;
+    m[u"kind"_s]       = static_cast<int>(p.kind());
+    m[u"durationMs"_s] = p.durationMs();
+    m[u"angle"_s]      = p.angle();
+    m[u"originX"_s]    = p.originX();
+    m[u"originY"_s]    = p.originY();
+    return m;
+}
+
+auto map_to_transition(const QVariantMap& m) -> proto::TransitionConfig {
+    proto::TransitionConfig p;
+    p.setKind(static_cast<proto::TransitionKind>(m.value(u"kind"_s).toInt()));
+    p.setDurationMs(m.value(u"durationMs"_s, 500).toUInt());
+    p.setAngle(m.value(u"angle"_s).toUInt());
+    p.setOriginX(m.value(u"originX"_s, 50).toUInt());
+    p.setOriginY(m.value(u"originY"_s, 50).toUInt());
+    return p;
+}
+
 auto global_to_map(const proto::GlobalSettings& g) -> QVariantMap {
     QVariantMap  m;
     QVariantList wallpaper_filters;
@@ -109,6 +129,9 @@ auto global_to_map(const proto::GlobalSettings& g) -> QVariantMap {
     }
     if (g.hasPauseEffect()) {
         m[u"pauseEffect"_s] = pause_effect_to_map(g.pauseEffect());
+    }
+    if (g.hasTransition()) {
+        m[u"transition"_s] = transition_to_map(g.transition());
     }
     m[u"queueMode"_s]                 = g.queueMode();
     m[u"rotationSecs"_s]              = g.rotationSecs();
@@ -184,6 +207,9 @@ auto map_to_global(const QVariantMap& m) -> proto::GlobalSettings {
     }
     if (m.contains(u"pauseEffect"_s)) {
         g.setPauseEffect(map_to_pause_effect(m.value(u"pauseEffect"_s).toMap()));
+    }
+    if (m.contains(u"transition"_s)) {
+        g.setTransition(map_to_transition(m.value(u"transition"_s).toMap()));
     }
     if (m.contains(u"queueMode"_s)) {
         g.setQueueMode(m.value(u"queueMode"_s).toString());

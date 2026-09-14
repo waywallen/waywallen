@@ -81,7 +81,22 @@ impl Router {
                 .then(|| renderer.latest_frame())
                 .flatten()
                 .filter(|frame| frame.buffer_generation == pool.generation);
+            // A new pool from the same renderer spec (resize, renegotiation,
+            // restart) keeps showing the same wallpaper and binds without
+            // a transition.
+            let content = (
+                link.renderer_id.clone(),
+                inner
+                    .renderer_slots
+                    .get(&link.renderer_id)
+                    .map_or(0, |slot| slot.spec_revision),
+            );
             let s = inner.displays.get_mut(&display_id).unwrap();
+            let transition = s.presentation.config.transition.kind != TransitionKind::None
+                && s.presented_content
+                    .as_ref()
+                    .is_some_and(|presented| *presented != content);
+            s.presented_content = Some(content);
             s.next_wire_buffer_generation = s
                 .next_wire_buffer_generation
                 .checked_add(1)
@@ -93,6 +108,7 @@ impl Router {
                 pool: Arc::clone(&pool),
                 buffer_generation: wire_generation,
                 initial_config: cfg,
+                transition,
             });
             if let Some(frame) = replay {
                 let _ = s.tx.send(DisplayOutEvent::Frame {
