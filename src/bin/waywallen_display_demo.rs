@@ -163,7 +163,9 @@ fn run_session(sock_path: &Path, args: &Args) -> Result<()> {
                 drm_render_major: 0,
                 drm_render_minor: 0,
                 mem_hints: 1 << 1,
-                sync_caps: 1 << 1,
+                // The release syncobj in frame_ready is always a daemon-owned
+                // binary one, so the renderer's fence flavour does not matter here.
+                sync_caps: (1 << 1) | (1 << 2),
                 color_caps: (1 << 0) | (1 << 6) | (1 << 7),
                 extent_max_w: args.width,
                 extent_max_h: args.height,
