@@ -783,9 +783,9 @@ int run_selftest(const Options& opt) {
     }
     auto producer = std::move(producer_res).unwrap();
 
-    auto yuv_res = wavsen::video::YuvToRgba::create(producer->instance_dispatch(),
+    auto yuv_res = wavsen::video::YuvToRgba::create(producer->instance(),
                                                     producer->physical_device(),
-                                                    producer->device_dispatch(),
+                                                    producer->device(),
                                                     producer->queue_family_index(),
                                                     producer->queue(),
                                                     rstd::u32(even_w),
@@ -1210,9 +1210,9 @@ int run(int argc, char** argv) {
     ww_bridge_vk_dt_load(&vdt, vkGetInstanceProcAddr, producer->instance());
     ww_bridge_vk_log_gpu_info("waywallen-video-renderer", &vdt, producer->physical_device());
 
-    auto yuv_res = wavsen::video::YuvToRgba::create(producer->instance_dispatch(),
+    auto yuv_res = wavsen::video::YuvToRgba::create(producer->instance(),
                                                     producer->physical_device(),
-                                                    producer->device_dispatch(),
+                                                    producer->device(),
                                                     producer->queue_family_index(),
                                                     producer->queue(),
                                                     rstd::u32(even_w),
