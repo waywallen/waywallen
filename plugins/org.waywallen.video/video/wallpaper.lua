@@ -17,7 +17,7 @@ function M.properties()
             type = "slider",
             min = 10,
             max = 400,
-            step = 10,
+            step = 1,
             suffix = "%",
             value = 100,
         },
