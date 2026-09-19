@@ -16,8 +16,22 @@ MD.Popup {
     //     (WS not bound yet, or core services still booting)
     readonly property bool dbusConnected: W.DaemonDBusClient.status === W.DaemonDBusClient.Connected
     readonly property bool daemonStarting: dbusConnected && W.Notify.daemonPhase !== W.Notify.DaemonPhase.Ready
+    readonly property bool daemonUnusable: !W.DaemonDBusClient.daemonShutdownExpected &&
+        (!dbusConnected || daemonStarting)
 
-    visible: !W.DaemonDBusClient.daemonShutdownExpected && (!dbusConnected || daemonStarting)
+    // The phase is `Starting` until the daemon's first StatusSync, and the
+    // window is on screen before the WebSocket has finished connecting, so
+    // on a healthy launch this dialog is briefly correct — long enough to
+    // flash a dimmed overlay, too short to read. Not having heard from the
+    // daemon yet is not the same as something being wrong, and only a
+    // condition that outlives the grace period is worth interrupting the
+    // window for: a daemon that is genuinely missing or still booting stays
+    // that way for seconds, while a healthy handshake clears in tens of
+    // milliseconds. Qt carries the same idea in `QProgressDialog`, whose
+    // `minimumDuration` exists so a dialog does not "pop up for tasks that
+    // are quickly over". Nothing else waits on this — the pages gate their
+    // queries on `daemonPhase` directly.
+    visible: daemonUnusable && m_grace.elapsed
     closePolicy: T.Popup.NoAutoClose
     dim: true
     modal: true
@@ -25,6 +39,28 @@ MD.Popup {
     x: Math.round((parent.width - width) / 2)
     y: Math.round((parent.height - height) / 2)
     bottomPadding: 24
+
+    // Started and stopped by hand rather than bound to `running`: a
+    // one-shot Timer stops itself when it fires, which would break the
+    // binding and clear the flag the moment it was set.
+    Timer {
+        id: m_grace
+        interval: 1000
+        property bool elapsed: false
+        onTriggered: elapsed = true
+    }
+
+    onDaemonUnusableChanged: {
+        if (daemonUnusable) {
+            m_grace.restart();
+        } else {
+            m_grace.stop();
+            m_grace.elapsed = false;
+        }
+    }
+
+    Component.onCompleted: if (daemonUnusable)
+        m_grace.restart()
 
     function refreshProcs() {
         m_proc_model.clear();
@@ -61,7 +97,12 @@ MD.Popup {
                 case W.DaemonDBusClient.VersionMismatch:
                     return qsTr("Daemon version mismatch");
                 }
-                return "";
+                // Connected with the phase ready is this dialog on its way
+                // out: the exit transition is still running while the
+                // bindings have already turned good. An empty string here
+                // collapses the popup to a blank 200x48 background for the
+                // length of that transition, so keep the last copy instead.
+                return qsTr("Starting…");
             }
         }
 
@@ -81,7 +122,8 @@ MD.Popup {
                 case W.DaemonDBusClient.VersionMismatch:
                     return qsTr("Daemon version %1 + is incompatible.").arg(W.DaemonDBusClient.daemonVersion);
                 }
-                return "";
+                // See the title: this is the closing frame, not a state.
+                return qsTr("waywallen is initializing core services. This usually takes a few seconds.");
             }
         }
 
