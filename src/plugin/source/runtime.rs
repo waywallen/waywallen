@@ -1885,6 +1885,32 @@ impl LuaPluginRuntime {
                 })?;
         ctx.set("read_file", read_file_fn.clone())?;
 
+        // ctx.fs.read_bytes(path, offset, len) -> string|nil
+        // A binary-safe window into a file, for plugins that must read one
+        // member of a container without pulling the whole thing in. `read`
+        // refuses anything over 1MB and decodes UTF-8; this reads at most 1MB
+        // per call and returns the bytes as they are. A short read at EOF
+        // returns what is there; nothing readable returns nil.
+        let read_bytes_fn =
+            self.lua
+                .create_function(|lua, (path, offset, len): (String, i64, i64)| {
+                    use std::io::{Read, Seek, SeekFrom};
+                    if offset < 0 || len <= 0 || len > 1_048_576 {
+                        return Ok(mlua::Value::Nil);
+                    }
+                    let Ok(mut file) = std::fs::File::open(&path) else {
+                        return Ok(mlua::Value::Nil);
+                    };
+                    if file.seek(SeekFrom::Start(offset as u64)).is_err() {
+                        return Ok(mlua::Value::Nil);
+                    }
+                    let mut buf = Vec::new();
+                    if file.take(len as u64).read_to_end(&mut buf).is_err() || buf.is_empty() {
+                        return Ok(mlua::Value::Nil);
+                    }
+                    Ok(mlua::Value::String(lua.create_string(&buf)?))
+                })?;
+
         // ctx.extension(path) -> string|nil
         let extension_fn = self.lua.create_function(|_, path: String| {
             Ok(std::path::Path::new(&path)
@@ -2004,6 +2030,7 @@ impl LuaPluginRuntime {
         fs.set("list_dirs", list_dirs_fn)?;
         fs.set("exists", file_exists_fn)?;
         fs.set("read", read_file_fn)?;
+        fs.set("read_bytes", read_bytes_fn)?;
         fs.set("extension", extension_fn)?;
         fs.set("filename", filename_fn.clone())?;
         fs.set("basename", filename_fn)?;

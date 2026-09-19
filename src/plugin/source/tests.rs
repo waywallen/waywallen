@@ -263,6 +263,53 @@ return M
 }
 
 #[test]
+fn fs_read_bytes_returns_a_binary_window_and_refuses_oversized_requests() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob_path = dir.path().join("container.bin");
+    // A non-UTF-8 byte in the middle: `read` would refuse this file, the
+    // window must hand it back untouched.
+    std::fs::write(&blob_path, b"HEAD\xffTAIL").unwrap();
+
+    let plugin_path = dir.path().join("read_bytes.lua");
+    std::fs::write(
+        &plugin_path,
+        format!(
+            r#"
+local M = {{}}
+function M.info()
+    return {{
+        name = "read_bytes",
+        capabilities = {{ source = {{ types = {{"image"}}, scan = true }} }},
+    }}
+end
+M.source = {{}}
+function M.source.scan(ctx)
+    local path = "{path}"
+    assert(ctx.fs.read_bytes(path, 0, 4) == "HEAD", "head window")
+    assert(ctx.fs.read_bytes(path, 4, 1) == "\xff", "binary byte survives")
+    assert(ctx.fs.read_bytes(path, 5, 64) == "TAIL", "short read at EOF")
+    assert(ctx.fs.read_bytes(path, 9, 4) == nil, "read past EOF")
+    assert(ctx.fs.read_bytes(path, -1, 4) == nil, "negative offset")
+    assert(ctx.fs.read_bytes(path, 0, 0) == nil, "empty window")
+    assert(ctx.fs.read_bytes(path, 0, 1048577) == nil, "over the cap")
+    assert(ctx.fs.read_bytes(path .. ".missing", 0, 4) == nil, "missing file")
+    return {{}}
+end
+return M
+"#,
+            path = blob_path.display()
+        ),
+    )
+    .unwrap();
+
+    let manager = SourceManager::new().unwrap();
+    manager
+        .load_plugin(&plugin_path, "org.read_bytes", "1", ENTRY_VERSION_V4)
+        .unwrap();
+    block_value(async { manager.scan_all(&HashMap::new()).await }).unwrap();
+}
+
+#[test]
 fn scan_all_reports_a_failing_plugin_instead_of_reporting_success() {
     let dir = tempfile::tempdir().unwrap();
     let plugin_path = dir.path().join("failing_source.lua");
