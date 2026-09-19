@@ -615,12 +615,12 @@ static int print_caps_json(const Options& opt) {
     pool_init.queue              = producer->queue();
     pool_init.queue_family_index = producer->queue_family_index().to_primitive();
     pool_init.get_instance_proc_addr =
-        reinterpret_cast<void* (*)(void*, const char*)>(producer->instance_dispatch().resolver);
+        reinterpret_cast<void* (*)(void*, const char*)>(vkGetInstanceProcAddr);
     pool_init.device_uuid = producer->device_uuid();
     pool_init.driver_uuid = producer->driver_uuid();
     {
         ww_bridge_vk_dt_t dt {};
-        ww_bridge_vk_dt_load(&dt, producer->instance_dispatch().resolver, producer->instance());
+        ww_bridge_vk_dt_load(&dt, vkGetInstanceProcAddr, producer->instance());
         if (int rc = ww_bridge_vk_query_render_node(&dt,
                                                     producer->physical_device(),
                                                     &pool_init.drm_render_major,
@@ -875,7 +875,7 @@ int run(int argc, char** argv) {
 
     /* GPU info diagnostic (uses bridge probe_vk dispatch table). */
     ww_bridge_vk_dt_t vdt {};
-    ww_bridge_vk_dt_load(&vdt, producer->instance_dispatch().resolver, producer->instance());
+    ww_bridge_vk_dt_load(&vdt, vkGetInstanceProcAddr, producer->instance());
     ww_bridge_vk_log_gpu_info("waywallen-image-renderer", &vdt, producer->physical_device());
 
     host.rgba_data = rgba_buf.data.data();
@@ -889,12 +889,12 @@ int run(int argc, char** argv) {
     pool_init.queue              = producer->queue();
     pool_init.queue_family_index = producer->queue_family_index().to_primitive();
     pool_init.get_instance_proc_addr =
-        reinterpret_cast<void* (*)(void*, const char*)>(producer->instance_dispatch().resolver);
+        reinterpret_cast<void* (*)(void*, const char*)>(vkGetInstanceProcAddr);
     pool_init.device_uuid = producer->device_uuid();
     pool_init.driver_uuid = producer->driver_uuid();
     {
         ww_bridge_vk_dt_t dt {};
-        ww_bridge_vk_dt_load(&dt, producer->instance_dispatch().resolver, producer->instance());
+        ww_bridge_vk_dt_load(&dt, vkGetInstanceProcAddr, producer->instance());
         if (int rc = ww_bridge_vk_query_render_node(&dt,
                                                     producer->physical_device(),
                                                     &pool_init.drm_render_major,
