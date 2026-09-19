@@ -23,9 +23,11 @@ QString userKind() { return QStringLiteral("user"); }
 QString schemeColorKey() { return QStringLiteral("waywallen.scheme_color"); }
 QString enableAudioKey() { return QStringLiteral("waywallen.enable_audio"); }
 QString playbackSpeedKey() { return QStringLiteral("waywallen.playback_speed"); }
+QString mouseParallaxKey() { return QStringLiteral("waywallen.mouse_parallax"); }
 
 bool isPredefinedKey(const QString& key) {
-    return key == schemeColorKey() || key == enableAudioKey() || key == playbackSpeedKey();
+    return key == schemeColorKey() || key == enableAudioKey() || key == playbackSpeedKey() ||
+           key == mouseParallaxKey();
 }
 
 QString jsonValueToWireString(const QJsonValue& v) {
@@ -308,6 +310,16 @@ void UserPropertyListModel::appendPredefinedEntries_(const QJsonObject& schema) 
                                        QStringLiteral("slider"),
                                        QStringLiteral("100"));
         m_entries.append(std::move(speed));
+    }
+
+    if (schema.contains(mouseParallaxKey())) {
+        const auto parallax_schema = schema.value(mouseParallaxKey()).toObject();
+        auto       parallax        = make(mouseParallaxKey(),
+                                          parallax_schema,
+                                          UserPropertyListModel::tr("Mouse parallax"),
+                                          QStringLiteral("bool"),
+                                          QStringLiteral("true"));
+        m_entries.append(std::move(parallax));
     }
 }
 

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 const SCHEME_COLOR_KEY: &str = "waywallen.scheme_color";
 const ENABLE_AUDIO_KEY: &str = "waywallen.enable_audio";
 const PLAYBACK_SPEED_KEY: &str = "waywallen.playback_speed";
+const MOUSE_PARALLAX_KEY: &str = "waywallen.mouse_parallax";
 const FILL_MODE_KEY: &str = "waywallen.fill_mode";
 const ROTATION_KEY: &str = "waywallen.rotation";
 const LOCATION_X_KEY: &str = "waywallen.location_x";
@@ -98,7 +99,7 @@ pub fn is_daemon_display_property_key(key: &str) -> bool {
 pub fn is_daemon_predefined_property_key(key: &str) -> bool {
     matches!(
         canonical_user_property_key(key),
-        SCHEME_COLOR_KEY | ENABLE_AUDIO_KEY | PLAYBACK_SPEED_KEY
+        SCHEME_COLOR_KEY | ENABLE_AUDIO_KEY | PLAYBACK_SPEED_KEY | MOUSE_PARALLAX_KEY
     )
 }
 
@@ -374,8 +375,12 @@ mod tests {
         assert!(is_daemon_predefined_property_key(
             "waywallen.playback_speed"
         ));
+        assert!(is_daemon_predefined_property_key(
+            "waywallen.mouse_parallax"
+        ));
         assert!(!is_daemon_display_property_key("waywallen.enable_audio"));
         assert!(!is_daemon_display_property_key("waywallen.playback_speed"));
+        assert!(!is_daemon_display_property_key("waywallen.mouse_parallax"));
 
         let raw = r#"{
             "waywallen.enable_audio": "false",
