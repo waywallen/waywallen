@@ -20,6 +20,184 @@ import wavsen.video;
 import wavsen.audio;
 import waywallen.bridge;
 
+// Prefetches VAAPI frames on a background thread so irregular
+// vaExportSurfaceHandle latency (notably on NVIDIA) does not stall presentation.
+class AsyncVaapiQueue {
+public:
+    explicit AsyncVaapiQueue(wavsen::video::VideoDecoder* decoder, size_t max_queue_size = 8);
+    ~AsyncVaapiQueue();
+
+    AsyncVaapiQueue(const AsyncVaapiQueue&)            = delete;
+    AsyncVaapiQueue& operator=(const AsyncVaapiQueue&) = delete;
+
+    void start();
+    void stop();
+
+    // Pauses/resumes decode. When pausing, blocks until any in-flight
+    // next_vaapi_frame() finishes so the main thread can safely touch the decoder.
+    void set_paused(bool paused);
+
+    // Blocks up to `timeout` for the next VaapiFramePull (Ok / Looped / Eof).
+    // Returns None on timeout or when the producer has stopped with an empty queue.
+    rstd::Option<wavsen::video::VaapiFramePull> pop_wait(std::chrono::milliseconds timeout);
+
+    bool        has_error() const;
+    std::string get_error() const;
+
+private:
+    void decode_thread_loop();
+
+    wavsen::video::VideoDecoder* decoder_;
+    size_t                       max_queue_size_;
+
+    std::queue<wavsen::video::VaapiFramePull> ready_frames_;
+    std::mutex                                mutex_;
+    std::condition_variable                   cv_push_;   // space available for producer
+    std::condition_variable                   cv_pop_;    // frame available for consumer
+    std::condition_variable                   cv_paused_; // decode finished for pause
+
+    std::thread       decode_thread_;
+    std::atomic<bool> running_ { false };
+    std::atomic<bool> paused_ { false };
+    std::atomic<bool> decode_finished_ { false }; // set on Eof or decode error
+    bool              decoding_ { false };        // true while inside next_vaapi_frame()
+
+    std::atomic<bool>  has_error_ { false };
+    std::string        error_message_;
+    mutable std::mutex error_mutex_;
+};
+
+AsyncVaapiQueue::AsyncVaapiQueue(wavsen::video::VideoDecoder* decoder, size_t max_queue_size)
+    : decoder_(decoder), max_queue_size_(max_queue_size) {}
+
+AsyncVaapiQueue::~AsyncVaapiQueue() { stop(); }
+
+void AsyncVaapiQueue::start() {
+    if (running_.exchange(true)) return;
+
+    decode_finished_.store(false);
+    paused_.store(false);
+    decode_thread_ = std::thread([this] {
+        decode_thread_loop();
+    });
+    rstd_info("AsyncVaapiQueue: decode thread started (max_queue={})", max_queue_size_);
+}
+
+void AsyncVaapiQueue::stop() {
+    if (! running_.exchange(false)) return;
+
+    cv_push_.notify_all();
+    cv_pop_.notify_all();
+    cv_paused_.notify_all();
+
+    if (decode_thread_.joinable()) {
+        decode_thread_.join();
+    }
+
+    std::lock_guard<std::mutex> lk(mutex_);
+    while (! ready_frames_.empty()) {
+        ready_frames_.pop();
+    }
+    rstd_info("AsyncVaapiQueue: stopped and drained");
+}
+
+void AsyncVaapiQueue::set_paused(bool paused) {
+    paused_.store(paused);
+    if (paused) {
+        std::unique_lock<std::mutex> lk(mutex_);
+        cv_paused_.wait(lk, [this] {
+            return ! decoding_ || ! running_.load();
+        });
+    } else {
+        cv_push_.notify_all();
+    }
+}
+
+rstd::Option<wavsen::video::VaapiFramePull>
+AsyncVaapiQueue::pop_wait(std::chrono::milliseconds timeout) {
+    std::unique_lock<std::mutex> lk(mutex_);
+
+    if (cv_pop_.wait_for(lk, timeout, [this] {
+            return ! ready_frames_.empty() || decode_finished_.load() || ! running_.load();
+        })) {
+        if (! ready_frames_.empty()) {
+            auto pull = rstd::move(ready_frames_.front());
+            ready_frames_.pop();
+            cv_push_.notify_one();
+            return rstd::Some(rstd::move(pull));
+        }
+    }
+    return rstd::None();
+}
+
+bool AsyncVaapiQueue::has_error() const { return has_error_.load(); }
+
+std::string AsyncVaapiQueue::get_error() const {
+    std::lock_guard<std::mutex> lk(error_mutex_);
+    return error_message_;
+}
+
+void AsyncVaapiQueue::decode_thread_loop() {
+    while (running_.load()) {
+        if (paused_.load()) {
+            std::unique_lock<std::mutex> lk(mutex_);
+            cv_push_.wait(lk, [this] {
+                return ! paused_.load() || ! running_.load();
+            });
+            if (! running_.load()) break;
+        }
+
+        {
+            std::unique_lock<std::mutex> lk(mutex_);
+            cv_push_.wait(lk, [this] {
+                return ! running_.load() || ready_frames_.size() < max_queue_size_;
+            });
+
+            if (! running_.load()) break;
+
+            // Check pause again under lock before starting decode
+            if (paused_.load()) continue;
+
+            decoding_ = true;
+        }
+
+        auto result = decoder_->next_vaapi_frame();
+
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            decoding_ = false;
+            cv_paused_.notify_all();
+        }
+
+        if (result.is_err()) {
+            std::lock_guard<std::mutex> err_lk(error_mutex_);
+            auto                        err = rstd::move(result).unwrap_err();
+            error_message_                  = rstd::cppstd::to_string(err.message);
+            has_error_.store(true);
+            decode_finished_.store(true);
+            rstd_error("AsyncVaapiQueue: decode failed: {}", error_message_);
+            cv_pop_.notify_all();
+            break;
+        }
+
+        auto pull = rstd::move(result).unwrap();
+
+        {
+            std::lock_guard<std::mutex> lk(mutex_);
+            const bool                  is_eof = pull.status == wavsen::video::NextFrame::Eof;
+            ready_frames_.push(rstd::move(pull));
+            cv_pop_.notify_one();
+            if (is_eof) {
+                decode_finished_.store(true);
+                rstd_info("AsyncVaapiQueue: EOF reached, decode thread exiting");
+                break;
+            }
+        }
+    }
+
+    rstd_info("AsyncVaapiQueue: decode thread exited");
+}
+
 namespace
 {
 
@@ -1166,6 +1344,13 @@ int run(int argc, char** argv) {
               hwdec_label(hwaccel),
               kind_label(decoder->get()->kind()));
 
+    std::unique_ptr<AsyncVaapiQueue> async_queue;
+    if (decoder->get()->kind() == wavsen::video::FrameKind::VaapiDrm) {
+        async_queue = std::make_unique<AsyncVaapiQueue>(decoder->get(), 8);
+        async_queue->start();
+        rstd_info("waywallen-video-renderer: async VAAPI decode queue active");
+    }
+
     /* --- Audio: open the same file as an rstd byte stream and attach AvPlayer.
      *   Failure (missing audio stream, unsupported codec, no audio device)
      *   is non-fatal: log and continue without audio (presenter falls
@@ -1385,7 +1570,10 @@ int run(int argc, char** argv) {
         }
 
         if (host.loop_pending.exchange(false, std::memory_order_acq_rel)) {
+            // Pause blocks until any in-flight next_vaapi_frame finishes.
+            if (async_queue) async_queue->set_paused(true);
             decoder->get()->set_loop(host.loop_value.load(std::memory_order_acquire));
+            if (async_queue) async_queue->set_paused(false);
             // Loop toggled — let the presenter re-baseline on next frame.
             presenter.reset();
         }
@@ -1425,9 +1613,15 @@ int run(int argc, char** argv) {
         const bool     pause_started = ! audio_runtime.paused && paused_now;
         const bool     resumed_now   = audio_runtime.paused && ! paused_now;
         const uint64_t frame_request = pending_frame_request(host);
-        if (pause_started) pause_resume_pts = last_submitted_pts;
-        if (resumed_now && audio_runtime.enabled && pause_resume_pts >= rstd::f64()) {
-            if (auto* player = current_av_player()) player->seek_to(pause_resume_pts);
+        if (pause_started) {
+            pause_resume_pts = last_submitted_pts;
+            if (async_queue) async_queue->set_paused(true);
+        }
+        if (resumed_now) {
+            if (async_queue) async_queue->set_paused(false);
+            if (audio_runtime.enabled && pause_resume_pts >= rstd::f64()) {
+                if (auto* player = current_av_player()) player->seek_to(pause_resume_pts);
+            }
         }
         sync_audio_state(current_av_player(),
                          audio_runtime,
@@ -1468,6 +1662,10 @@ int run(int argc, char** argv) {
                         signal_shutdown(host);
                         break;
                     }
+                    if (async_queue) {
+                        async_queue->stop();
+                        async_queue.reset();
+                    }
                     (void)decoder.take();
                     wavsen::video::OpenOpts new_opts {
                         new_h, rstd::string::String::make(as_rstd_str(opt.render_node))
@@ -1487,6 +1685,11 @@ int run(int argc, char** argv) {
                     }
                     decoder = rstd::Some(std::move(re_res).unwrap());
                     hwaccel = new_h;
+                    if (decoder->get()->kind() == wavsen::video::FrameKind::VaapiDrm) {
+                        async_queue = std::make_unique<AsyncVaapiQueue>(decoder->get(), 8);
+                        async_queue->start();
+                        rstd_info("waywallen-video-renderer: async queue restarted after reopen");
+                    }
                     presenter.reset();
                     // Video reopened at PTS 0 — keep audio aligned.
                     if (auto* player = current_av_player()) player->seek_to_start();
@@ -1547,13 +1750,28 @@ int run(int argc, char** argv) {
             break;
         }
         case wavsen::video::FrameKind::VaapiDrm: {
-            auto pulled = decoder->get()->next_vaapi_frame();
-            if (pulled.is_err()) {
-                fs_res = rstd::Err(rstd::move(pulled).unwrap_err());
+            if (async_queue) {
+                auto opt_pull = async_queue->pop_wait(std::chrono::milliseconds(5));
+                if (opt_pull.is_none()) {
+                    if (async_queue->has_error()) {
+                        rstd_error("waywallen-video-renderer: async queue error: {}",
+                                   async_queue->get_error());
+                        signal_shutdown(host);
+                    }
+                    continue;
+                }
+                auto pull   = rstd::move(opt_pull).unwrap();
+                fs_res      = rstd::Ok(pull.status);
+                vaapi_frame = rstd::move(pull.frame);
             } else {
-                auto value  = rstd::move(pulled).unwrap();
-                fs_res      = rstd::Ok(value.status);
-                vaapi_frame = rstd::move(value.frame);
+                auto pulled = decoder->get()->next_vaapi_frame();
+                if (pulled.is_err()) {
+                    fs_res = rstd::Err(rstd::move(pulled).unwrap_err());
+                } else {
+                    auto value  = rstd::move(pulled).unwrap();
+                    fs_res      = rstd::Ok(value.status);
+                    vaapi_frame = rstd::move(value.frame);
+                }
             }
             break;
         }
@@ -1765,6 +1983,10 @@ int run(int argc, char** argv) {
         submitted_since_negotiate = true;
         if (frame_pts >= rstd::f64()) last_submitted_pts = frame_pts;
         complete_frame_request(host, frame_request);
+    }
+
+    if (async_queue) {
+        async_queue->stop();
     }
 
     if (reader.joinable()) {
