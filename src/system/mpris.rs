@@ -637,6 +637,9 @@ async fn publish_to_renderers(
     if ids.is_empty() {
         return;
     }
+    if reason == "subscription" && !raw_snapshot.art_url.is_empty() {
+        art_cache.failed.remove(&art_key(&raw_snapshot.art_url));
+    }
     let snapshot = art_cache.prepare_snapshot(raw_snapshot, tx).await;
     log::debug!(
         "publishing {reason} snapshot to {} renderer(s): {}",
