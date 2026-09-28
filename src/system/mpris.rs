@@ -651,6 +651,17 @@ async fn publish_to_renderers(
             log::warn!("failed to send snapshot to renderer {id}: {e:#}");
         }
     }
+    if reason == "subscription" {
+        let mgr = app.renderer_manager.clone();
+        let ids2 = ids.to_vec();
+        let snap2 = snapshot.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            for id in &ids2 {
+                let _ = mgr.send_mpris(id, snap2.clone()).await;
+            }
+        });
+    }
 }
 
 fn is_mpris_name(name: &str) -> bool {
