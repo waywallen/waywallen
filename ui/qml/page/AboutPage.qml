@@ -8,6 +8,51 @@ MD.Page {
     implicitWidth: aboutContent.implicitWidth + 32
     bottomPadding: 24
 
+    // idle, checking, latest, available, failed
+    property string updateState: "idle"
+    property string latestVersion: ""
+    property string releaseUrl: ""
+
+    function versionParts(v) {
+        return v.replace(/^v/i, "").split(/[-+]/)[0].split(".").map(p => parseInt(p) || 0);
+    }
+
+    function isNewer(candidate, current) {
+        const a = versionParts(candidate);
+        const b = versionParts(current);
+        for (let i = 0; i < Math.max(a.length, b.length); i++) {
+            const d = (a[i] ?? 0) - (b[i] ?? 0);
+            if (d !== 0)
+                return d > 0;
+        }
+        return false;
+    }
+
+    function checkForUpdates() {
+        updateState = "checking";
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            let release = null;
+            if (xhr.status === 200) {
+                try {
+                    release = JSON.parse(xhr.responseText);
+                } catch (e) {}
+            }
+            if (!release?.tag_name) {
+                root.updateState = "failed";
+                return;
+            }
+            root.latestVersion = release.tag_name.replace(/^v/i, "");
+            root.releaseUrl = release.html_url ?? "https://github.com/waywallen/waywallen/releases/latest";
+            root.updateState = root.isNewer(root.latestVersion, Qt.application.version) ? "available" : "latest";
+        };
+        xhr.open("GET", "https://api.github.com/repos/waywallen/waywallen/releases/latest");
+        xhr.setRequestHeader("Accept", "application/vnd.github+json");
+        xhr.send();
+    }
+
     ColumnLayout {
         id: aboutContent
 
@@ -36,6 +81,34 @@ MD.Page {
             text: qsTr("Version %1").arg(Qt.application.version)
             typescale: MD.Token.typescale.body_medium
             color: MD.Token.color.on_surface_variant
+        }
+
+        MD.Button {
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.updateState !== "available"
+            enabled: root.updateState !== "checking"
+            text: {
+                switch (root.updateState) {
+                case "checking":
+                    return qsTr("Checking for updates…");
+                case "latest":
+                    return qsTr("You have the latest version");
+                case "failed":
+                    return qsTr("Could not check for updates");
+                default:
+                    return qsTr("Check for updates");
+                }
+            }
+            mdState.type: MD.Enum.BtFilledTonal
+            onClicked: root.checkForUpdates()
+        }
+
+        MD.Button {
+            Layout.alignment: Qt.AlignHCenter
+            visible: root.updateState === "available"
+            text: qsTr("Version %1 is available").arg(root.latestVersion)
+            mdState.type: MD.Enum.BtFilled
+            onClicked: MD.Util.openUrlExternally(root.releaseUrl)
         }
 
         Item {
