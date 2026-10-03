@@ -500,7 +500,7 @@ pub async fn apply_wallpaper(
         .await?;
     let deferred = receipt.activation == crate::wallframe::routing::AssignmentActivation::Deferred;
     log::debug!(
-        "wallpaper apply: id={} source={} targets={:?} sharing={} activation={}",
+        "wallpaper apply: id={} source={} targets={:?} requested_sharing={} activation={}",
         entry.item_id,
         request.source.as_str(),
         target_ids,
