@@ -1,0 +1,34 @@
+msgid ""
+msgstr "Project-Id-Version: org.waywallen.image 0.4.4\nLanguage: de\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+#: main.lua:15
+msgid "A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF."
+msgstr "Ein Ordner mit Bilddateien. Unterordner bis zu zwei Ebenen tief werden ebenfalls durchsucht. Unterstützte Formate: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF."
+
+#: plugin.toml
+msgid "Frame rate"
+msgstr "Bildrate"
+
+#: plugin.toml
+msgid "Image"
+msgstr "Bild"
+
+#: main.lua:14
+msgid "Image Folder"
+msgstr "Bilderordner"
+
+#: plugin.toml
+msgid "Render node"
+msgstr "Render-Knoten"
+
+#: plugin.toml
+msgid "Rendering"
+msgstr "Darstellung"
+
+#: plugin.toml
+msgid "Resolution"
+msgstr "Auflösung"
+
+#: image/wallpaper.lua:6
+msgid "Scheme color"
+msgstr "Farbschema"

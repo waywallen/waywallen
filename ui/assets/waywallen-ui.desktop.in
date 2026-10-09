@@ -2,13 +2,16 @@
 Type=Application
 Name=Waywallen
 GenericName=Wallpaper Manager for Linux
+GenericName[de]=Hintergrundbildverwaltung für Linux
 GenericName[ru]=Менеджер обоев для Linux
 Comment=@APP_SUMMARY@
+Comment[de]=Hintergrundbildverwaltung für Linux
 Comment[ru]=Менеджер обоев для Linux
 Exec=waywallen
 Icon=@APP_ID@
 Terminal=false
 Categories=Graphics;Qt;
 Keywords=wallpaper;pipewire;vulkan;
+Keywords[de]=Hintergrundbild;Hintergrund;Live-Hintergrund;Arbeitsfläche;wallpaper;pipewire;vulkan;
 Keywords[ru]=обои;живые обои;рабочий стол;wallpaper;pipewire;vulkan;
 StartupNotify=true

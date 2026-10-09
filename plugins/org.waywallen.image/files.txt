@@ -1,6 +1,7 @@
 ../../../../bin/waywallen-image-renderer
 image/source.lua
 image/wallpaper.lua
+i18n/de.po
 i18n/ru.po
 i18n/zh-CN.po
 main.lua

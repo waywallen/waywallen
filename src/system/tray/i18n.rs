@@ -14,6 +14,27 @@ use std::sync::OnceLock;
 /// One language's messages as `(msgid, msgstr)` pairs, sorted by `msgid`.
 type Catalog = &'static [(&'static str, &'static str)];
 
+const DE: Catalog = &[
+    ("1 hour", "1 Stunde"),
+    ("1 minute", "1 Minute"),
+    ("15 minutes", "15 Minuten"),
+    ("30 seconds", "30 Sekunden"),
+    ("5 minutes", "5 Minuten"),
+    ("Linux wallpaper daemon", "Hintergrundbild-Daemon für Linux"),
+    ("Mute", "Stummschalten"),
+    ("Next", "Nächstes Hintergrundbild"),
+    ("Off", "Aus"),
+    ("Open UI", "Oberfläche öffnen"),
+    ("Pause", "Anhalten"),
+    ("Previous", "Vorheriges Hintergrundbild"),
+    ("Quit", "Beenden"),
+    ("Rescan wallpapers", "Hintergrundbilder neu einlesen"),
+    ("Resume", "Fortsetzen"),
+    ("Rotate", "Automatisch wechseln"),
+    ("Shuffle", "Mischen"),
+    ("Unmute", "Stummschaltung aufheben"),
+];
+
 const RU: Catalog = &[
     ("1 hour", "1 час"),
     ("1 minute", "1 минута"),
@@ -37,6 +58,7 @@ const RU: Catalog = &[
 
 fn catalog_for(language: &str) -> Option<Catalog> {
     match language {
+        "de" => Some(DE),
         "ru" => Some(RU),
         _ => None,
     }
@@ -92,7 +114,7 @@ mod tests {
 
     #[test]
     fn catalogs_are_sorted_and_complete() {
-        for catalog in [RU] {
+        for catalog in [DE, RU] {
             assert!(
                 catalog.windows(2).all(|w| w[0].0 < w[1].0),
                 "catalog entries must be sorted by msgid for binary_search"
@@ -115,6 +137,7 @@ mod tests {
 
     #[test]
     fn catalog_is_selected_by_primary_subtag() {
+        assert!(catalog_for("de").is_some());
         assert!(catalog_for("ru").is_some());
         assert!(catalog_for("en").is_none());
     }
