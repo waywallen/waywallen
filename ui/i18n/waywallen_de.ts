@@ -10,6 +10,11 @@
     </message>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="58"/>
+        <source>Daemon version %1</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/page/AboutPage.qml" line="58"/>
         <source>Checking for updates…</source>
         <translation>Nach Aktualisierungen wird gesucht …</translation>
     </message>
