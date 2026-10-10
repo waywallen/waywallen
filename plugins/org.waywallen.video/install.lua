@@ -16,6 +16,7 @@ lito.install({
     { source = "main.lua", destination = plugin_path("main.lua") },
     { source = "video/source.lua", destination = plugin_path("video/source.lua") },
     { source = "video/wallpaper.lua", destination = plugin_path("video/wallpaper.lua") },
+    { source = "i18n/de.po", destination = plugin_path("i18n/de.po") },
     { source = "i18n/ru.po", destination = plugin_path("i18n/ru.po") },
     { source = "i18n/zh-CN.po", destination = plugin_path("i18n/zh-CN.po") },
   },

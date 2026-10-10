@@ -26,6 +26,7 @@ qt.translations({
   ts_files = {
     "i18n/waywallen_zh_CN.ts",
     "i18n/waywallen_ru.ts",
+    "i18n/waywallen_de.ts",
   },
   resource_prefix = "/i18n",
 })

@@ -1,0 +1,214 @@
+msgid ""
+msgstr "Project-Id-Version: org.waywallen.wallhaven 0.1.0\nLanguage: de\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+#: wallhaven/api.lua:109
+msgid "1080 x 1920"
+msgstr "1080 x 1920"
+
+#: wallhaven/api.lua:100
+msgid "1280 x 720"
+msgstr "1280 x 720"
+
+#: wallhaven/api.lua:111
+msgid "1440 x 2560"
+msgstr "1440 x 2560"
+
+#: wallhaven/api.lua:101
+msgid "1920 x 1080"
+msgstr "1920 x 1080"
+
+#: wallhaven/api.lua:104
+msgid "2560 x 1080"
+msgstr "2560 x 1080"
+
+#: wallhaven/api.lua:102
+msgid "2560 x 1440"
+msgstr "2560 x 1440"
+
+#: wallhaven/api.lua:105
+msgid "3440 x 1440"
+msgstr "3440 x 1440"
+
+#: wallhaven/api.lua:107
+msgid "3840 x 1080"
+msgstr "3840 x 1080"
+
+#: wallhaven/api.lua:103
+msgid "3840 x 2160"
+msgstr "3840 x 2160"
+
+#: wallhaven/api.lua:106
+msgid "5120 x 1440"
+msgstr "5120 x 1440"
+
+#: wallhaven/api.lua:110
+msgid "720 x 1280"
+msgstr "720 x 1280"
+
+#: wallhaven/api.lua:108
+msgid "7680 x 2160"
+msgstr "7680 x 2160"
+
+#: main.lua:36
+msgid "API key"
+msgstr "API-Schlüssel"
+
+#: wallhaven/api.lua:70
+msgid "Abstract"
+msgstr "Abstrakt"
+
+#: wallhaven/api.lua:71
+msgid "Animal"
+msgstr "Tiere"
+
+#: wallhaven/api.lua:72
+msgid "Anime"
+msgstr "Anime"
+
+#: wallhaven/api.lua:74
+msgid "CG"
+msgstr "Computergrafik"
+
+#: wallhaven/api.lua:73
+msgid "Cartoon"
+msgstr "Cartoon"
+
+#: main.lua:37
+msgid "Copy the API key from Wallhaven Account Settings."
+msgstr "Kopieren Sie den API-Schlüssel aus den Kontoeinstellungen von Wallhaven."
+
+#: wallhaven/api.lua:75
+msgid "Cyberpunk"
+msgstr "Cyberpunk"
+
+#: wallhaven/api.lua:76
+msgid "Fantasy"
+msgstr "Fantasy"
+
+#: wallhaven/api.lua:77
+msgid "Game"
+msgstr "Spiele"
+
+#: wallhaven/api.lua:78
+msgid "Girls"
+msgstr "Frauen"
+
+#: wallhaven/api.lua:79
+msgid "Guys"
+msgstr "Männer"
+
+#: wallhaven/api.lua:80
+msgid "Landscape"
+msgstr "Landschaft"
+
+#: main.lua:27
+msgid "Log in to Wallhaven"
+msgstr "Bei Wallhaven anmelden"
+
+#: wallhaven/api.lua:83
+msgid "MMD"
+msgstr "MMD"
+
+#: wallhaven/api.lua:81
+msgid "Medieval"
+msgstr "Mittelalter"
+
+#: wallhaven/api.lua:82
+msgid "Memes"
+msgstr "Memes"
+
+#: wallhaven/api.lua:84
+msgid "Music"
+msgstr "Musik"
+
+#: wallhaven/api.lua:58
+msgid "NSFW wallpapers require a Wallhaven API key."
+msgstr "NSFW-Hintergrundbilder erfordern einen API-Schlüssel von Wallhaven."
+
+#: wallhaven/api.lua:85
+msgid "Nature"
+msgstr "Natur"
+
+#: wallhaven/api.lua:62
+msgid "Not safe for work"
+msgstr "Nicht jugendfrei"
+
+#: main.lua:28
+msgid "Optional. Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password."
+msgstr "Optional. Verwenden Sie einen API-Schlüssel aus Ihren Wallhaven-Kontoeinstellungen. Geben Sie nicht Ihr Wallhaven-Passwort ein."
+
+#: wallhaven/api.lua:86
+msgid "Pixel art"
+msgstr "Pixel-Art"
+
+#: main.lua:61
+msgid "Popular"
+msgstr "Beliebt"
+
+#: wallhaven/api.lua:56
+msgid "Purity"
+msgstr "Inhaltsstufe"
+
+#: wallhaven/api.lua:61
+msgid "Questionable"
+msgstr "Fragwürdig"
+
+#: main.lua:60
+msgid "Recent"
+msgstr "Neueste"
+
+#: wallhaven/api.lua:87
+msgid "Relaxing"
+msgstr "Entspannend"
+
+#: main.lua:47
+msgid "Remove API key"
+msgstr "API-Schlüssel entfernen"
+
+#: wallhaven/api.lua:97
+msgid "Resolution"
+msgstr "Auflösung"
+
+#: wallhaven/api.lua:88
+msgid "Retro"
+msgstr "Retro"
+
+#: wallhaven/api.lua:60
+msgid "Safe for work"
+msgstr "Jugendfrei"
+
+#: wallhaven/api.lua:89
+msgid "Sci-Fi"
+msgstr "Science-Fiction"
+
+#: wallhaven/api.lua:90
+msgid "Sports"
+msgstr "Sport"
+
+#: main.lua:17
+msgid "Status"
+msgstr "Status"
+
+#: wallhaven/api.lua:91
+msgid "Technology"
+msgstr "Technik"
+
+#: wallhaven/api.lua:67
+msgid "Topics"
+msgstr "Themen"
+
+#: main.lua:59
+msgid "Trending"
+msgstr "Im Trend"
+
+#: wallhaven/api.lua:92
+msgid "Vehicle"
+msgstr "Fahrzeuge"
+
+#: main.lua:38
+msgid "Wallhaven API key"
+msgstr "Wallhaven-API-Schlüssel"
+
+#: main.lua:8
+msgid "Wallhaven account"
+msgstr "Wallhaven-Konto"
