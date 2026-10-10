@@ -3,6 +3,9 @@ name = "waywallen-ui"
 version.workspace = true
 standard = "c++23"
 
+[features.update-check]
+default = true
+
 [[bin]]
 name = "waywallen-ui"
 module = "waywallen.entry"

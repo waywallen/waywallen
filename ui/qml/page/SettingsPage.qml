@@ -853,6 +853,7 @@ MD.Page {
             SettingItem {
                 first: false
                 last: false
+                visible: W.UpdateChecker.supported
 
                 RowLayout {
                     Layout.fillWidth: true

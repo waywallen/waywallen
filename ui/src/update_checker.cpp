@@ -15,6 +15,12 @@ namespace waywallen
 namespace
 {
 
+#if LITO_FEAT_UPDATE_CHECK
+constexpr bool kSupported = true;
+#else
+constexpr bool kSupported = false;
+#endif
+
 constexpr auto kEnabledKey       = "update/checkEnabled";
 constexpr auto kLastCheckTimeKey = "update/lastCheckTime";
 constexpr auto kLatestVersionKey = "update/latestVersion";
@@ -58,7 +64,7 @@ UpdateChecker* UpdateChecker::create(QQmlEngine*, QJSEngine*) {
 UpdateChecker::UpdateChecker(QObject* parent)
     : QObject(parent), m_network(new QNetworkAccessManager(this)) {
     QSettings settings;
-    m_enabled        = settings.value(kEnabledKey, true).toBool();
+    m_enabled        = kSupported && settings.value(kEnabledKey, true).toBool();
     m_latest_version = settings.value(kLatestVersionKey).toString();
     m_release_url    = release_url(settings.value(kReleaseUrlKey).toString());
     if (const auto secs = settings.value(kLastCheckTimeKey, 0).toLongLong(); secs > 0) {
@@ -70,14 +76,17 @@ UpdateChecker::UpdateChecker(QObject* parent)
     schedule();
 }
 
+bool UpdateChecker::supported() const { return kSupported; }
+
 bool UpdateChecker::updateAvailable() const {
+    if (! kSupported) return false;
     const auto latest = parse_version(m_latest_version);
     if (latest.isNull()) return false;
     return latest > parse_version(QCoreApplication::applicationVersion());
 }
 
 void UpdateChecker::setEnabled(bool enabled) {
-    if (m_enabled == enabled) return;
+    if (! kSupported || m_enabled == enabled) return;
     m_enabled = enabled;
     QSettings().setValue(kEnabledKey, enabled);
     schedule();
@@ -107,7 +116,7 @@ void UpdateChecker::schedule() {
 }
 
 void UpdateChecker::check() {
-    if (checking()) return;
+    if (! kSupported || checking()) return;
     m_timer.stop();
 
     QNetworkRequest request { QUrl(QString::fromLatin1(kLatestReleaseApi)) };

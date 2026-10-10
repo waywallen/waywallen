@@ -110,6 +110,11 @@ lito install --prefix package-root/usr --profile release
 Packages should consume the staged install tree. Lito is the public project build interface; CMake
 is only used internally by source dependency providers.
 
+The UI looks for a new release on GitHub and links to its download page. This is the `update-check`
+feature of `waywallen-ui`, on by default. Where a package manager delivers the updates, pass
+`--no-default-features` to both commands: the UI then sends no such request and hides the button on
+the about page and the switch in the settings.
+
 The protocol XMLs (`protocol/*.xml`) and `proto/control.proto` / `proto/filter.proto` are build-time
 codegen inputs and are not shipped in the package. Read them from the source tree if you need to
 implement a third-party client.
