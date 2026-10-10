@@ -30,7 +30,7 @@ MD.Page {
             Layout.alignment: Qt.AlignHCenter
             Layout.preferredWidth: 96
             Layout.preferredHeight: 96
-            source: "qrc:/waywallen/ui/assets/waywallen-ui.svg"
+            source: "../../assets/waywallen-ui.svg"
             fillMode: Image.PreserveAspectFit
             visible: status === Image.Ready
         }

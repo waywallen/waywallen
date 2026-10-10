@@ -256,7 +256,7 @@ MD.ApplicationWindow {
                             height: 32
                             x: MD.Util.lerp((m_rail.collapsedWidth - width) / 2, 32, m_rail.expansionProgress)
                             y: m_menu_btn.y + m_menu_btn.height + 16
-                            source: "qrc:/waywallen/ui/assets/waywallen-ui.svg"
+                            source: "../assets/waywallen-ui.svg"
                             fillMode: Image.PreserveAspectFit
                             sourceSize.width: 64
                             sourceSize.height: 64
