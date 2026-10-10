@@ -565,6 +565,17 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
             });
     }
 
+    // Library watcher. Rescans when a library directory changes on disk.
+    {
+        let watch_state = state.clone();
+        let shutdown_for_watch = state.shutdown_subscribe();
+        state
+            .tasks
+            .spawn_async(tasks::TaskKind::Service, "catalog/watcher", async move {
+                application::run_library_watcher(watch_state, shutdown_for_watch).await
+            });
+    }
+
     // Bind the WS control plane (port 0 = OS picks an available port).
     let bind_addr = format!("127.0.0.1:{}", cli.ws_port);
     let (local_addr, ws_fut) = api::websocket::bind(state.clone(), &bind_addr).await?;

@@ -11,6 +11,7 @@ use crate::DaemonContext;
 mod libraries;
 mod query;
 mod remote;
+mod watch;
 
 pub use libraries::add_library;
 pub use query::ordered_entry_ids;
@@ -18,6 +19,7 @@ pub use remote::{
     download_remote, publish_remote_download_progress, remote_capability,
     remove_wallpaper_entry_files_and_db, resolve_remote_source_id,
 };
+pub use watch::run_library_watcher;
 
 pub async fn rescan(app: &Arc<DaemonContext>) -> Result<usize> {
     refresh_sources(app).await
