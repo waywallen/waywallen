@@ -1,3 +1,4 @@
+use super::composition::IsolatedRenderer;
 use super::*;
 
 pub(super) const AUTO_REPLAY_START_DELAY: Duration = Duration::from_secs(2);
@@ -12,7 +13,7 @@ struct RendererStartEffect {
 }
 
 enum AdvanceStart {
-    Start(RendererStartEffect),
+    Start(RendererStartEffect, Vec<IsolatedRenderer>),
     Schedule(PendingRendererStart),
     Cancel,
     Wait,
@@ -649,25 +650,53 @@ impl Router {
                     AdvanceStart::Cancel
                 } else {
                     slot.pending_start = None;
-                    AdvanceStart::Start(RendererStartEffect {
+                    let effect = RendererStartEffect {
                         renderer_id: renderer_id.to_owned(),
                         process_generation,
                         spec_revision: slot.spec_revision,
                         start_token: pending.token,
                         cause: pending.cause,
                         spawn_request: slot.spawn_request.clone(),
-                    })
+                    };
+                    let isolated = self.isolate_renderer_targets_locked(&mut inner, renderer_id);
+                    AdvanceStart::Start(effect, isolated)
                 }
             }
         };
         match action {
-            AdvanceStart::Start(effect) => {
+            AdvanceStart::Start(effect, isolated) => {
                 self.deadlines
                     .cancel(deadline::DeadlineKey::renderer_start(renderer_id));
+                for target in &isolated {
+                    for display_id in &target.display_ids {
+                        self.sync_display(*display_id).await;
+                    }
+                    if let Some(snapshot) = self.snapshot_renderer(&target.renderer_id).await {
+                        self.emit(RouterEvent::RendererUpsert(snapshot));
+                    }
+                }
+                if !isolated.is_empty() {
+                    self.emit(RouterEvent::DisplaysReplace(self.snapshot_displays().await));
+                }
                 if let Some(snapshot) = self.snapshot_renderer(renderer_id).await {
                     self.emit(RouterEvent::RendererUpsert(snapshot));
                 }
-                self.execute_renderer_start(effect).await
+                let mut error = self.execute_renderer_start(effect).await.err();
+                // Each isolated slot now owns exactly one target. Use the
+                // regular start path so stopped displays and lifecycle races
+                // receive the same checks as the original slot. The original
+                // slot has already waited out any auto-resume deadline.
+                for target in isolated {
+                    if let Err(failure) = Box::pin(self.request_renderer_start(
+                        &target.renderer_id,
+                        RendererStartCause::DisplayReconnect,
+                    ))
+                    .await
+                    {
+                        error.get_or_insert(failure);
+                    }
+                }
+                error.map_or(Ok(()), Err)
             }
             AdvanceStart::Schedule(pending) => {
                 self.deadlines.schedule(

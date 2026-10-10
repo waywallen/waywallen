@@ -337,6 +337,25 @@ impl RoutingTable {
         displays
     }
 
+    /// Change one link's owner while preserving its identity and projection.
+    pub fn retarget_link(&mut self, link_id: LinkId, renderer_id: &str) -> bool {
+        let Some(link) = self.links.get_mut(&link_id) else {
+            return false;
+        };
+        if link.renderer_id == renderer_id {
+            return false;
+        }
+        if let Some(ids) = self.by_renderer.get_mut(&link.renderer_id) {
+            ids.retain(|id| *id != link_id);
+        }
+        link.renderer_id = renderer_id.to_string();
+        self.by_renderer
+            .entry(renderer_id.to_string())
+            .or_default()
+            .push(link_id);
+        true
+    }
+
     pub fn remove_link(&mut self, link_id: LinkId) -> Option<Link> {
         let link = self.links.remove(&link_id)?;
         if let Some(v) = self.by_display.get_mut(&link.display_id) {
@@ -409,6 +428,33 @@ mod tests {
         assert_eq!(t.links_for_renderer("r1").len(), 1);
         // l2 still around
         assert_eq!(t.links_for_display(2)[0].id, l2);
+    }
+
+    #[test]
+    fn retarget_one_link_preserves_metadata_and_both_indexes() {
+        let mut table = RoutingTable::new();
+        let first = table.add_link("shared".into(), 1);
+        let second = table.add_link_with_enabled("shared".into(), 2, false);
+        let src = LinkSrcRect {
+            x: 10.0,
+            y: 20.0,
+            w: 100.0,
+            h: 200.0,
+        };
+        table.update_link_geometry(second, Some(src), None, Some(3), Some([0.2; 4]), Some(7));
+        assert!(table.retarget_link(second, "independent"));
+        let link = table.get_link(second).unwrap();
+        assert_eq!(link.renderer_id, "independent");
+        assert!(!link.enabled);
+        assert_eq!(link.src_rect, src);
+        assert_eq!(link.transform, 3);
+        assert_eq!(link.clear_rgba, [0.2; 4]);
+        assert_eq!(link.z_order, 7);
+        assert_eq!(table.links_for_renderer("shared").len(), 1);
+        assert_eq!(table.links_for_renderer("shared")[0].id, first);
+        assert_eq!(table.links_for_renderer("independent")[0].id, second);
+        assert_eq!(table.links_for_display(2)[0].id, second);
+        assert!(!table.retarget_link(second, "independent"));
     }
 
     #[test]

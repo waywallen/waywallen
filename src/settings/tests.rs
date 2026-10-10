@@ -1062,6 +1062,7 @@ fn registry_with_video() -> RendererRegistry {
         type_labels: Default::default(),
         priority: 100,
         activity: crate::plugin::renderer_registry::RendererActivityMode::Continuous,
+        sharing: Default::default(),
         spawn_version: Some(1),
         extras: Vec::new(),
         settings: s,

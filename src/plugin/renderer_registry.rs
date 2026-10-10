@@ -178,6 +178,16 @@ pub enum RendererActivityMode {
     OnDemand,
 }
 
+/// Whether independent presentation targets may share one renderer process.
+/// Pointer-interactive renderers need separate input state for each target.
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RendererSharing {
+    #[default]
+    Shared,
+    PerTarget,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct RendererDef {
     /// Component name. Empty in a manifest map value — filled from the
@@ -206,6 +216,10 @@ pub struct RendererDef {
     /// manifests default to on-demand for backward compatibility.
     #[serde(default)]
     pub activity: RendererActivityMode,
+    /// Per-target renderers override the global duplicate-renderer preference.
+    /// A continuous Canvas is one target, independent displays are separate.
+    #[serde(default)]
+    pub sharing: RendererSharing,
     /// Renderer spawn contract version declared by the plugin.
     /// `None` means the plugin accepts the daemon compile-time version.
     #[serde(default)]
@@ -1049,6 +1063,7 @@ types = ["image"]
             type_labels: Default::default(),
             priority: 100,
             activity: RendererActivityMode::OnDemand,
+            sharing: RendererSharing::Shared,
             spawn_version: None,
             extras: Vec::new(),
             settings: Default::default(),
@@ -1073,6 +1088,31 @@ types = ["image"]
             group: None,
             order: None,
         }
+    }
+
+    #[test]
+    fn manifest_declares_target_isolation_and_defaults_to_shared() {
+        let source = r#"
+            [plugin]
+            id = "test.sharing"
+            name = "Sharing"
+
+            [renderers.interactive]
+            bin = "web"
+            types = ["web"]
+            sharing = "per_target"
+
+            [renderers.video]
+            bin = "video"
+            types = ["video"]
+        "#;
+        let manifest: PluginManifest = toml::from_str(source).unwrap();
+        assert_eq!(
+            manifest.renderers["interactive"].sharing,
+            RendererSharing::PerTarget
+        );
+        assert_eq!(manifest.renderers["video"].sharing, RendererSharing::Shared);
+        assert!(toml::from_str::<PluginManifest>(&source.replace("per_target", "typo")).is_err());
     }
 
     #[test]
