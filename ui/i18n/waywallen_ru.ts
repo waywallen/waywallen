@@ -442,6 +442,11 @@
         <source>Rotation</source>
         <translation>Поворот</translation>
     </message>
+    <message>
+        <location filename="../qml/page/display/DisplayLayoutControls.qml" line="207"/>
+        <source>Flip</source>
+        <translation>Отражение</translation>
+    </message>
 </context>
 <context>
     <name>DisplaysPage</name>
@@ -950,6 +955,11 @@
         <location filename="../qml/page/wallpaper/PlaylistListSheet.qml" line="183"/>
         <source>Delete playlist</source>
         <translation>Удалить плейлист</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/wallpaper/PlaylistListSheet.qml" line="22"/>
+        <source>Hidden wallpapers</source>
+        <translation>Скрытые обои</translation>
     </message>
 </context>
 <context>
@@ -2390,6 +2400,26 @@ Unsaved frame state may be lost.</source>
         <source>Fixed</source>
         <translation>Фиксированное</translation>
     </message>
+    <message>
+        <location filename="../qml/page/wallpaper/TweakSheet.qml" line="141"/>
+        <source>Image decode cache</source>
+        <translation>Кэш декодированных изображений</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/wallpaper/TweakSheet.qml" line="153"/>
+        <source>%1 MiB</source>
+        <translation>%1 МиБ</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/wallpaper/TweakSheet.qml" line="154"/>
+        <source>512 MiB</source>
+        <translation>512 МиБ</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/wallpaper/TweakSheet.qml" line="160"/>
+        <source>Lower values use less memory but may increase CPU usage when playing animated thumbnails. Set to 0 to disable caching.</source>
+        <translation>Меньшие значения экономят память, но могут повысить нагрузку на процессор при воспроизведении анимированных превью. 0 отключает кэш.</translation>
+    </message>
 </context>
 <context>
     <name>waywallen::model::UserPropertyListModel</name>
@@ -2641,6 +2671,11 @@ Unsaved frame state may be lost.</source>
         <source>No display connected</source>
         <translation>Нет подключённых мониторов</translation>
     </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="799"/>
+        <source>Flip</source>
+        <translation>Отражение</translation>
+    </message>
 </context>
 <context>
     <name>WallpaperFilter</name>
@@ -2731,6 +2766,26 @@ Unsaved frame state may be lost.</source>
         <location filename="../qml/dialog/WallpaperFilterDialog.qml" line="241"/>
         <source>OR</source>
         <translation>ИЛИ</translation>
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperFilterDialog.qml" line="182"/>
+        <source>Visibility</source>
+        <translation>Видимость</translation>
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperFilterDialog.qml" line="190"/>
+        <source>Not hidden</source>
+        <translation>Не скрытые</translation>
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperFilterDialog.qml" line="195"/>
+        <source>Hidden only</source>
+        <translation>Только скрытые</translation>
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperFilterDialog.qml" line="200"/>
+        <source>All</source>
+        <translation>Все</translation>
     </message>
 </context>
 <context>
@@ -2961,6 +3016,31 @@ Unsaved frame state may be lost.</source>
         <source>Auto detect libraries</source>
         <translation>Найти библиотеки автоматически</translation>
     </message>
+    <message>
+        <location filename="../qml/page/WallpaperPage.qml" line="54"/>
+        <source>Hidden %1</source>
+        <translation>Скрыто: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperPage.qml" line="54"/>
+        <source>Unhidden %1</source>
+        <translation>Снова показано: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperPage.qml" line="58"/>
+        <source>Hide failed</source>
+        <translation>Не удалось скрыть</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperPage.qml" line="287"/>
+        <source>Unhide %1</source>
+        <translation>Показать: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperPage.qml" line="287"/>
+        <source>Hide %1</source>
+        <translation>Скрыть: %1</translation>
+    </message>
 </context>
 <context>
     <name>Window</name>
@@ -3144,6 +3224,72 @@ Unsaved frame state may be lost.</source>
         <location filename="../qml/component/SidebarNowPlaying.qml" line="33"/>
         <source>Current wallpapers</source>
         <translation>Текущие обои</translation>
+    </message>
+</context>
+<context>
+    <name>FlipButtons</name>
+    <message>
+        <location filename="../qml/component/FlipButtons.qml" line="14"/>
+        <source>None</source>
+        <translation>Нет</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/FlipButtons.qml" line="19"/>
+        <source>Horizontal</source>
+        <translation>По горизонтали</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/FlipButtons.qml" line="24"/>
+        <source>Vertical</source>
+        <translation>По вертикали</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/FlipButtons.qml" line="29"/>
+        <source>Both</source>
+        <translation>Обе оси</translation>
+    </message>
+</context>
+<context>
+    <name>HiddenWallpapersPage</name>
+    <message>
+        <location filename="../qml/page/HiddenWallpapersPage.qml" line="12"/>
+        <source>Hidden wallpapers</source>
+        <translation>Скрытые обои</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/HiddenWallpapersPage.qml" line="17"/>
+        <source>Refresh</source>
+        <translation>Обновить</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/HiddenWallpapersPage.qml" line="36"/>
+        <source>Unhidden</source>
+        <translation>Снова показано</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/HiddenWallpapersPage.qml" line="42"/>
+        <source>Unhide failed</source>
+        <translation>Не удалось показать</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/HiddenWallpapersPage.qml" line="85"/>
+        <source>Untitled</source>
+        <translation>Без названия</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/HiddenWallpapersPage.qml" line="111"/>
+        <source>Unhide</source>
+        <translation>Показать</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/HiddenWallpapersPage.qml" line="125"/>
+        <source>No hidden wallpapers</source>
+        <translation>Скрытых обоев нет</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/HiddenWallpapersPage.qml" line="136"/>
+        <source>Failed to load hidden wallpapers</source>
+        <translation>Не удалось загрузить скрытые обои</translation>
     </message>
 </context>
 </TS>
