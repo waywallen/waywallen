@@ -49,6 +49,17 @@ MD.Page {
             color: MD.Token.color.on_surface_variant
         }
 
+        MD.Text {
+            readonly property string daemonVersion: W.DaemonDBusClient.daemonVersion
+
+            Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: -12
+            visible: daemonVersion.length > 0 && daemonVersion !== Qt.application.version
+            text: qsTr("Daemon version %1").arg(daemonVersion)
+            typescale: MD.Token.typescale.body_medium
+            color: MD.Token.color.on_surface_variant
+        }
+
         MD.Button {
             Layout.alignment: Qt.AlignHCenter
             visible: !W.UpdateChecker.updateAvailable
