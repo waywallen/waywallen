@@ -16,11 +16,15 @@ namespace waywallen
 /// version it found are kept in QSettings, so a restart neither repeats the
 /// request within the check interval nor loses a known update. Network
 /// failures are silent and retried later.
+///
+/// A build without the `update-check` feature keeps the type, but it is not
+/// `supported`: it stays disabled, sends no request and reports no update.
 export class UpdateChecker : public QObject {
     Q_OBJECT
     QML_ELEMENT
     QML_SINGLETON
 
+    Q_PROPERTY(bool supported READ supported CONSTANT FINAL)
     Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY enabledChanged FINAL)
     Q_PROPERTY(bool checking READ checking NOTIFY checkingChanged FINAL)
     Q_PROPERTY(bool updateAvailable READ updateAvailable NOTIFY latestVersionChanged FINAL)
@@ -34,6 +38,7 @@ public:
     static UpdateChecker* create(QQmlEngine*, QJSEngine*);
     static UpdateChecker* instance();
 
+    bool             supported() const;
     bool             enabled() const { return m_enabled; }
     bool             checking() const { return m_reply != nullptr; }
     bool             updateAvailable() const;

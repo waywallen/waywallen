@@ -51,7 +51,7 @@ MD.Page {
 
         MD.Button {
             Layout.alignment: Qt.AlignHCenter
-            visible: !W.UpdateChecker.updateAvailable
+            visible: W.UpdateChecker.supported && !W.UpdateChecker.updateAvailable
             enabled: !W.UpdateChecker.checking
             text: {
                 if (W.UpdateChecker.checking)
