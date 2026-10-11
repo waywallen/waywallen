@@ -1801,7 +1801,7 @@ Related display: #%1</source>
         <location filename="../qml/page/SettingsPage.qml" line="473"/>
         <location filename="../src/ui_language.cpp" line="74"/>
         <source>System</source>
-        <translation>Системная</translation>
+        <translation>Как в системе</translation>
     </message>
     <message>
         <location filename="../qml/page/SettingsPage.qml" line="460"/>
@@ -1916,7 +1916,7 @@ Related display: #%1</source>
     <message>
         <location filename="../qml/page/SettingsPage.qml" line="532"/>
         <source>Auto replay</source>
-        <translation>Автоповтор</translation>
+        <translation>Автопауза</translation>
     </message>
     <message>
         <location filename="../qml/page/SettingsPage.qml" line="584"/>
