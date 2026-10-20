@@ -65,5 +65,6 @@ pub(super) fn entry_to_pb(
         supports_item_unsubscribe,
         web_url: e.web_url.clone().unwrap_or_default(),
         hidden: e.hidden,
+        update_available: e.update_available,
     }
 }

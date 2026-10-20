@@ -554,6 +554,7 @@ message WallpaperEntry {
   // When true, the library browser hides this item unless the
   // WallpaperListRequest hidden_filter includes it.
   bool hidden = 21;
+  bool update_available = 22;
 }
 
 message WallpaperLibraryVisibility {

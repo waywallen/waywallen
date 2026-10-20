@@ -2525,6 +2525,10 @@ Unsaved frame state may be lost.</source>
         <source>Untitled</source>
         <translation>未命名</translation>
     </message>
+    <message>
+        <source>Update available</source>
+        <translation>有可用更新</translation>
+    </message>
 </context>
 <context>
     <name>WallpaperDetailPanel</name>
@@ -2749,6 +2753,14 @@ Unsaved frame state may be lost.</source>
         <source>No display connected</source>
         <translation>没有已连接的显示器</translation>
     </message>
+    <message>
+        <source>Update</source>
+        <translation>更新</translation>
+    </message>
+    <message>
+        <source>Update available</source>
+        <translation>有可用更新</translation>
+    </message>
 </context>
 <context>
     <name>WallpaperFilter</name>
@@ -2950,6 +2962,14 @@ Unsaved frame state may be lost.</source>
         <location filename="../qml/page/WallpaperInfoPage.qml" line="216"/>
         <source>Overrides</source>
         <translation>覆盖设置</translation>
+    </message>
+    <message>
+        <source>Update</source>
+        <translation>更新</translation>
+    </message>
+    <message>
+        <source>Update available</source>
+        <translation>有可用更新</translation>
     </message>
 </context>
 <context>

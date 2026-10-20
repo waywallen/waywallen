@@ -152,6 +152,16 @@ MD.Page {
             }
 
             InfoLabel {
+                visible: root.wallpaper?.updateAvailable ?? false
+                label: qsTr("Update")
+            }
+            InfoValue {
+                visible: root.wallpaper?.updateAvailable ?? false
+                text: qsTr("Update available")
+                color: MD.Token.color.tertiary
+            }
+
+            InfoLabel {
                 visible: Number(root.wallpaper?.width ?? 0) > 0
                 label: qsTr("Width")
             }

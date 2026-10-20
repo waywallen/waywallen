@@ -15,6 +15,7 @@ pub struct Model {
     pub description: Option<String>,
     pub external_id: Option<String>,
     pub web_url: Option<String>,
+    pub update_available: bool,
     pub size: Option<i64>,
     pub width: Option<i32>,
     pub height: Option<i32>,

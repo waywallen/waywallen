@@ -1784,6 +1784,7 @@ impl LuaPluginRuntime {
                 tags: tbl.get::<Vec<String>>("tags").unwrap_or_default(),
                 external_id: tbl.get::<String>("external_id").ok(),
                 web_url: tbl.get::<String>("web_url").ok(),
+                update_available: tbl.get("update_available").unwrap_or(false),
                 // Optional plugin-supplied media metadata.
                 // Plugins that know it can skip later probing.
                 size: tbl.get::<i64>("size").ok(),

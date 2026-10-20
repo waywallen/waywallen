@@ -556,6 +556,19 @@ Item {
                     }
 
                     MD.Text {
+                        visible: root.wp?.updateAvailable ?? false
+                        text: qsTr("Update")
+                        typescale: MD.Token.typescale.label_medium
+                        color: MD.Token.color.on_surface_variant
+                    }
+                    MD.Text {
+                        visible: root.wp?.updateAvailable ?? false
+                        text: qsTr("Update available")
+                        typescale: MD.Token.typescale.body_medium
+                        color: MD.Token.color.tertiary
+                    }
+
+                    MD.Text {
                         visible: m_meta.hasFormat
                         text: qsTr("Format")
                         typescale: MD.Token.typescale.label_medium

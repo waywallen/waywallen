@@ -66,6 +66,7 @@ mod tests {
             tags: Vec::new(),
             external_id: None,
             web_url: None,
+            update_available: false,
             size: None,
             width: None,
             height: None,

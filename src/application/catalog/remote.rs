@@ -193,6 +193,7 @@ async fn upsert_remote_download(
             description: (!info.description.trim().is_empty()).then_some(info.description.as_str()),
             external_id: (!info.external_id.trim().is_empty()).then_some(info.external_id.as_str()),
             web_url: (!info.web_url.trim().is_empty()).then_some(info.web_url.as_str()),
+            update_available: false,
             size: info.size,
             width: info.width.and_then(|value| i32::try_from(value).ok()),
             height: info.height.and_then(|value| i32::try_from(value).ok()),

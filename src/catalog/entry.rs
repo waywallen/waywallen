@@ -30,6 +30,8 @@ pub struct WallpaperEntry {
     /// Source-provided page for this wallpaper on its remote service.
     #[serde(default)]
     pub web_url: Option<String>,
+    #[serde(default)]
+    pub update_available: bool,
     /// File size in bytes.
     #[serde(default)]
     pub size: Option<i64>,

@@ -9,6 +9,7 @@ mod m20260825_000001_playlist_synchronized_selection;
 mod m20260929_000001_item_hidden;
 mod m20261015_000001_smart_playlists;
 mod m20261015_000002_library_name;
+mod m20261019_000001_item_update_available;
 
 pub struct Migrator;
 
@@ -25,6 +26,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20260929_000001_item_hidden::Migration),
             Box::new(m20261015_000001_smart_playlists::Migration),
             Box::new(m20261015_000002_library_name::Migration),
+            Box::new(m20261019_000001_item_update_available::Migration),
         ]
     }
 }
@@ -37,7 +39,7 @@ mod tests {
     #[tokio::test]
     async fn library_names_migrate_existing_rows() {
         let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
-        Migrator::down(&db, Some(1)).await.unwrap();
+        Migrator::down(&db, Some(2)).await.unwrap();
         db.execute_unprepared("INSERT INTO source_plugin (id, name) VALUES (1, 'image')")
             .await
             .unwrap();
