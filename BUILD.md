@@ -4,7 +4,7 @@
 
 | Dependency | Version | Notes |
 |------------|---------|-------|
-| [Lito](https://github.com/litocpp/lito) | ≥ 0.8.1 | Project build entry; 0.8.0 fails to resolve this workspace, and 0.8.1 is the release that stages the generated QML modules |
+| [Lito](https://github.com/litocpp/lito) | ≥ 0.8.5 | Project build entry; 0.8.1 stages the generated QML modules, 0.8.5 is needed for `lito install` to install them |
 | Rust | stable | |
 | Clang | 22+ | [LLVM-22.1.8-Linux-X64](https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/LLVM-22.1.8-Linux-X64.tar.xz) |
 | CMake | 3.28+ | Host tool used by Lito source dependency providers |
@@ -109,6 +109,12 @@ Build release artifacts and stage them into the package root with Lito:
 lito build --profile release
 lito install --prefix package-root/usr --profile release
 ```
+
+The install tree also carries the `waywallen.ui` QML module in `share/qml/waywallen/ui`
+(`qmldir`, the QML files, `assets/` and `module.qmltypes`). `waywallen-ui` itself does not use
+it, it loads the copy compiled into the binary. It is there for other programs that want to reuse
+the UI components; such a program adds `share/qml` to its QML import path and has to provide the
+C++ types listed in `module.qmltypes` itself.
 
 Packages should consume the staged install tree. Lito is the public project build interface; CMake
 is only used internally by source dependency providers.

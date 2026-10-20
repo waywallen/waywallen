@@ -14,6 +14,13 @@ lito.install({
       destination = "bin",
     },
   },
+  generated_files = {
+    {
+      target = { kind = "bin", name = "waywallen-ui" },
+      source = "lito-qml/waywallen/ui",
+      destination = "share/qml/waywallen/ui",
+    },
+  },
   files = {
     {
       source = "assets/waywallen-ui.svg",

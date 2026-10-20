@@ -37,6 +37,7 @@ qt.qml_module({
   uri = "waywallen.ui",
   version = "0.3",
   resource_prefix = "/",
+  prefer_resources = false,
   qml_files = {
     "qml/Window.qml",
     "qml/Global.qml",
