@@ -21,6 +21,7 @@ auto HealthQuery::state() const -> const QString& { return m_state; }
 auto HealthQuery::osName() const -> const QString& { return m_os_name; }
 
 void HealthQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -28,10 +29,10 @@ void HealthQuery::reload() {
     req.setHealth(proto::HealthRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             self->m_service = rsp.health().service();

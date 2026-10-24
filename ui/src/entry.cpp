@@ -9,21 +9,12 @@ Q_IMPORT_QML_PLUGIN(QExtraPlugin)
 module waywallen.entry;
 import qextra;
 
-import ncrequest;
 import rstd.cppstd;
 import waywallen;
 
 namespace waywallen
 {
 int run(int argc, char** argv) {
-    auto request_init = ncrequest::global_init();
-    if (request_init.is_err()) {
-        auto error = rstd::cppstd::to_string(
-            rstd::format("ncrequest initialization failed: {}", request_init.unwrap_err()));
-        qCritical("%s", error.c_str());
-        return 1;
-    }
-
     QGuiApplication gui_app(argc, argv);
     gui_app.setDesktopFileName(APP_ID);
     gui_app.setOrganizationName("waywallen");

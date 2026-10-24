@@ -130,9 +130,8 @@ workspace = true
 [dependencies.waywallen-plugin-i18n]
 path = "../tools/i18n/po"
 
-[dependencies.ncrequest]
+[dependencies.waywallen-backend-connection]
 workspace = true
-features = ["qt"]
 
 [dependencies.qextra]
 workspace = true

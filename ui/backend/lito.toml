@@ -1,0 +1,36 @@
+[package]
+name = "waywallen-backend-connection"
+version.workspace = true
+standard = "c++23"
+
+[lib]
+name = "waywallen-backend-connection"
+module = "waywallen.backend.connection"
+archive = "waywallen_backend_connection"
+sources = ["src/connection.cppm", "src/connection.cpp", "src/pending.cppm"]
+
+[usage]
+threads = true
+
+[dependencies.ncrequest]
+workspace = true
+features = ["qt"]
+
+[dependencies.rstd-std]
+workspace = true
+pub = true
+
+[dependencies.rstd-cppstd]
+workspace = true
+
+[external-dependencies.cmake.qt6]
+workspace = true
+targets = [{ name = "Qt6::Core" }, { name = "Qt6::Network" }, { name = "Qt6::WebSockets" }]
+
+[[test]]
+name = "backend-connection"
+sources = ["tests/connection.cpp"]
+
+[[test]]
+name = "backend-pending"
+sources = ["tests/pending.cpp"]

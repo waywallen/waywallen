@@ -40,16 +40,16 @@ PlaylistListQuery::PlaylistListQuery(QObject* parent): Query(parent) {}
 auto PlaylistListQuery::playlists() const -> const QVariantList& { return m_playlists; }
 
 void PlaylistListQuery::reload() {
-    const auto generation = ++m_generation;
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
     auto req     = proto::Request {};
     req.setPlaylistList(proto::PlaylistListRequest {});
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req), generation]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self || self->m_generation != generation) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
         self->inspect_set(result, [self](const proto::Response& rsp) {
             QVariantList out;
             for (const auto& p : rsp.playlistList().playlists()) {
@@ -71,8 +71,7 @@ auto PlaylistDetailQuery::playlistId() const -> qint64 { return m_playlist_id; }
 
 void PlaylistDetailQuery::setPlaylistId(qint64 id) {
     if (m_playlist_id == id) return;
-    ++m_generation;
-    cancel();
+    invalidateRequests();
     m_playlist_id = id;
     Q_EMIT playlistIdChanged();
 }
@@ -89,7 +88,7 @@ void PlaylistDetailQuery::componentComplete() {
 }
 
 void PlaylistDetailQuery::reload() {
-    const auto generation = ++m_generation;
+    const auto revision = beginRequest();
     if (m_playlist_id <= 0) {
         return;
     }
@@ -102,10 +101,10 @@ void PlaylistDetailQuery::reload() {
     req.setPlaylistGet(std::move(detail));
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req), generation]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self || self->m_generation != generation) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
         self->inspect_set(result, [self](const proto::Response& rsp) {
             const auto&                   detail   = rsp.playlistGet();
             const auto&                   summary  = detail.playlist();

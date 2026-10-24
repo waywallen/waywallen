@@ -1,6 +1,6 @@
 module;
 #include "QExtra/macro_qt.hpp"
-#include <algorithm>
+#include "kstore/subscription.hpp"
 
 #ifdef Q_MOC_RUN
 #    include "waywallen/model/store_item.moc"
@@ -21,11 +21,9 @@ public:
     using store_type      = Store;
     using item_type       = typename store_type::item_type;
     using store_item_type = typename store_type::store_item_type;
-    using handle_type     = typename store_type::handle_type;
     using key_type        = typename store_type::key_type;
 
     StoreItem(Store store, QObject* parent): QObject(parent), m_item(store) {}
-    ~StoreItem() { unreg(); }
 
     auto item() const -> item_type {
         if (auto it = m_item.item()) {
@@ -34,32 +32,27 @@ public:
         return {};
     }
     void setItem(const item_type& v) {
-        auto key = kstore::ItemTrait<item_type>::key(v);
-        if (key != m_item.key()) {
-            unreg();
-            m_item = m_item.store().store_insert(v).first;
-            m_item.store().store_changed_callback(std::span { &key, 1 },
-                                                  m_handle ? *m_handle : handle_type {});
+        auto       key       = kstore::ItemTrait<item_type>::key(v);
+        const bool different = key != m_item.key();
+        auto       store     = m_item.store();
+        auto [item, changed] = store.store_insert(v);
+        if (different) {
+            m_subscription.reset();
+            m_item         = std::move(item);
+            m_subscription = store.subscribe(key, [this](std::span<const key_type>) {
+                static_cast<CRTP*>(this)->itemChanged();
+            });
+        }
+        if (changed) {
+            store.store_changed_callback(std::span { &key, 1 });
+        } else if (different) {
             static_cast<CRTP*>(this)->itemChanged();
-
-            m_handle = rstd::Some(m_item.store().store_reg_notify(
-                [this, key = std::move(key)](std::span<const key_type> changed) {
-                    if (std::ranges::find(changed, key) != changed.end()) {
-                        static_cast<CRTP*>(this)->itemChanged();
-                    }
-                }));
         }
     }
 
 private:
-    void unreg() {
-        if (m_handle) {
-            m_item.store().store_unreg_notify(*m_handle);
-        }
-    }
-
-    rstd::Option<handle_type> m_handle;
-    store_item_type           m_item;
+    store_item_type      m_item;
+    kstore::Subscription m_subscription;
 };
 
 class WallpaperStoreItem

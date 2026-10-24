@@ -109,7 +109,6 @@ private:
     void invalidateList();
 
     QList<qlonglong>                        m_hidden_library_ids;
-    quint64                                 m_generation { 0 };
     bool                                    m_reload_pending { false };
     QString                                 m_wp_type;
     QList<control::v1::WallpaperFilterRule> m_filters;

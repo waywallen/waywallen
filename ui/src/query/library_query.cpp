@@ -24,6 +24,7 @@ namespace waywallen
 LibraryListQuery::LibraryListQuery(QObject* parent): Query(parent) {}
 
 void LibraryListQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -31,10 +32,10 @@ void LibraryListQuery::reload() {
     req.setLibraryList(proto::LibraryListRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [](const proto::Response& rsp) {
             if (auto* lm = LibraryManager::instance()) {
@@ -153,6 +154,7 @@ LibraryAutoDetectQuery::LibraryAutoDetectQuery(QObject* parent): Query(parent) {
 auto LibraryAutoDetectQuery::addedCount() const -> qint32 { return m_added_count; }
 
 void LibraryAutoDetectQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -160,10 +162,10 @@ void LibraryAutoDetectQuery::reload() {
     req.setLibraryAutoDetect(proto::LibraryAutoDetectRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             auto added = static_cast<qint32>(rsp.libraryAutoDetect().added().size());

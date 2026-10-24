@@ -94,7 +94,6 @@ private:
     QStringList m_tags;
     QString     m_error;
     bool        m_browsing_enabled { false };
-    quint64     m_generation { 0 };
 };
 
 export class RemoteDetailsQuery : public Query,
@@ -184,9 +183,6 @@ public:
                               const QVariant& error);
     Q_SIGNAL void setFinished(const QString& sourceId, const QString& id, bool subscribed,
                               bool accepted, const QVariant& error);
-
-private:
-    quint64 m_refresh_generation { 0 };
 };
 
 export class RemoteSettingsPatchQuery

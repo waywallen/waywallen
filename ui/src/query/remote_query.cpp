@@ -25,6 +25,7 @@ auto RemoteAvailabilityQuery::defaultSourceId() const -> const QString& {
 }
 
 void RemoteAvailabilityQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -32,10 +33,10 @@ void RemoteAvailabilityQuery::reload() {
     req.setRemoteAvailability(proto::RemoteAvailabilityRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             const auto&  av = rsp.remoteAvailability();
@@ -241,8 +242,7 @@ void RemoteSearchQuery::setBrowsingEnabled(bool v) {
     if (v) {
         delayReload();
     } else {
-        ++m_generation;
-        cancel();
+        invalidateRequests();
         clearResults();
     }
 }
@@ -300,13 +300,13 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
     inner.setRequiredTags(m_tags);
     req.setRemoteSearch(std::move(inner));
 
-    const auto generation = ++m_generation;
-    auto       self       = QWatcher { this };
-    spawn([self, backend, req = std::move(req), page, append, generation]() mutable -> task<void> {
+    const auto revision = beginRequest();
+    auto       self     = QWatcher { this };
+    spawn([self, backend, req = std::move(req), page, append, revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
         if (! self) co_return;
-        if (self->m_generation != generation) co_return;
+        if (! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self, page, append](const proto::Response& rsp) {
             const auto&             sr = rsp.remoteSearch();
@@ -370,6 +370,7 @@ auto RemoteDetailsQuery::tags() const -> const QStringList& { return m_tags; }
 auto RemoteDetailsQuery::webUrl() const -> const QString& { return m_web_url; }
 
 void RemoteDetailsQuery::reload() {
+    const auto revision = beginRequest();
     m_author.clear();
     m_author_avatar_url.clear();
     m_description.clear();
@@ -390,10 +391,10 @@ void RemoteDetailsQuery::reload() {
     req.setRemoteDetails(std::move(inner));
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             const auto& dr            = rsp.remoteDetails();
@@ -499,7 +500,7 @@ void RemoteSubscriptionQuery::reload() {}
 void RemoteSubscriptionQuery::refresh(const QString& sourceId, const QString& id) {
     if (sourceId.isEmpty() || id.isEmpty()) return;
     AppStore::instance()->setRemoteAcquisitionState(sourceId, id, 3);
-    const auto generation = ++m_refresh_generation;
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -510,11 +511,11 @@ void RemoteSubscriptionQuery::refresh(const QString& sourceId, const QString& id
     req.setSubscriptionStatus(std::move(inner));
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req), sourceId, id, generation]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), sourceId, id, revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
         if (! self) co_return;
-        if (self->m_refresh_generation != generation) co_return;
+        if (! self->isCurrentRequest(revision)) co_return;
 
         if (! result) {
             self->inspect_set(result, [](const proto::Response&) {
@@ -543,6 +544,7 @@ void RemoteSubscriptionQuery::refresh(const QString& sourceId, const QString& id
 
 void RemoteSubscriptionQuery::setSubscribed(const QString& sourceId, const QString& id,
                                             bool subscribed) {
+    const auto revision = beginRequest();
     if (sourceId.isEmpty() || id.isEmpty()) return;
     AppStore::instance()->setRemoteAcquisitionState(sourceId, id, 3);
     setStatus(Status::Querying);
@@ -556,10 +558,11 @@ void RemoteSubscriptionQuery::setSubscribed(const QString& sourceId, const QStri
     req.setSubscriptionSet(std::move(inner));
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req), sourceId, id, subscribed]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), sourceId, id, subscribed, revision]() mutable
+              -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         if (! result) {
             self->inspect_set(result, [](const proto::Response&) {

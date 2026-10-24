@@ -9,6 +9,7 @@ members = [
   "tools/i18n",
   "tools/i18n/po",
   "ui",
+  "ui/backend",
 ]
 default-members = [
   "plugins/org.waywallen.image",
@@ -24,6 +25,7 @@ version = "0.5.0"
 [workspace.dependencies]
 waywallen-bridge = { path = "bridge" }
 waywallen-plugin-common = { path = "plugins" }
+waywallen-backend-connection = { path = "ui/backend" }
 rstd-cppstd = { version = "0.1.7" }
 rstd-std = { version = "0.1.7" }
 rstd-json = { version = "0.1.7" }
@@ -69,6 +71,7 @@ components = [
   "Core",
   "DBus",
   "LinguistTools",
+  "Network",
   "Protobuf",
   "ProtobufQuick",
   "ProtobufWellKnownTypes",

@@ -18,6 +18,7 @@ AutostartGetQuery::AutostartGetQuery(QObject* parent): Query(parent) {}
 bool AutostartGetQuery::enabled() const { return m_enabled; }
 
 void AutostartGetQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -25,10 +26,10 @@ void AutostartGetQuery::reload() {
     req.setAutostartGet(proto::AutostartGetRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             const bool enabled = rsp.autostartGet().enabled();

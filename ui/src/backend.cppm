@@ -10,6 +10,7 @@ export import :proto;
 import rstd;
 import rstd.cppstd;
 import qextra;
+import waywallen.backend.connection;
 
 using rstd::boxed::Box;
 using rstd::result::Result;
@@ -54,6 +55,7 @@ public:
     Q_SLOT void on_retry();
 
 private:
+    Q_SIGNAL void transportConnected();
     Q_SIGNAL void transportDisconnected();
 
     Q_SLOT void on_error(QString);
@@ -62,8 +64,9 @@ private:
 
     auto serial() -> quint64;
 
-    Box<QThread>              m_thread;
-    detail::BackendTransport* m_transport;
+    Box<QThread>                             m_thread;
+    detail::BackendTransport*                m_transport;
+    BackendPending<proto::Response, QString> m_pending;
 
     Atomic<quint64>      m_serial;
     quint16              m_port;

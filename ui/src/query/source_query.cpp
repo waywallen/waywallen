@@ -21,6 +21,7 @@ SourceListQuery::SourceListQuery(QObject* parent): Query(parent) {}
 auto SourceListQuery::sources() const -> const QVariantList& { return m_sources; }
 
 void SourceListQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -28,10 +29,10 @@ void SourceListQuery::reload() {
     req.setSourceList(proto::SourceListRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             QVariantList items;

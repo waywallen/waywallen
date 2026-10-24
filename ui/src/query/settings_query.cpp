@@ -343,6 +343,7 @@ auto SettingsGetQuery::logDir() const -> const QString& { return m_log_dir; }
 auto SettingsGetQuery::wwLogActive() const -> bool { return m_ww_log_active; }
 
 void SettingsGetQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -350,10 +351,10 @@ void SettingsGetQuery::reload() {
     req.setSettingsGet(proto::SettingsGetRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             const auto& get_rsp   = rsp.settingsGet();

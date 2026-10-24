@@ -41,6 +41,7 @@ auto RendererListQuery::renderers() const -> const QStringList& { return m_rende
 auto RendererListQuery::instances() const -> const QVariantList& { return m_instances; }
 
 void RendererListQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -48,10 +49,10 @@ void RendererListQuery::reload() {
     req.setRendererList(proto::RendererListRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             auto& list_rsp = rsp.rendererList();
@@ -107,6 +108,7 @@ auto RendererPluginListQuery::supportedTypes() const -> const QStringList& {
 auto RendererPluginListQuery::typeLabels() const -> const QVariantMap& { return m_type_labels; }
 
 void RendererPluginListQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -114,10 +116,10 @@ void RendererPluginListQuery::reload() {
     req.setRendererPluginList(proto::RendererPluginListRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             auto& list_rsp = rsp.rendererPluginList();

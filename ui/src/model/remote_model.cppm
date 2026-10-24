@@ -32,6 +32,7 @@ public:
     QString authorAvatarUrl;
     QString wpType;
     int     acquisitionState { 0 };
+    bool    operator==(const RemoteRow&) const = default;
 };
 
 inline auto remoteKey(const QString& sourceId, const QString& itemId) -> QString {

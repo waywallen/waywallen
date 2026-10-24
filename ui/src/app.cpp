@@ -38,6 +38,10 @@ auto app_instance(waywallen::App* in = nullptr) -> waywallen::App* {
 
 class AppPrivate {
 public:
+    struct RuntimeLifetime {
+        ~RuntimeLifetime() { QAsyncResult::dropEx(); }
+    };
+
     AppPrivate(App* self, quint16 port)
         : m_p(self),
           m_main_win(nullptr),
@@ -59,6 +63,7 @@ public:
     App*                   m_p;
     QPointer<QQuickWindow> m_main_win;
     QmlNetworkDiskCache    m_qml_network_cache;
+    RuntimeLifetime        m_runtime;
     // Reverse dependency order keeps the QML engine first and Backend last during destruction.
     Box<Backend>               m_backend;
     Box<DisplayManager>        m_display_mgr;
@@ -90,10 +95,7 @@ App::App(quint16 port, rstd::empty): QObject(nullptr), d_ptr(new AppPrivate(this
     QGuiApplication::instance()->installEventFilter(this);
 }
 
-App::~App() {
-    QGuiApplication::instance()->removeEventFilter(this);
-    QAsyncResult::dropEx();
-}
+App::~App() { QGuiApplication::instance()->removeEventFilter(this); }
 
 void App::init() {
     Q_D(App);
@@ -131,7 +133,7 @@ void App::init() {
     // (re)configured when the daemon reports `Connected` — VersionMissing
     // and VersionMismatch hold the backend disconnected even if a port
     // value is in hand, since the wire contract isn't trusted.
-    auto sync_backend = [this, d, dbus]() {
+    auto sync_backend = [d, dbus]() {
         if (d->m_port != 0) {
             // Explicit override from CLI; ignore DBus-driven changes.
             return;
