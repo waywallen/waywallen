@@ -2,6 +2,8 @@ module;
 #include <QNetworkAccessManager>
 #include <QNetworkProxy>
 #include <QThread>
+#include <QPointer>
+#include <memory>
 #include <QtGlobal>
 #include <algorithm>
 #include <chrono>
@@ -17,6 +19,32 @@ using rstd::sync::Arc;
 namespace lf = lifetchto;
 namespace qt = ncrequest::client::qt_network;
 
+namespace waywallen
+{
+struct ConnectionExecutor {
+    QPointer<QObject> target;
+    auto              post_job(rstd::async::ExecutorJob job) const -> bool {
+        if (! target) return false;
+        auto owned = std::make_shared<rstd::async::ExecutorJob>(rstd::move(job));
+        return QMetaObject::invokeMethod(
+            target.data(),
+            [owned = std::move(owned)] {
+                owned->run();
+            },
+            Qt::QueuedConnection);
+    }
+    auto is_closed() const -> bool { return target.isNull(); }
+};
+} // namespace waywallen
+namespace rstd
+{
+template<>
+struct Impl<async::Executor, waywallen::ConnectionExecutor>
+    : ImplBase<waywallen::ConnectionExecutor> {
+    auto post_job(async::ExecutorJob job) { return this->self().post_job(rstd::move(job)); }
+    auto is_closed() { return this->self().is_closed(); }
+};
+} // namespace rstd
 namespace waywallen
 {
 namespace
@@ -136,8 +164,7 @@ auto run_connection(Arc<ConnectionState> state, rstd::async::RuntimeHandle runti
         // IPC stays open for the process lifetime; handshake and close retain their deadlines.
         ws.upgrade.duplex.total_timeout = Some(lf::http::TotalTimeout::disabled());
         ncrequest::WebSocketCallbacks callbacks;
-        callbacks.executor = Some(executor.clone());
-        callbacks.message  = [state = state.clone(), generation](liwebsocketo::Message message) {
+        callbacks.message = [state = state.clone(), generation](liwebsocketo::Message message) {
             if (! state->current(generation) || state->failed) return;
             if (message.kind == liwebsocketo::Kind::Pong) return;
             if (message.kind != liwebsocketo::Kind::Binary) {
@@ -221,7 +248,7 @@ class BackendConnection::Private {
 public:
     Arc<ConnectionState>          state;
     rstd::async::RuntimeHandle    runtime;
-    qt::CallbackExecutor          callback_executor;
+    rstd::async::AnyExecutor      executor;
     std::shared_future<void>      done;
     rstd::async::JoinHandle<void> worker;
 
@@ -229,16 +256,16 @@ public:
             BackendConnectionCallbacks callbacks, BackendConnectionLimits limits)
         : state(Arc<ConnectionState>::make()),
           runtime(rstd::move(handle)),
-          callback_executor(qt::CallbackExecutor::make(owner).unwrap()),
+          executor(rstd::async::AnyExecutor::from_executor(ConnectionExecutor { owner })),
           worker([&] {
-              state->callbacks = std::move(callbacks);
-              state->limits    = limits;
-              auto promise     = std::make_shared<std::promise<void>>();
-              done             = promise->get_future().share();
-              auto executor    = rstd::async::AnyExecutor::from_executor(callback_executor.clone());
+              state->callbacks    = std::move(callbacks);
+              state->limits       = limits;
+              auto promise        = std::make_shared<std::promise<void>>();
+              done                = promise->get_future().share();
+              auto owner_executor = executor.clone();
               return runtime.spawn(
                   finish_connection(runtime.spawn(run_connection(
-                                        state.clone(), runtime.clone(), std::move(executor))),
+                                        state.clone(), runtime.clone(), std::move(owner_executor))),
                                     std::move(promise)));
           }()) {}
 };
@@ -251,7 +278,6 @@ BackendConnection::BackendConnection(rstd::async::RuntimeHandle runtime,
 
 BackendConnection::~BackendConnection() {
     Q_ASSERT(d->done.wait_for(std::chrono::seconds(0)) == std::future_status::ready);
-    d->callback_executor.close();
 }
 
 void BackendConnection::open(QStringView url) {
@@ -281,7 +307,7 @@ auto BackendConnection::send(QByteArray bytes) -> Result<empty, QString> {
     state->sends.retain([](const auto& task) {
         return ! task.is_finished();
     });
-    auto executor = rstd::async::AnyExecutor::from_executor(d->callback_executor.clone());
+    auto executor = d->executor.clone();
     state->sends.push(d->runtime.spawn(watch_send(
         state.clone(), rstd::move(accepted).unwrap(), state->generation, std::move(executor))));
     return Ok(empty {});
