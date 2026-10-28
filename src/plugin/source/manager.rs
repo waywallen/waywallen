@@ -665,6 +665,10 @@ impl LuaPluginRegistry {
         })
     }
 
+    pub fn supports_entry_remove(&self, entry: &WallpaperEntry) -> bool {
+        entry.can_remove != Some(false) && self.supports_item_remove(&entry.plugin_name)
+    }
+
     pub fn supports_item_unsubscribe(&self, entry: &WallpaperEntry) -> bool {
         if entry.external_id.as_deref().is_none_or(str::is_empty) {
             return false;

@@ -21,6 +21,7 @@ pub struct ItemUpsertArgs<'a> {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub content_rating: Option<&'a str>,
+    pub can_remove: Option<bool>,
 }
 
 /// Upsert an item keyed by `(library_id, path)`. Every non-key column
@@ -43,6 +44,7 @@ pub async fn upsert_item(db: &DatabaseConnection, args: ItemUpsertArgs<'_>) -> R
         width: Set(args.width),
         height: Set(args.height),
         content_rating: Set(args.content_rating.map(str::to_owned)),
+        can_remove: Set(args.can_remove),
         create_at: Set(now),
         update_at: Set(now),
         sync_at: Set(now),
@@ -62,6 +64,7 @@ pub async fn upsert_item(db: &DatabaseConnection, args: ItemUpsertArgs<'_>) -> R
                     item::Column::ExternalId,
                     item::Column::WebUrl,
                     item::Column::UpdateAvailable,
+                    item::Column::CanRemove,
                     item::Column::UpdateAt,
                     item::Column::SyncAt,
                 ])
@@ -149,6 +152,7 @@ fn entry_from_item(
         width: it.width.map(|v| v as u32),
         height: it.height.map(|v| v as u32),
         content_rating: it.content_rating,
+        can_remove: it.can_remove,
         modified_at: it.modified_at,
         create_at: it.create_at,
         plugin_name: plugin_name.to_string(),

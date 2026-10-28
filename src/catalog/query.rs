@@ -232,6 +232,7 @@ mod tests {
             plugin_name: String::new(),
             library_root: String::new(),
             hidden: false,
+            can_remove: None,
         }
     }
 

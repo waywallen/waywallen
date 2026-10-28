@@ -15,6 +15,7 @@ lito.install({
     { source = "plugin.toml", destination = plugin_path("plugin.toml") },
     { source = "main.lua", destination = plugin_path("main.lua") },
     { source = "image/source.lua", destination = plugin_path("image/source.lua") },
+    { source = "image/system.lua", destination = plugin_path("image/system.lua") },
     { source = "image/wallpaper.lua", destination = plugin_path("image/wallpaper.lua") },
     { source = "i18n/de.po", destination = plugin_path("i18n/de.po") },
     { source = "i18n/ru.po", destination = plugin_path("i18n/ru.po") },

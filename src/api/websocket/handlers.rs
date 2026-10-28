@@ -460,7 +460,7 @@ pub(super) async fn dispatch_inner(
                     (
                         e.item_id,
                         (
-                            state.source_manager.supports_item_remove(&e.plugin_name),
+                            state.source_manager.supports_entry_remove(e),
                             state.source_manager.supports_item_unsubscribe(e),
                         ),
                     )
@@ -541,9 +541,7 @@ pub(super) async fn dispatch_inner(
                 .flatten()
                 .map(|schema| dedupe_predefined_schema(&schema))
                 .unwrap_or_default();
-            let supports_item_remove = state
-                .source_manager
-                .supports_item_remove(&entry.plugin_name);
+            let supports_item_remove = state.source_manager.supports_entry_remove(&entry);
             let supports_item_unsubscribe = state.source_manager.supports_item_unsubscribe(&entry);
             let overrides = repo::get_user_property_overrides_raw(&state.db, entry.item_id)
                 .await?
@@ -791,9 +789,7 @@ pub(super) async fn dispatch_inner(
             }
 
             let layout_override = layout.map(WallpaperLayoutOverride::from_resolved);
-            let supports_item_remove = state
-                .source_manager
-                .supports_item_remove(&entry.plugin_name);
+            let supports_item_remove = state.source_manager.supports_entry_remove(&entry);
             let supports_item_unsubscribe = state.source_manager.supports_item_unsubscribe(&entry);
             Res::WallpaperLayoutSet(pb::WallpaperLayoutSetResponse {
                 entry: Some(entry_to_pb(
@@ -2196,9 +2192,7 @@ pub(super) async fn dispatch_inner(
                         String::new(),
                         String::new(),
                         None,
-                        state
-                            .source_manager
-                            .supports_item_remove(&entry.plugin_name),
+                        state.source_manager.supports_entry_remove(&entry),
                         state.source_manager.supports_item_unsubscribe(entry),
                     )
                 })

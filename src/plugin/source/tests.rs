@@ -746,6 +746,7 @@ return M
         modified_at: None,
         create_at: 0,
         hidden: false,
+        can_remove: None,
     };
     let libraries = vec![entry.library_root.clone()];
     block_value(async { mgr.remove_item("remove_only", &entry, &libraries).await }).unwrap();
@@ -798,6 +799,7 @@ return M
         modified_at: None,
         create_at: 0,
         hidden: false,
+        can_remove: None,
     };
     let err = block_value(async { mgr.remove_item("no_remove", &entry, &[]).await }).unwrap_err();
     assert!(matches!(
@@ -1965,6 +1967,7 @@ return M
         plugin_name: "separate_flows".to_string(),
         library_root: String::new(),
         hidden: false,
+        can_remove: None,
     };
     assert!(manager.supports_item_unsubscribe(&subscription_entry));
     assert!(!manager.supports_item_unsubscribe(&WallpaperEntry {
@@ -2347,6 +2350,7 @@ return M
         plugin_name: "apply_test".into(),
         library_root: "/tmp".into(),
         hidden: false,
+        can_remove: None,
     };
 
     let apply = block_value(async { mgr.call_apply("apply_test", &entry).await.unwrap() });

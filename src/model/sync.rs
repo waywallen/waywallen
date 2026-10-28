@@ -127,6 +127,7 @@ pub async fn sync_plugin_entries(
                     width,
                     height,
                     content_rating: content_rating.as_deref(),
+                    can_remove: entry.can_remove,
                 },
             )
             .await?;
@@ -186,6 +187,7 @@ mod tests {
             modified_at: None,
             create_at: 0,
             hidden: false,
+            can_remove: None,
         }
     }
 
@@ -349,6 +351,7 @@ mod tests {
             modified_at: None,
             create_at: 0,
             hidden: false,
+            can_remove: None,
         };
         let _ = sync_plugin_entries(
             &db,

@@ -20,6 +20,7 @@ pub struct Model {
     pub width: Option<i32>,
     pub height: Option<i32>,
     pub content_rating: Option<String>,
+    pub can_remove: Option<bool>,
     /// Milliseconds since UNIX epoch. Set on first INSERT, never
     /// updated on subsequent upserts of the same `(library_id, path)`.
     pub create_at: i64,

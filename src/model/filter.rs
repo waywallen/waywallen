@@ -346,6 +346,7 @@ mod tests {
                 width: Some(1920),
                 height: Some(1080),
                 content_rating: Some("Everyone"),
+                can_remove: None,
             },
         )
         .await
@@ -367,6 +368,7 @@ mod tests {
                 width: Some(900),
                 height: Some(1600),
                 content_rating: Some("Mature"),
+                can_remove: None,
             },
         )
         .await
@@ -388,6 +390,7 @@ mod tests {
                 width: Some(640),
                 height: Some(480),
                 content_rating: None,
+                can_remove: None,
             },
         )
         .await

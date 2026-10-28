@@ -1791,6 +1791,7 @@ impl LuaPluginRuntime {
                 width: tbl.get::<u32>("width").ok(),
                 height: tbl.get::<u32>("height").ok(),
                 content_rating: tbl.get::<String>("content_rating").ok(),
+                can_remove: tbl.get::<Option<bool>>("can_remove")?,
                 // Daemon-only (filled from DB on read); scan leaves it None.
                 modified_at: None,
                 create_at: 0,
@@ -2012,6 +2013,7 @@ impl LuaPluginRuntime {
         fs.set("size", file_size_fn)?;
         fs.set("remove_file", remove_file_fn)?;
         fs.set("remove_dir", remove_dir_fn)?;
+        super::filesystem::install(&self.lua, &fs)?;
         ctx.set("fs", fs)?;
 
         // ctx.probe(path) -> table|nil
@@ -2124,6 +2126,7 @@ impl LuaPluginRuntime {
         // ctx.http:get(url):headers({...}):send()
         ctx.set("http", self.http_view())?;
         ctx.set("html", mlua_extra::html::create_module(&self.lua)?)?;
+        ctx.set("xml", mlua_extra::xml::create_module(&self.lua)?)?;
         ctx.set("url", mlua_extra::url::create_module(&self.lua)?)?;
 
         Ok(ctx)
@@ -2168,6 +2171,7 @@ impl LuaPluginRuntime {
         entry_tbl.set("wp_type", entry.wp_type.clone())?;
         entry_tbl.set("path", entry.resource.clone())?;
         entry_tbl.set("resource", entry.resource.clone())?;
+        entry_tbl.set("can_remove", entry.can_remove)?;
         if let Some(p) = &entry.preview {
             entry_tbl.set("preview", p.clone())?;
         }

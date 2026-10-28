@@ -62,10 +62,12 @@ mod tests {
                     description: None,
                     external_id: None,
                     web_url: None,
+                    update_available: false,
                     size: None,
                     width: None,
                     height: None,
                     content_rating: None,
+                    can_remove: None,
                 },
             )
             .await

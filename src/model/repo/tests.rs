@@ -208,6 +208,35 @@ fn minimal_args<'a>(
         width: None,
         height: None,
         content_rating: None,
+        can_remove: None,
+    }
+}
+
+#[tokio::test]
+async fn item_can_remove_snapshot_round_trips_and_unknown_clears_it() {
+    let db = mem_db().await;
+    let plugin = upsert_plugin(&db, "image", "1").await.unwrap();
+    let library = add_library(&db, plugin.id, "/backgrounds").await.unwrap();
+    let mut id = None;
+    for (permission, update_available) in [
+        (None, false),
+        (Some(false), true),
+        (Some(true), false),
+        (None, true),
+    ] {
+        let mut args = minimal_args(plugin.id, library.id, "one.png", "image");
+        args.can_remove = permission;
+        args.update_available = update_available;
+        let item = upsert_item(&db, args).await.unwrap();
+        assert_eq!(*id.get_or_insert(item.id), item.id);
+        assert_eq!(item.can_remove, permission);
+        assert_eq!(item.update_available, update_available);
+        let entry = get_entry(&db, item.id).await.unwrap().unwrap();
+        assert_eq!(entry.can_remove, permission);
+        assert_eq!(entry.update_available, update_available);
+        let entries = load_entries(&db).await.unwrap();
+        assert_eq!(entries[0].can_remove, permission);
+        assert_eq!(entries[0].update_available, update_available);
     }
 }
 
@@ -385,6 +414,7 @@ async fn upsert_item_refreshes_every_column_on_conflict() {
             width: None,
             height: None,
             content_rating: None,
+            can_remove: None,
         },
     )
     .await
@@ -406,6 +436,7 @@ async fn upsert_item_refreshes_every_column_on_conflict() {
             width: None,
             height: None,
             content_rating: None,
+            can_remove: None,
         },
     )
     .await
@@ -443,6 +474,7 @@ async fn upsert_item_persists_media_meta() {
             width: Some(1920),
             height: Some(1080),
             content_rating: Some("Everyone"),
+            can_remove: None,
         },
     )
     .await
@@ -471,6 +503,7 @@ async fn upsert_item_persists_media_meta() {
             width: None,
             height: None,
             content_rating: None,
+            can_remove: None,
         },
     )
     .await

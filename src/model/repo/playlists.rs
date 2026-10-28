@@ -476,6 +476,7 @@ mod tests {
                     width: None,
                     height: None,
                     content_rating: None,
+                    can_remove: None,
                 },
             )
             .await
