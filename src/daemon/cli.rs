@@ -22,7 +22,7 @@ pub struct DaemonConfig {
     #[arg(
         long,
         value_name = "NAME",
-        help = "Display backend name [built-ins: kde-plasma, gnome-shell, layer-shell]"
+        help = "Display backend name [built-ins: kde-plasma, gnome-shell, layer-shell, x11]"
     )]
     pub display_backend: Option<String>,
 
