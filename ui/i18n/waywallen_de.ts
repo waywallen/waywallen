@@ -2294,6 +2294,14 @@ Betroffener Bildschirm: #%1</translation>
 <context>
     <name>SourceManagePage</name>
     <message>
+        <source>Auto detect libraries</source>
+        <translation>Bibliotheken automatisch erkennen</translation>
+    </message>
+    <message>
+        <source>No new libraries found</source>
+        <translation>Keine neuen Bibliotheken gefunden</translation>
+    </message>
+    <message>
         <source>Rename library</source>
         <translation>Bibliothek umbenennen</translation>
     </message>

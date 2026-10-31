@@ -2183,6 +2183,14 @@ Related display: #%1</source>
 <context>
     <name>SourceManagePage</name>
     <message>
+        <source>Auto detect libraries</source>
+        <translation>自动检测库</translation>
+    </message>
+    <message>
+        <source>No new libraries found</source>
+        <translation>未发现新的库</translation>
+    </message>
+    <message>
         <source>Rename library</source>
         <translation>重命名库</translation>
     </message>

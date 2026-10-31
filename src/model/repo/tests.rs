@@ -374,6 +374,83 @@ async fn library_path_scoped_per_plugin() {
 }
 
 #[tokio::test]
+async fn library_paths_deduplicate_aliases_without_changing_existing_library() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("wallpapers");
+    let alias = dir.path().join("alias");
+    std::fs::create_dir_all(root.join("child")).unwrap();
+    std::os::unix::fs::symlink(&root, &alias).unwrap();
+    let stored_path = format!("{}/./", alias.display());
+    let db = mem_db().await;
+    let plugin = upsert_plugin(&db, "image", "1").await.unwrap();
+    // Simulate a library saved before canonical path comparisons were used.
+    let existing = library::ActiveModel {
+        plugin_id: Set(plugin.id),
+        path: Set(stored_path.clone()),
+        name: Set("Custom name".to_owned()),
+        metadata: Set(r#"{"keep":"value"}"#.to_owned()),
+        ..Default::default()
+    }
+    .insert(&db)
+    .await
+    .unwrap();
+    for path in [
+        root.to_str().unwrap().to_owned(),
+        format!("{}/child/../", root.display()),
+        alias.to_str().unwrap().to_owned(),
+        stored_path.clone(),
+    ] {
+        let found = find_library(&db, plugin.id, &path).await.unwrap().unwrap();
+        assert_eq!(found, existing);
+        assert!(matches!(
+            add_named_library(&db, plugin.id, &path, Some("Replacement")).await,
+            Err(Error::InvalidArgument(message)) if message.contains("already registered")
+        ));
+    }
+    assert_eq!(list_libraries(&db).await.unwrap(), vec![existing]);
+    let other_plugin = upsert_plugin(&db, "video", "1").await.unwrap();
+    add_library(&db, other_plugin.id, root.to_str().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(list_libraries(&db).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn library_paths_concurrent_aliases_only_insert_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let alias = dir.path().join("alias");
+    std::os::unix::fs::symlink(dir.path(), &alias).unwrap();
+    let db = mem_db().await;
+    let plugin = upsert_plugin(&db, "image", "1").await.unwrap();
+    let (first, second) = tokio::join!(
+        add_library(&db, plugin.id, dir.path().to_str().unwrap()),
+        add_library(&db, plugin.id, alias.to_str().unwrap()),
+    );
+    assert_ne!(first.is_ok(), second.is_ok());
+    assert_eq!(list_libraries(&db).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn library_paths_still_match_when_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("missing");
+    let path = root.to_str().unwrap();
+    let db = mem_db().await;
+    let plugin = upsert_plugin(&db, "image", "1").await.unwrap();
+    let existing = add_library(&db, plugin.id, path).await.unwrap();
+    assert_eq!(
+        find_library(&db, plugin.id, &format!("{path}/./"))
+            .await
+            .unwrap()
+            .unwrap(),
+        existing
+    );
+    assert!(add_library(&db, plugin.id, &format!("{path}/"))
+        .await
+        .is_err());
+}
+
+#[tokio::test]
 async fn add_library_expands_home_prefix() {
     let _lock = ENV_LOCK.lock().unwrap();
     let _home = HomeGuard::set("/tmp/waywallen-home");

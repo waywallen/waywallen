@@ -2182,6 +2182,14 @@ Related display: #%1</source>
 <context>
     <name>SourceManagePage</name>
     <message>
+        <source>Auto detect libraries</source>
+        <translation>Найти библиотеки автоматически</translation>
+    </message>
+    <message>
+        <source>No new libraries found</source>
+        <translation>Новые библиотеки не найдены</translation>
+    </message>
+    <message>
         <source>Rename library</source>
         <translation>Переименовать библиотеку</translation>
     </message>
