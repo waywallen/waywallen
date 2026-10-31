@@ -57,9 +57,11 @@ function M.search_item(item)
     return {
         id = item.id or "",
         title = title(item),
-        preview_url = thumbs.large or thumbs.original or thumbs.small or item.path or "",
+        preview_url = thumbs.original or thumbs.large or thumbs.small or item.path or "",
         author = "",
         wp_type = "image",
+        width = item.dimension_x,
+        height = item.dimension_y,
         extra = {
             resolution = item.resolution or "",
             purity = item.purity or "",
@@ -95,7 +97,7 @@ function M.download(detail)
         url = detail.path or "",
         filename = "wallhaven-" .. tostring(detail.id or "wallpaper") .. "." .. ext,
         title = title(detail),
-        preview_url = thumbs.large or thumbs.original or thumbs.small or "",
+        preview_url = thumbs.original or thumbs.large or thumbs.small or "",
         description = detail.source or detail.url or "",
         tags = tags_from_detail(detail),
         external_id = tostring(detail.id or ""),

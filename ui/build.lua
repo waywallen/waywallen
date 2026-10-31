@@ -54,6 +54,7 @@ qt.qml_module({
     "qml/component/GnomeDisplaysHelp.qml",
     "qml/component/LayerShellDisplaysHelp.qml",
     "qml/component/ThumbnailImage.qml",
+    "qml/component/WallpaperView.qml",
     "qml/component/SearchChip.qml",
     "qml/component/ValueSlider.qml",
     "qml/component/FlipButtons.qml",

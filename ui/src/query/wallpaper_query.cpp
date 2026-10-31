@@ -285,8 +285,10 @@ void WallpaperListQuery::restoreSelection(const QVariant& value) {
 void WallpaperListQuery::reload() {
     const auto revision = beginRequest();
     m_reload_pending    = false;
+    m_failed_append     = false;
     setOffset(0);
     setNoMore(false);
+    tdata()->setHasMore(false);
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
     auto req     = proto::Request {};
@@ -327,6 +329,8 @@ void WallpaperListQuery::reload() {
 void WallpaperListQuery::fetchMore(qint32) {
     if (noMore() || m_reload_pending || status() == Status::Querying) return;
     const auto revision = beginRequest();
+    m_failed_append     = true;
+    tdata()->setHasMore(false);
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -352,6 +356,7 @@ void WallpaperListQuery::fetchMore(qint32) {
             auto t = self->tdata();
             t->insert(t->rowCount(), items);
             self->setOffset(next_offset);
+            self->m_failed_append = false;
 
             const qint32 new_total = static_cast<qint32>(list_rsp.count());
             if (new_total != self->m_total) {
@@ -364,6 +369,14 @@ void WallpaperListQuery::fetchMore(qint32) {
         });
         co_return;
     });
+}
+
+void WallpaperListQuery::retry() {
+    if (status() != Status::Error) return;
+    if (m_failed_append)
+        fetchMore(tdata()->rowCount());
+    else
+        reload();
 }
 
 // ---------------------------------------------------------------------------

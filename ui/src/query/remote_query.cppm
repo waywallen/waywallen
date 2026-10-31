@@ -75,6 +75,7 @@ public:
 
     void             reload() override;
     Q_INVOKABLE void loadMore();
+    Q_INVOKABLE void retry();
     Q_SLOT void      fetchMore(qint32) override;
 
     Q_SIGNAL void sourceIdChanged();
@@ -85,6 +86,7 @@ public:
     Q_SIGNAL void stateChanged();
 
 private:
+    void invalidateSearch();
     void clearResults();
     void fetchPage(quint32 page, bool append);
 
@@ -94,6 +96,8 @@ private:
     QStringList m_tags;
     QString     m_error;
     bool        m_browsing_enabled { false };
+    bool        m_failed_append { false };
+    bool        m_reload_pending { false };
 };
 
 export class RemoteDetailsQuery : public Query,

@@ -1205,6 +1205,10 @@ message RemoteItem {
   // Optional picture of the author, as a URL the source plugin supplied.
   // Empty when the source has none; the UI sizes it, not the source.
   string author_avatar_url = 8;
+  // Resource dimensions, not the potentially cropped preview dimensions.
+  // Absent when the search result has no reliable dimensions.
+  optional uint32 width = 9;
+  optional uint32 height = 10;
 }
 
 message RemoteSearchRequest {

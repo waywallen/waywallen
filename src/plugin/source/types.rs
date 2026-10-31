@@ -331,6 +331,8 @@ pub struct DiscoverItem {
     pub author: String,
     pub author_avatar_url: String,
     pub wp_type: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
     pub extra: HashMap<String, String>,
 }
 

@@ -9,7 +9,7 @@ namespace waywallen::model
 {
 
 WallpaperListModel::WallpaperListModel(QObject* parent)
-    : kstore::QGadgetListModel(this, parent), list_crtp_t() {
+    : GridListModel(this, parent), list_crtp_t() {
     setSelectionEnabled(true);
 }
 

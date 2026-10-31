@@ -457,6 +457,8 @@ return M
     let search =
         block_value(async { mgr.call_discover("imported", "", "", 1, &[]).await.unwrap() });
     assert_eq!(search.items[0].wp_type, "image");
+    assert_eq!(search.items[0].width, None);
+    assert_eq!(search.items[0].height, None);
     // A row without an avatar is still accepted and simply has none.
     assert_eq!(search.items[0].author_avatar_url, "");
     assert_eq!(
@@ -481,6 +483,70 @@ return M
         detail.author_avatar_url,
         "https://example.invalid/avatar/abc.png"
     );
+}
+
+#[test]
+fn discover_search_preserves_optional_resource_dimensions() {
+    let dir = tempfile::tempdir().unwrap();
+    let entry = dir.path().join("dimensions.lua");
+    std::fs::write(
+        &entry,
+        r#"
+local M = {}
+function M.info()
+    return { name = "dimensions", capabilities = { discover = { search = true } } }
+end
+M.discover = {}
+function M.discover.search(ctx, params)
+    local items = {
+        {},
+        { width = 1920, height = 1080 },
+        { width = 1920.0, height = 1080.0 },
+        { width = 0, height = 0 },
+        { width = -1, height = -1 },
+        { width = 1.5, height = 2.5 },
+        { width = 4294967296, height = 4294967296 },
+        { width = 0/0, height = 0/0 },
+        { width = 1/0, height = 1/0 },
+        { width = "1920", height = "1080" },
+        { width = true, height = false },
+        { width = {}, height = {} },
+        { width = 4294967295, height = 1 },
+        { width = 1920 },
+    }
+    for i, item in ipairs(items) do
+        item.id = tostring(i)
+        item.title = "Dimensions"
+        item.preview_url = ""
+        item.author = ""
+    end
+    return { items = items, has_more = false }
+end
+return M
+"#,
+    )
+    .unwrap();
+
+    for entry_version in [ENTRY_VERSION_V3, ENTRY_VERSION_V4] {
+        let manager = SourceManager::new().unwrap();
+        manager
+            .load_plugin(&entry, "org.dimensions", "1", entry_version)
+            .unwrap();
+        let search =
+            block_value(async { manager.call_discover("dimensions", "", "", 1, &[]).await })
+                .unwrap();
+        assert_eq!(search.items.len(), 14);
+        assert!(!search.has_more);
+        for (index, item) in search.items.iter().enumerate() {
+            let expected = match index {
+                1 | 2 => (Some(1920), Some(1080)),
+                12 => (Some(u32::MAX), Some(1)),
+                13 => (Some(1920), None),
+                _ => (None, None),
+            };
+            assert_eq!((item.width, item.height), expected, "item {index}");
+        }
+    }
 }
 
 #[test]
@@ -983,8 +1049,28 @@ end
     let search_item: LuaFunction = map.get("search_item").unwrap();
     let item = runtime.lua.create_table().unwrap();
     item.set("id", "abc").unwrap();
-    let mapped: LuaTable = search_item.call(item).unwrap();
+    let mapped: LuaTable = search_item.call(item.clone()).unwrap();
     assert_eq!(mapped.get::<String>("wp_type").unwrap(), "image");
+    assert_eq!(mapped.get::<Option<u32>>("width").unwrap(), None);
+    assert_eq!(mapped.get::<Option<u32>>("height").unwrap(), None);
+
+    item.set("dimension_x", 2250).unwrap();
+    item.set("dimension_y", 4000).unwrap();
+    let thumbs = runtime.lua.create_table().unwrap();
+    thumbs
+        .set("large", "https://example.invalid/cropped.jpg")
+        .unwrap();
+    thumbs
+        .set("original", "https://example.invalid/portrait.jpg")
+        .unwrap();
+    item.set("thumbs", thumbs).unwrap();
+    let mapped: LuaTable = search_item.call(item).unwrap();
+    assert_eq!(mapped.get::<u32>("width").unwrap(), 2250);
+    assert_eq!(mapped.get::<u32>("height").unwrap(), 4000);
+    assert_eq!(
+        mapped.get::<String>("preview_url").unwrap(),
+        "https://example.invalid/portrait.jpg"
+    );
 
     let details: LuaFunction = map.get("details").unwrap();
     let detail = runtime.lua.create_table().unwrap();
@@ -997,10 +1083,22 @@ end
 
     let download: LuaFunction = map.get("download").unwrap();
     detail.set("id", "abc123").unwrap();
+    let thumbs = runtime.lua.create_table().unwrap();
+    thumbs
+        .set("large", "https://example.invalid/cropped.jpg")
+        .unwrap();
+    thumbs
+        .set("original", "https://example.invalid/portrait.jpg")
+        .unwrap();
+    detail.set("thumbs", thumbs).unwrap();
     let download_mapped: LuaTable = download.call(detail.clone()).unwrap();
     assert_eq!(
         download_mapped.get::<String>("web_url").unwrap(),
         "https://wallhaven.cc/w/abc123"
+    );
+    assert_eq!(
+        download_mapped.get::<String>("preview_url").unwrap(),
+        "https://example.invalid/portrait.jpg"
     );
     // A wallpaper Wallhaven reports no uploader for keeps the empty author
     // the listing has always produced.

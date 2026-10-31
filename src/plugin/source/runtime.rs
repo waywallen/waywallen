@@ -556,6 +556,21 @@ impl LuaPluginRuntime {
         }
     }
 
+    fn optional_dimension(tbl: &LuaTable, key: &str) -> Option<u32> {
+        match tbl.get::<LuaValue>(key).ok()? {
+            LuaValue::Integer(value) => u32::try_from(value).ok().filter(|value| *value > 0),
+            LuaValue::Number(value)
+                if value.is_finite()
+                    && value > 0.0
+                    && value <= u32::MAX as f64
+                    && value.fract() == 0.0 =>
+            {
+                Some(value as u32)
+            }
+            _ => None,
+        }
+    }
+
     fn redact_localized_text(value: LocalizedText) -> LocalizedText {
         match value {
             LocalizedText::Raw(value) => LocalizedText::raw(redact_secrets(&value)),
@@ -2499,6 +2514,8 @@ impl LuaPluginRuntime {
                         value
                     }
                 },
+                width: Self::optional_dimension(&row, "width"),
+                height: Self::optional_dimension(&row, "height"),
                 extra: parse_lua_string_map(&row, "extra", &context)?,
             });
         }

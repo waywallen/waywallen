@@ -86,8 +86,9 @@ public:
     Q_INVOKABLE bool matchesSelection(const QVariant&) const;
     Q_SIGNAL void    selectionChanged();
 
-    void reload() override;
-    void fetchMore(qint32) override;
+    void             reload() override;
+    void             fetchMore(qint32) override;
+    Q_INVOKABLE void retry();
 
     Q_SIGNAL void wpTypeChanged();
     Q_SIGNAL void filterStateChanged();
@@ -110,6 +111,7 @@ private:
 
     QList<qlonglong>                        m_hidden_library_ids;
     bool                                    m_reload_pending { false };
+    bool                                    m_failed_append { false };
     QString                                 m_wp_type;
     QList<control::v1::WallpaperFilterRule> m_filters;
     QList<control::v1::FilterLogic>         m_filter_logics;

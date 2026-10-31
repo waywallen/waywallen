@@ -1422,6 +1422,8 @@ pub(super) async fn dispatch_inner(
                             downloaded,
                             source_id: source_id.clone(),
                             wp_type: item.wp_type,
+                            width: item.width,
+                            height: item.height,
                         });
                     }
                     Res::RemoteSearch(pb::RemoteSearchResponse {

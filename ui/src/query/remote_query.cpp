@@ -196,10 +196,11 @@ void RemoteAvailabilityQuery::reload() {
 
 RemoteSearchQuery::RemoteSearchQuery(QObject* parent): QueryList(parent) {
     tdata()->set_store(tdata(), AppStore::instance()->remotes);
-    connect_requet_reload(&RemoteSearchQuery::sourceIdChanged, this);
-    connect_requet_reload(&RemoteSearchQuery::queryChanged, this);
-    connect_requet_reload(&RemoteSearchQuery::sortKeyChanged, this);
-    connect_requet_reload(&RemoteSearchQuery::tagsChanged, this);
+    connect(this, &RemoteSearchQuery::statusChanged, this, &RemoteSearchQuery::stateChanged);
+    connect(this, &RemoteSearchQuery::sourceIdChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(this, &RemoteSearchQuery::queryChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(this, &RemoteSearchQuery::sortKeyChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(this, &RemoteSearchQuery::tagsChanged, this, &RemoteSearchQuery::invalidateSearch);
 }
 
 auto RemoteSearchQuery::sourceId() const -> const QString& { return m_source_id; }
@@ -240,7 +241,7 @@ void RemoteSearchQuery::setBrowsingEnabled(bool v) {
     m_browsing_enabled = v;
     Q_EMIT browsingEnabledChanged();
     if (v) {
-        delayReload();
+        invalidateSearch();
     } else {
         invalidateRequests();
         clearResults();
@@ -252,7 +253,9 @@ auto RemoteSearchQuery::hasMore() const -> bool {
     const auto t = model();
     return t && t->hasMore();
 }
-auto RemoteSearchQuery::errorText() const -> const QString& { return m_error; }
+auto RemoteSearchQuery::errorText() const -> const QString& {
+    return m_error.isEmpty() ? error() : m_error;
+}
 
 void RemoteSearchQuery::reload() {
     if (! m_browsing_enabled || m_source_id.isEmpty()) {
@@ -265,16 +268,33 @@ void RemoteSearchQuery::reload() {
 }
 
 void RemoteSearchQuery::loadMore() {
-    if (! m_browsing_enabled || noMore() || querying()) return;
+    if (! m_browsing_enabled || m_reload_pending || noMore() || querying()) return;
     fetchPage(static_cast<quint32>(offset() + 2), true);
 }
 
 void RemoteSearchQuery::fetchMore(qint32) {
-    if (! m_browsing_enabled || noMore()) return;
+    if (! m_browsing_enabled || m_reload_pending || noMore() || querying()) return;
     fetchPage(static_cast<quint32>(offset() + 2), true);
 }
 
+void RemoteSearchQuery::retry() {
+    if (status() != Status::Error) return;
+    if (m_failed_append)
+        loadMore();
+    else
+        reload();
+}
+
+void RemoteSearchQuery::invalidateSearch() {
+    m_reload_pending = true;
+    m_failed_append  = false;
+    if (auto t = model()) t->setHasMore(false);
+    delayReload();
+}
+
 void RemoteSearchQuery::clearResults() {
+    m_reload_pending = false;
+    m_failed_append  = false;
     setOffset(0);
     setNoMore(true);
     m_error.clear();
@@ -287,7 +307,10 @@ void RemoteSearchQuery::clearResults() {
 void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
     auto t = model();
     if (! t) return;
+    m_reload_pending = false;
     t->setHasMore(false);
+    m_failed_append = append;
+    m_error.clear();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -322,6 +345,8 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
                     it.authorAvatarUrl(),
                     it.wpType(),
                     it.downloaded() ? 3 : 0,
+                    it.hasWidth() ? it.width() : 0,
+                    it.hasHeight() ? it.height() : 0,
                 });
             }
             auto t = self->model();
@@ -329,7 +354,8 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
             const bool more = sr.hasMore() && ! rows.isEmpty();
             self->setOffset(static_cast<qint32>(page - 1));
             self->setNoMore(! more);
-            self->m_error = sr.error();
+            self->m_error         = sr.error();
+            self->m_failed_append = false;
             if (append)
                 t->append(rows, more);
             else
