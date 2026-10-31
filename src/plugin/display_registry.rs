@@ -52,18 +52,21 @@ fn default_priority() -> i32 {
     100
 }
 
-/// Display backends available without an installed manifest.
-pub fn builtin_display_defs() -> Vec<DisplayDef> {
-    let mut layer_shell_bin = PathBuf::from("waywallen-layer-shell");
+/// `name` next to the daemon executable if it is there, else `name` for PATH.
+fn sibling_bin(name: &str) -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
-            let candidate = parent.join("waywallen-layer-shell");
+            let candidate = parent.join(name);
             if candidate.exists() {
-                layer_shell_bin = candidate;
+                return candidate;
             }
         }
     }
+    PathBuf::from(name)
+}
 
+/// Display backends available without an installed manifest.
+pub fn builtin_display_defs() -> Vec<DisplayDef> {
     vec![
         DisplayDef {
             name: "kde-plasma".to_string(),
@@ -85,7 +88,7 @@ pub fn builtin_display_defs() -> Vec<DisplayDef> {
         },
         DisplayDef {
             name: "layer-shell".to_string(),
-            bin: layer_shell_bin,
+            bin: sibling_bin("waywallen-layer-shell"),
             de: vec![
                 "hyprland".to_string(),
                 "sway".to_string(),
@@ -96,6 +99,19 @@ pub fn builtin_display_defs() -> Vec<DisplayDef> {
             ],
             priority: 50,
             requires: vec!["wlr-layer-shell".to_string(), "linux-dmabuf-v4".to_string()],
+            extra_args: Vec::new(),
+            spawn: SpawnMode::Daemon,
+        },
+        DisplayDef {
+            name: "x11".to_string(),
+            bin: sibling_bin("waywallen-x11"),
+            de: vec![
+                "mate".to_string(),
+                "x-cinnamon".to_string(),
+                "xfce".to_string(),
+            ],
+            priority: 50,
+            requires: vec!["x11".to_string()],
             extra_args: Vec::new(),
             spawn: SpawnMode::Daemon,
         },
@@ -220,6 +236,10 @@ mod tests {
         assert_eq!(
             registry.find("gnome-shell").map(|def| def.spawn),
             Some(SpawnMode::External)
+        );
+        assert_eq!(
+            registry.find("x11").map(|def| def.spawn),
+            Some(SpawnMode::Daemon)
         );
     }
 

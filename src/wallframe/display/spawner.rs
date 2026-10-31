@@ -230,6 +230,11 @@ pub fn pick_backend(reg: &DisplayRegistry, caps: &DeCaps) -> PickOutcome {
         if d.de.iter().any(|t| t.eq_ignore_ascii_case("kde")) && !d.de.iter().any(|t| t == "*") {
             continue;
         }
+        // MATE, Cinnamon and Xfce keep their XDG_CURRENT_DESKTOP on Wayland.
+        if requires_x11(d) && caps.is_wayland_session {
+            log::debug!("display backend {} skipped: Wayland session", d.name);
+            continue;
+        }
         if !d.requires.is_empty() && !caps.probed_globals.is_empty() {
             let ok = d
                 .requires
@@ -347,6 +352,10 @@ pub fn preflight_daemon_backend(
 
 fn requires_layer_shell(def: &DisplayDef) -> bool {
     def.requires.iter().any(|r| r == "wlr-layer-shell")
+}
+
+fn requires_x11(def: &DisplayDef) -> bool {
+    def.requires.iter().any(|r| r == "x11")
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +617,28 @@ mod tests {
                 PickOutcome::Matched(d) => assert_eq!(d.name, "layer-shell"),
                 other => panic!("expected Matched(layer-shell) for {desktop}, got {other:?}"),
             }
+        }
+    }
+
+    #[test]
+    fn x11_desktops_pick_x11_client_outside_wayland() {
+        for desktop in ["mate", "x-cinnamon", "xfce"] {
+            let mut caps = DeCaps {
+                xdg_desktop: vec![desktop.into()],
+                ..Default::default()
+            };
+            let outcome = pick_backend(&registry(), &caps);
+            match &outcome {
+                PickOutcome::Matched(d) => assert_eq!(d.name, "x11"),
+                other => panic!("expected Matched(x11) for {desktop}, got {other:?}"),
+            }
+            assert!(should_daemon_spawn(&outcome));
+
+            caps.is_wayland_session = true;
+            assert!(matches!(
+                pick_backend(&registry(), &caps),
+                PickOutcome::None
+            ));
         }
     }
 
