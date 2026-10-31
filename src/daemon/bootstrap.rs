@@ -74,11 +74,15 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         None
     } else {
         let registry = build_display_registry(&cli.plugin_dirs);
-        Some(select_display_backend(
-            &registry,
-            &display_caps,
-            cli.display_backend.as_deref(),
-        )?)
+        let pick =
+            select_display_backend(&registry, &display_caps, cli.display_backend.as_deref())?;
+        // A backend pinned with --display-backend never falls back.
+        let fallbacks = if cli.display_backend.is_none() {
+            display::spawner::fallback_backends(&registry, &display_caps, &pick)
+        } else {
+            Vec::new()
+        };
+        Some((pick, fallbacks))
     };
 
     // Single-instance gate.
@@ -346,7 +350,7 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
             display::spawner::DisplayBackendStatus::disabled(&display_caps);
         None
     } else {
-        let pick = display_pick.expect("display pick missing without --no-display");
+        let (pick, fallbacks) = display_pick.expect("display pick missing without --no-display");
         display::spawner::log_outcome(&pick, &display_caps);
         let should_spawn = display::spawner::should_daemon_spawn(&pick);
         let (status, backend) = match pick {
@@ -355,7 +359,7 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
                 if should_spawn =>
             {
                 let (status, backend) =
-                    display::spawner::preflight_daemon_backend(def, &display_caps);
+                    display::spawner::preflight_with_fallback(def, &fallbacks, &display_caps);
                 if status.state == display::spawner::DISPLAY_BACKEND_STATE_BINARY_MISSING
                     || status.state == display::spawner::DISPLAY_BACKEND_STATE_FLATPAK_RESTRICTED
                 {
