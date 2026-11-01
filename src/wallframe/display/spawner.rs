@@ -198,6 +198,15 @@ pub fn pick_backend(reg: &DisplayRegistry, caps: &DeCaps) -> PickOutcome {
         return PickOutcome::None;
     }
 
+    match matching_backends(reg, caps).into_iter().next() {
+        Some(def) => PickOutcome::Matched(def),
+        None => PickOutcome::None,
+    }
+}
+
+/// Non-KDE backends applicable to `caps`, in pick order: highest priority
+/// first, ties in registration order.
+fn matching_backends(reg: &DisplayRegistry, caps: &DeCaps) -> Vec<DisplayDef> {
     let de_matches = |d: &DisplayDef| -> bool {
         if d.de.is_empty() {
             return true;
@@ -220,7 +229,7 @@ pub fn pick_backend(reg: &DisplayRegistry, caps: &DeCaps) -> PickOutcome {
 
     // Soft capability check: only warn on missing `requires`; don't veto
     // until the real wl_registry probe lands. This keeps Hyprland/Sway
-    let mut best: Option<DisplayDef> = None;
+    let mut matched = Vec::new();
     for d in reg.all() {
         if !de_matches(&d) {
             continue;
@@ -249,17 +258,26 @@ pub fn pick_backend(reg: &DisplayRegistry, caps: &DeCaps) -> PickOutcome {
                 continue;
             }
         }
-        match best {
-            None => best = Some(d.clone()),
-            Some(ref cur) if d.priority > cur.priority => best = Some(d.clone()),
-            _ => {}
-        }
+        matched.push(d.clone());
     }
+    matched
+}
 
-    match best {
-        Some(def) => PickOutcome::Matched(def),
-        None => PickOutcome::None,
-    }
+/// Backends to try when the auto-picked one cannot start: the remaining
+/// matches in pick order. KDE keeps its hard rule and gets none.
+pub fn fallback_backends(
+    reg: &DisplayRegistry,
+    caps: &DeCaps,
+    pick: &PickOutcome,
+) -> Vec<DisplayDef> {
+    let PickOutcome::Matched(picked) = pick else {
+        return Vec::new();
+    };
+    matching_backends(reg, caps)
+        .into_iter()
+        .skip_while(|d| d.name != picked.name)
+        .skip(1)
+        .collect()
 }
 
 /// Convenience: log the outcome at info level with enough detail to
@@ -348,6 +366,33 @@ pub fn preflight_daemon_backend(
     let mut def = def;
     def.bin = resolved;
     (DisplayBackendStatus::ready(&def, caps), Some(def))
+}
+
+/// Like [`preflight_daemon_backend`], but when the binary is missing moves on
+/// to the next fallback. Keeps the first `binary_missing` status if none of
+/// them is installed.
+pub fn preflight_with_fallback(
+    def: DisplayDef,
+    fallbacks: &[DisplayDef],
+    caps: &DeCaps,
+) -> (DisplayBackendStatus, Option<DisplayDef>) {
+    let (first_status, backend) = preflight_daemon_backend(def, caps);
+    if first_status.state != DISPLAY_BACKEND_STATE_BINARY_MISSING {
+        return (first_status, backend);
+    }
+    let mut reason = first_status.reason.clone();
+    for next in fallbacks {
+        log::warn!("{reason}; trying display backend {}", next.name);
+        if !matches!(next.spawn, SpawnMode::Daemon) {
+            return (DisplayBackendStatus::external(next, caps), None);
+        }
+        let (status, backend) = preflight_daemon_backend(next.clone(), caps);
+        if status.state != DISPLAY_BACKEND_STATE_BINARY_MISSING {
+            return (status, backend);
+        }
+        reason = status.reason;
+    }
+    (first_status, None)
 }
 
 fn requires_layer_shell(def: &DisplayDef) -> bool {
@@ -733,6 +778,54 @@ mod tests {
         assert_eq!(status.state, DISPLAY_BACKEND_STATE_BINARY_MISSING);
         assert_eq!(status.desktop, "hyprland");
         assert!(status.reason.contains("was not found"));
+    }
+
+    #[test]
+    fn missing_binary_falls_back_to_next_matching_backend() {
+        let caps = DeCaps {
+            xdg_desktop: vec!["mate".into()],
+            ..Default::default()
+        };
+        let mut reg = DisplayRegistry::new();
+        let mut missing = def("x11-custom", &["mate"], 60, SpawnMode::Daemon);
+        missing.bin = PathBuf::from("/__waywallen_missing_x11_binary__");
+        let mut installed = def("x11", &["mate"], 50, SpawnMode::Daemon);
+        installed.bin = std::env::current_exe().unwrap();
+        reg.register(missing);
+        reg.register(installed);
+        reg.register(def("layer-shell", &["sway"], 70, SpawnMode::Daemon));
+
+        let pick = pick_backend(&reg, &caps);
+        let fallbacks = fallback_backends(&reg, &caps, &pick);
+        let PickOutcome::Matched(picked) = pick else {
+            panic!("expected Matched(x11-custom), got {pick:?}");
+        };
+        assert_eq!(picked.name, "x11-custom");
+        assert_eq!(fallbacks.len(), 1);
+
+        let (status, backend) = preflight_with_fallback(picked.clone(), &fallbacks, &caps);
+        assert_eq!(status.name, "x11");
+        assert_eq!(status.state, DISPLAY_BACKEND_STATE_READY);
+        assert_eq!(backend.unwrap().name, "x11");
+
+        let (status, backend) = preflight_with_fallback(picked, &fallbacks[..0], &caps);
+        assert!(backend.is_none());
+        assert_eq!(status.name, "x11-custom");
+        assert_eq!(status.state, DISPLAY_BACKEND_STATE_BINARY_MISSING);
+    }
+
+    #[test]
+    fn kde_hard_match_has_no_fallbacks() {
+        let caps = DeCaps {
+            xdg_desktop: vec!["kde".into()],
+            ..Default::default()
+        };
+        let mut reg = registry();
+        reg.register(def("any", &["*"], 10, SpawnMode::Daemon));
+
+        let pick = pick_backend(&reg, &caps);
+        assert!(matches!(pick, PickOutcome::KdeHardMatch(_)));
+        assert!(fallback_backends(&reg, &caps, &pick).is_empty());
     }
 
     #[test]

@@ -10,7 +10,7 @@ ENV_NAME="${WAYWALLEN_CONDA_ENV:-waywallen}"
 ENV_PREFIX="${WAYWALLEN_CONDA_PREFIX:-$PROJECT_DIR/build/conda-envs/$ENV_NAME}"
 TMP_DIR="${TMPDIR:-/tmp}"
 WAYWALLEN_DISPLAY_REPO="${WAYWALLEN_DISPLAY_REPO:-https://github.com/waywallen/waywallen-display.git}"
-WAYWALLEN_DISPLAY_REF="${WAYWALLEN_DISPLAY_REF:-f8119f0483cc30baca20ec9b697070cb9a1724e6}"
+WAYWALLEN_DISPLAY_REF="${WAYWALLEN_DISPLAY_REF:-3c9c4a736677182695bbe5bc36fadaf8e211a091}"
 APPDIR="$PROJECT_DIR/build/AppDir"
 INSTALL_DIR="$APPDIR/usr"
 TOOLS_DIR="$PROJECT_DIR/build/_tools"
@@ -202,7 +202,7 @@ pushd "$PROJECT_DIR"
     --config "tools.cmake.search-path=[\"$CONDA_PREFIX\"]"
 popd
 
-info "Building and installing waywallen-layer-shell"
+info "Building and installing waywallen-layer-shell and waywallen-x11"
 if [[ -d "$WAYWALLEN_DISPLAY_SRC/.git" ]]; then
     git -C "$WAYWALLEN_DISPLAY_SRC" remote set-url origin "$WAYWALLEN_DISPLAY_REPO"
 else
@@ -215,12 +215,16 @@ git -C "$WAYWALLEN_DISPLAY_SRC" checkout --detach "$WAYWALLEN_DISPLAY_REF"
 pushd "$WAYWALLEN_DISPLAY_SRC"
 cargo build \
     --bin waywallen-layer-shell \
+    --bin waywallen-x11 \
+    --features x11 \
     --release \
     --locked
 popd
-install -Dm755 \
-    "$WAYWALLEN_DISPLAY_SRC/target/release/waywallen-layer-shell" \
-    "$INSTALL_DIR/bin/waywallen-layer-shell"
+for display_bin in waywallen-layer-shell waywallen-x11; do
+    install -Dm755 \
+        "$WAYWALLEN_DISPLAY_SRC/target/release/$display_bin" \
+        "$INSTALL_DIR/bin/$display_bin"
+done
 
 mkdir -p "$TOOLS_DIR"
 LINUXDEPLOY="$TOOLS_DIR/linuxdeploy-$APPIMAGE_ARCH.AppImage"
