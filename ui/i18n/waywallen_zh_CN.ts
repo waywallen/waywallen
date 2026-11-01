@@ -11,32 +11,32 @@
     <message>
         <location filename="../qml/page/AboutPage.qml" line="58"/>
         <source>Daemon version %1</source>
-        <translation type="unfinished"></translation>
+        <translation>守护进程版本 %1</translation>
     </message>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="58"/>
         <source>Checking for updates…</source>
-        <translation type="unfinished"></translation>
+        <translation>正在检查更新…</translation>
     </message>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="61"/>
         <source>You have the latest version</source>
-        <translation type="unfinished"></translation>
+        <translation>已是最新版本</translation>
     </message>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="63"/>
         <source>Could not check for updates</source>
-        <translation type="unfinished"></translation>
+        <translation>无法检查更新</translation>
     </message>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="65"/>
         <source>Check for updates</source>
-        <translation type="unfinished"></translation>
+        <translation>检查更新</translation>
     </message>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="75"/>
         <source>Version %1 is available</source>
-        <translation type="unfinished"></translation>
+        <translation>版本 %1 已发布</translation>
     </message>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="57"/>
@@ -1224,7 +1224,7 @@
     <message>
         <location filename="../qml/page/PluginManagePage.qml" line="529"/>
         <source>Incompatible</source>
-        <translation type="unfinished"></translation>
+        <translation>不兼容</translation>
     </message>
 </context>
 <context>
@@ -1914,12 +1914,12 @@ Related display: #%1</source>
     <message>
         <location filename="../qml/page/SettingsPage.qml" line="865"/>
         <source>Check for updates</source>
-        <translation type="unfinished"></translation>
+        <translation>检查更新</translation>
     </message>
     <message>
         <location filename="../qml/page/SettingsPage.qml" line="868"/>
         <source>Look for a new release on GitHub once a day and mark the app icon when one is available.</source>
-        <translation type="unfinished"></translation>
+        <translation>每天在 GitHub 上检查一次新版本，有可用版本时在应用图标上标记。</translation>
     </message>
     <message>
         <location filename="../qml/page/SettingsPage.qml" line="681"/>
@@ -2271,27 +2271,27 @@ Related display: #%1</source>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="183"/>
         <source>unknown</source>
-        <translation type="unfinished"></translation>
+        <translation>未知</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="185"/>
         <source>healthy</source>
-        <translation type="unfinished"></translation>
+        <translation>正常</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="191"/>
         <source>starting</source>
-        <translation type="unfinished"></translation>
+        <translation>启动中</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="193"/>
         <source>playing</source>
-        <translation type="unfinished"></translation>
+        <translation>播放中</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="195"/>
         <source>paused</source>
-        <translation type="unfinished"></translation>
+        <translation>已暂停</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="196"/>
@@ -2301,12 +2301,12 @@ Related display: #%1</source>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="197"/>
         <source>muted</source>
-        <translation type="unfinished"></translation>
+        <translation>已静音</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="199"/>
         <source>stopping</source>
-        <translation type="unfinished"></translation>
+        <translation>停止中</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="201"/>
@@ -2320,17 +2320,17 @@ Unsaved frame state may be lost.</source>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="201"/>
         <source>stopped</source>
-        <translation type="unfinished"></translation>
+        <translation>已停止</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="203"/>
         <source>killed</source>
-        <translation type="unfinished"></translation>
+        <translation>已终止</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="205"/>
         <source>failed</source>
-        <translation type="unfinished"></translation>
+        <translation>失败</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="240"/>
@@ -2375,7 +2375,7 @@ Unsaved frame state may be lost.</source>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="452"/>
         <source>keep</source>
-        <translation type="unfinished"></translation>
+        <translation>保留</translation>
     </message>
     <message>
         <location filename="../qml/page/StatusPage.qml" line="460"/>
@@ -2494,6 +2494,26 @@ Unsaved frame state may be lost.</source>
         <source>Fixed</source>
         <translation>固定</translation>
     </message>
+    <message>
+        <location filename="../qml/page/wallpaper/TweakSheet.qml" line="141"/>
+        <source>Image decode cache</source>
+        <translation>图片解码缓存</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/wallpaper/TweakSheet.qml" line="153"/>
+        <source>%1 MiB</source>
+        <translation>%1 MiB</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/wallpaper/TweakSheet.qml" line="154"/>
+        <source>512 MiB</source>
+        <translation>512 MiB</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/wallpaper/TweakSheet.qml" line="160"/>
+        <source>Lower values use less memory but may increase CPU usage when playing animated thumbnails. Set to 0 to disable caching.</source>
+        <translation>较小的值占用更少内存，但播放动态缩略图时可能增加 CPU 占用。设为 0 可关闭缓存。</translation>
+    </message>
 </context>
 <context>
     <name>waywallen::model::UserPropertyListModel</name>
@@ -2515,7 +2535,7 @@ Unsaved frame state may be lost.</source>
     <message>
         <location filename="../src/model/user_property_model.cpp" line="319"/>
         <source>Mouse parallax</source>
-        <translation type="unfinished"></translation>
+        <translation>鼠标视差</translation>
     </message>
 </context>
 <context>
@@ -3115,6 +3135,31 @@ Unsaved frame state may be lost.</source>
         <source>Auto detect libraries</source>
         <translation>自动检测库</translation>
     </message>
+    <message>
+        <location filename="../qml/page/WallpaperPage.qml" line="64"/>
+        <source>Hidden %1</source>
+        <translation>已隐藏 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperPage.qml" line="64"/>
+        <source>Unhidden %1</source>
+        <translation>已取消隐藏 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperPage.qml" line="68"/>
+        <source>Hide failed</source>
+        <translation>隐藏失败</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperPage.qml" line="297"/>
+        <source>Unhide %1</source>
+        <translation>取消隐藏 %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperPage.qml" line="297"/>
+        <source>Hide %1</source>
+        <translation>隐藏 %1</translation>
+    </message>
 </context>
 <context>
     <name>Window</name>
@@ -3198,7 +3243,7 @@ Unsaved frame state may be lost.</source>
     <message>
         <location filename="../qml/Window.qml" line="288"/>
         <source>Version %1 is available</source>
-        <translation type="unfinished"></translation>
+        <translation>版本 %1 已发布</translation>
     </message>
 </context>
 <context>
