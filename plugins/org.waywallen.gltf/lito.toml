@@ -1,0 +1,21 @@
+[package]
+name = "waywallen-gltf-plugin"
+version.workspace = true
+
+[[bin]]
+name = "waywallen-gltf-renderer"
+module = "waywallen.gltf.entry"
+sources = ["src/main.cpp", "src/entry.cppm", "src/entry.cpp"]
+
+[usage]
+threads = true
+
+[dependencies]
+waywallen-plugin-common.workspace = true
+rstd-std.workspace = true
+rstd-argparse.workspace = true
+rstd-log.workspace = true
+vecgltf.workspace = true
+
+[runtime-dependencies.waywallen-bridge]
+workspace = true

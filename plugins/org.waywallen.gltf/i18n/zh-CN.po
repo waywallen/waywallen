@@ -1,0 +1,41 @@
+msgid ""
+msgstr "Project-Id-Version: org.waywallen.gltf 0.5.0\nLanguage: zh-CN\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+msgid "glTF"
+msgstr "glTF"
+
+msgid "glTF Folder"
+msgstr "glTF 文件夹"
+
+msgid "A directory containing glTF or GLB models. Subdirectories up to two levels deep are also scanned. Keep each model's external buffers and textures beside it."
+msgstr "包含 glTF 或 GLB 模型的目录。同时扫描最多两级子目录。请保留模型及其外部缓冲区和纹理文件的相对位置。"
+
+msgid "Frame rate"
+msgstr "帧率"
+
+msgid "Resolution"
+msgstr "分辨率"
+
+msgid "Custom resolution"
+msgstr "自定义分辨率"
+
+msgid "Render node"
+msgstr "渲染节点"
+
+msgid "Rendering"
+msgstr "渲染"
+
+msgid "Exposure"
+msgstr "曝光"
+
+msgid "Animation index"
+msgstr "动画索引"
+
+msgid "Use -1 for the static pose. Animation indices start at 0."
+msgstr "使用 -1 显示静态姿态。动画索引从 0 开始。"
+
+msgid "Loop animation"
+msgstr "循环动画"
+
+msgid "Playback"
+msgstr "播放"

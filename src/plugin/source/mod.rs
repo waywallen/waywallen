@@ -25,6 +25,8 @@ pub use types::*;
 #[cfg(test)]
 mod discover_tests;
 #[cfg(test)]
+mod gltf_tests;
+#[cfg(test)]
 mod image_tests;
 #[cfg(test)]
 mod sketchfab_tests;

@@ -4,6 +4,7 @@ members = [
   "bridge",
   "plugins",
   "plugins/org.waywallen.image",
+  "plugins/org.waywallen.gltf",
   "plugins/org.waywallen.sketchfab",
   "plugins/org.waywallen.video",
   "plugins/org.waywallen.wallhaven",
@@ -15,6 +16,7 @@ members = [
 ]
 default-members = [
   "plugins/org.waywallen.image",
+  "plugins/org.waywallen.gltf",
   "plugins/org.waywallen.sketchfab",
   "plugins/org.waywallen.video",
   "plugins/org.waywallen.wallhaven",
@@ -41,6 +43,7 @@ luato = { git = "https://github.com/litocpp/luato.git" }
 wavsen = { git = "https://github.com/hypengw/wavsen.git" }
 ncrequest = { git = "https://github.com/hypengw/ncrequest.git" }
 qextra = { git = "https://github.com/hypengw/QExtra.git" }
+vecgltf = { git = "https://github.com/vecren/vecgltf.git" }
 
 [workspace.external-dependencies.pkg-config]
 gbm = { module = "gbm" }

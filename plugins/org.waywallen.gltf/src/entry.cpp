@@ -1,0 +1,801 @@
+module;
+
+#include <rstd/macro.hpp>
+#include <errno.h>
+#include <poll.h>
+#include <signal.h>
+#include <sys/prctl.h>
+#include <unistd.h>
+
+module waywallen.gltf.entry;
+
+import rstd;
+import rstd.argparse;
+import rstd.log;
+import vecgltf.render;
+import waywallen.bridge;
+
+namespace
+{
+using namespace rstd::prelude;
+using namespace rstd::literals;
+using rstd::ffi::CStr;
+using rstd::ffi::CString;
+using rstd::sync::Arc;
+namespace gltf = vecgltf;
+namespace vk   = vrento::vulkan;
+namespace tex  = vrento::texture;
+
+struct Options {
+    String   path, ipc, render_node, capture;
+    unsigned fps { 30 }, custom_extent { 1080 }, frames { 3 };
+    int      resolution { -2 }, animation {};
+    float    exposure { 1 };
+    bool     loop { true }, selftest {}, validation {};
+};
+
+auto text(const char* value) -> ref<str> {
+    return value ? CStr::from_ptr(value).to_str().unwrap_or(""_str) : ""_str;
+}
+auto terminated(ref<str> value) -> CString {
+    return CString::make(Vec<u8>::from(value.as_bytes())).unwrap();
+}
+void report(const gltf::Error& error) {
+    rstd_error(
+        "gltf: {} [{}] {}: {}", error.source, unsigned(error.kind), error.location, error.message);
+}
+template<class T>
+auto number(ref<str> value) -> Option<T> {
+    auto parsed = rstd::from_str<T>(value);
+    return parsed.is_ok() ? Some(parsed.unwrap()) : None<T>();
+}
+void settings(Options& options, const ww_kv_list_t& values) {
+    for (unsigned i = 0; i < values.count; ++i) {
+        auto key = text(values.data[i].key), value = text(values.data[i].value);
+        if (key == "render_node"_str)
+            options.render_node = String::make(value);
+        else if (key == "fps"_str) {
+            auto v = number<u32>(value);
+            if (v && *v >= u32(1) && *v <= u32(240)) options.fps = v->to_primitive();
+        } else if (key == "resolution"_str) {
+            auto v = number<i32>(value);
+            if (v) options.resolution = ww_resolution_sanitize(v->to_primitive());
+        } else if (key == "custom_extent"_str) {
+            auto v = number<u32>(value);
+            if (v && *v >= u32(1) && *v <= u32(8192)) options.custom_extent = v->to_primitive();
+        } else if (key == "animation"_str) {
+            auto v = number<i32>(value);
+            if (v && *v >= i32(-1)) options.animation = v->to_primitive();
+        } else if (key == "exposure"_str) {
+            auto v = number<f32>(value);
+            if (v && v->is_finite() && *v >= f32(0.1) && *v <= f32(16))
+                options.exposure = v->to_primitive();
+        } else if (key == "loop"_str) {
+            if (value == "true"_str) options.loop = true;
+            if (value == "false"_str) options.loop = false;
+        }
+    }
+}
+
+auto parse(int argc, char** argv, int& status) -> Option<Options> {
+    using namespace rstd::argparse;
+    auto command = Command::make("waywallen-gltf-renderer"_str);
+    command.about("Render glTF and GLB wallpapers"_str);
+    auto path =
+        command.add_arg(Arg<String>::value("path"_str, string_parser()).long_name("path"_str));
+    auto ipc = command.add_arg(Arg<String>::value("ipc"_str, string_parser()).long_name("ipc"_str));
+    auto node = command.add_arg(
+        Arg<String>::value("render-node"_str, string_parser()).long_name("render-node"_str));
+    auto frames =
+        command.add_arg(Arg<String>::value("frames"_str, string_parser()).long_name("frames"_str));
+    auto capture = command.add_arg(
+        Arg<String>::value("capture"_str, string_parser()).long_name("capture"_str));
+    command.add_arg(Arg<bool>::flag("selftest"_str).long_name("selftest"_str));
+    command.add_arg(Arg<bool>::flag("validation"_str).long_name("validation"_str));
+    auto built = rstd::move(command).build();
+    if (built.is_err()) {
+        status = 1;
+        return None();
+    }
+    auto                     parser = built.unwrap();
+    Vec<rstd::ffi::OsString> args;
+    for (int i = 0; i < argc; ++i)
+        args.push(rstd::ffi::OsString::from(
+            ref<rstd::ffi::OsStr>::from_encoded_bytes_unchecked(text(argv[i]).as_bytes())));
+    auto parsed = parser.parse_from(rstd::move(args));
+    if (parsed.is_err()) {
+        auto output = parser.render_error(parsed.unwrap_err());
+        rstd::io::eprint("{}", output.text());
+        status = output.exit_code().to_primitive();
+        return None();
+    }
+    auto outcome = parsed.unwrap();
+    if (outcome.is_Display()) {
+        rstd::io::println("{}", outcome.as_Display().request.text());
+        status = outcome.as_Display().request.exit_code().to_primitive();
+        return None();
+    }
+    auto    matches = rstd::move(outcome).as_Parsed().value;
+    Options options;
+    auto    copy = [&](const auto& key, String& target) {
+        auto value = matches.get_one(key).unwrap();
+        if (value) target = (**value).clone();
+    };
+    copy(path, options.path);
+    copy(ipc, options.ipc);
+    copy(node, options.render_node);
+    copy(capture, options.capture);
+    String count;
+    copy(frames, count);
+    if (! count.is_empty()) {
+        auto value = number<u32>(count.as_str());
+        if (! value || *value < u32(1) || *value > u32(1000)) {
+            status = 2;
+            return None();
+        }
+        options.frames = value->to_primitive();
+    }
+    options.selftest   = matches.contains("selftest"_str);
+    options.validation = matches.contains("validation"_str);
+    if (options.path.is_empty() || (! options.selftest && options.ipc.is_empty())) {
+        rstd_error("--path MODEL and either --ipc SOCKET or --selftest are required");
+        status = 2;
+        return None();
+    }
+    return Some(rstd::move(options));
+}
+
+VkExtent2D initial_extent(const Options& options) {
+    VkExtent2D extent { 1920, 1080 };
+    unsigned   cap = options.resolution == WW_RESOLUTION_CUSTOM
+                         ? options.custom_extent
+                         : ww_resolution_short_edge(options.resolution);
+    ww_resolution_apply_short_edge(
+        cap, WW_RESOLUTION_CAP_ALLOW_UPSCALE, &extent.width, &extent.height);
+    if (extent.width > 7680 || extent.height > 4320) {
+        if (uint64_t(extent.width) * 4320 > uint64_t(extent.height) * 7680) {
+            extent.height = unsigned(uint64_t(extent.height) * 7680 / extent.width);
+            extent.width  = 7680;
+        } else {
+            extent.width  = unsigned(uint64_t(extent.width) * 4320 / extent.height);
+            extent.height = 4320;
+        }
+    }
+    if (options.selftest) extent = { 128, 128 };
+    return extent;
+}
+
+struct Gpu {
+    vk::DeviceSession           session;
+    vk::TextureContext          queue;
+    gltf::Renderer              renderer;
+    gltf::SceneInstance         instance;
+    gltf::PreparedAsset         prepared;
+    gltf::OrbitCamera           camera;
+    Option<tex::TextureViewRef> target;
+    tex::SubmissionToken        last;
+    VkExtent2D                  extent {};
+    Gpu(vk::DeviceSession device, vk::TextureContext context, gltf::Renderer graphics,
+        gltf::SceneInstance scene, gltf::PreparedAsset model)
+        : session(rstd::move(device)),
+          queue(rstd::move(context)),
+          renderer(rstd::move(graphics)),
+          instance(rstd::move(scene)),
+          prepared(rstd::move(model)) {
+        camera.fit(instance.bounds());
+    }
+    bool resize(VkExtent2D size) {
+        if (target && size.width == extent.width && size.height == extent.height) return true;
+        tex::TextureDesc desc;
+        desc.extent = { size.width, size.height };
+        desc.usage = tex::Usage::ColorAttachment | tex::Usage::Sampled | tex::Usage::TransferSource;
+        auto image = queue.CreateTexture(desc);
+        if (image.is_err()) return false;
+        auto view = queue.CreateView(image.unwrap(), {});
+        if (view.is_err()) return false;
+        auto resized = renderer.resize(size);
+        if (resized.is_err()) {
+            report(resized.unwrap_err());
+            return false;
+        }
+        target = Some(view.unwrap());
+        extent = size;
+        return true;
+    }
+    void configure(const Options& options) {
+        unsigned selected =
+            options.animation < 0 ? gltf::invalid_index : unsigned(options.animation);
+        auto count = gltf::count(instance.asset().animations);
+        if (! count && options.animation == 0) selected = gltf::invalid_index;
+        if (selected != gltf::invalid_index && selected >= count) {
+            rstd_warn("gltf: animation {} is out of range; keeping current selection",
+                      options.animation);
+            selected = instance.animation();
+        }
+        if (instance.animation() != selected) {
+            instance.set_animation(selected);
+            camera.fit(instance.bounds());
+        }
+        instance.set_looping(options.loop);
+    }
+    bool animating(const Options& options) const {
+        auto animation = instance.animation();
+        return animation != gltf::invalid_index &&
+               (options.loop ||
+                instance.time() < gltf::at(instance.asset().animations, animation).end);
+    }
+    auto record(float delta, const Options& options) -> Option<tex::Submission> {
+        instance.update(delta);
+        auto begun = queue.Begin();
+        if (begun.is_err()) return None();
+        auto work     = begun.unwrap();
+        auto recorded = renderer.record(work,
+                                        *target,
+                                        prepared,
+                                        instance,
+                                        camera.view(float(extent.width) / float(extent.height)),
+                                        { options.exposure });
+        if (recorded.is_err()) {
+            report(recorded.unwrap_err());
+            return None();
+        }
+        return Some(rstd::move(work));
+    }
+};
+
+auto create_gpu(const Options& options) -> Option<Box<Gpu>> {
+    auto path      = rstd::path::PathBuf::from(options.path.as_str());
+    auto canonical = rstd::fs::canonicalize(path.as_path());
+    if (canonical.is_err()) {
+        rstd_error("gltf: model path: {}", canonical.unwrap_err());
+        return None();
+    }
+    auto canonical_path = canonical.unwrap();
+    auto source         = canonical_path.as_path().to_str();
+    if (! source) {
+        rstd_error("gltf: model path is not UTF-8");
+        return None();
+    }
+    auto loaded = gltf::LoadAsset(source.unwrap());
+    if (loaded.is_err()) {
+        report(loaded.unwrap_err());
+        return None();
+    }
+    auto asset = loaded.unwrap();
+    for (const auto& diagnostic : asset->diagnostics)
+        rstd_warn("gltf: {}: {}", diagnostic.location, diagnostic.message);
+    vk::DeviceSessionOptions device;
+    device.extent     = initial_extent(options);
+    device.validation = options.validation;
+    Vec<vk::Extension> extensions;
+    if (! options.selftest) {
+        ref<str> names[] {
+            "VK_KHR_external_memory_fd"_str,    "VK_EXT_external_memory_dma_buf"_str,
+            "VK_KHR_image_format_list"_str,     "VK_EXT_image_drm_format_modifier"_str,
+            "VK_KHR_external_semaphore_fd"_str, "VK_EXT_queue_family_foreign"_str
+        };
+        for (auto name : names) extensions.push({ true, name });
+        extensions.push({ false, "VK_EXT_physical_device_drm"_str });
+    }
+    device.device_extensions = extensions.as_slice();
+    rstd::uint8_t uuid[16] {};
+    if (! options.render_node.is_empty()) {
+        vrento::vulkan::Instance probe;
+        auto                     created = vk::Instance::TryCreate(probe, {}, {});
+        if (created.is_err()) {
+            rstd_error("render-node Vulkan instance failed");
+            return None();
+        }
+        ww_bridge_vk_dt_t dispatch {};
+        auto&             native = probe.inst();
+        ww_bridge_vk_dt_load(&dispatch, native.Dispatch().resolver, *native);
+        auto path = terminated(options.render_node.as_str());
+        int  rc   = ww_bridge_vk_resolve_render_node(&dispatch, *native, path.as_ptr(), uuid);
+        if (rc) {
+            rstd_error("render-node resolution failed: {}", rc);
+            return None();
+        }
+        device.physical_device_uuid = slice<rstd::uint8_t>::from_raw_parts(uuid, usize(16));
+    }
+    auto created = vk::DeviceSession::create(device);
+    if (created.is_err()) {
+        rstd_error("Vulkan session: {}", created.unwrap_err());
+        return None();
+    }
+    auto session = created.unwrap();
+    auto context = vk::TextureContext::create(session);
+    if (context.is_err()) {
+        rstd_error("Vulkan texture context failed");
+        return None();
+    }
+    auto graphics = gltf::Renderer::create(session, device.extent);
+    if (graphics.is_err()) {
+        report(graphics.unwrap_err());
+        return None();
+    }
+    auto renderer = graphics.unwrap();
+    auto prepared = renderer.prepare(asset.clone());
+    if (prepared.is_err()) {
+        report(prepared.unwrap_err());
+        return None();
+    }
+    auto gpu = Box<Gpu>::make(session,
+                              context.unwrap(),
+                              rstd::move(renderer),
+                              gltf::SceneInstance(asset.clone()),
+                              prepared.unwrap());
+    gpu->configure(options);
+    gpu->camera.fit(gpu->instance.bounds());
+    if (! gpu->resize(device.extent)) return None();
+    return Some(rstd::move(gpu));
+}
+
+struct Host {
+    Option<vk::DeviceSession>              device_owner;
+    int                                    socket { -1 };
+    ww_pool_t*                             pool {};
+    bool                                   ready {}, paused {}, frame_requested { true }, stop {};
+    uint64_t                               target_revision {};
+    waywallen_render_target_capabilities_t capabilities { .revision         = 1,
+                                                          .reference_width  = 1920,
+                                                          .reference_height = 1080,
+                                                          .mode             = 2,
+                                                          .min_width        = 1,
+                                                          .min_height       = 1,
+                                                          .max_width        = 7680,
+                                                          .max_height       = 4320,
+                                                          .width_alignment  = 1,
+                                                          .height_alignment = 1 };
+    void                                   close_pool() {
+        if (device_owner) (void)device_owner->wait_idle();
+        if (pool) ww_bridge_pool_destroy(pool);
+        pool = nullptr;
+    }
+    ~Host() {
+        close_pool();
+        if (socket >= 0) ww_bridge_close(socket);
+    }
+};
+
+bool open_pool(Host& host, Gpu& gpu, const Options& options) {
+    host.device_owner                     = Some(vk::DeviceSession(gpu.session));
+    auto&                        session  = gpu.session;
+    const auto&                  device   = session.device();
+    const auto&                  instance = session.instance_owner().inst();
+    VkPhysicalDeviceIDProperties ids { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
+    VkPhysicalDeviceProperties2 properties { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &ids };
+    device.gpu().GetProperties2KHR(properties);
+    ww_pool_vulkan_init_t init {};
+    init.instance           = session.instance();
+    init.physical_device    = *device.gpu();
+    init.device             = *device.handle();
+    init.queue              = *device.graphics_queue().handle;
+    init.queue_family_index = device.graphics_queue().family_index;
+    init.get_instance_proc_addr =
+        reinterpret_cast<void* (*)(void*, const char*)>(instance.Dispatch().resolver);
+    init.device_uuid          = ids.deviceUUID;
+    init.driver_uuid          = ids.driverUUID;
+    init.drm_render_fd        = -1;
+    init.image_usage_flags    = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    init.format_feature_flags = VK_FORMAT_FEATURE_BLIT_DST_BIT;
+    ww_bridge_vk_dt_t dispatch {};
+    ww_bridge_vk_dt_load(&dispatch, instance.Dispatch().resolver, *instance);
+    (void)ww_bridge_vk_query_render_node(
+        &dispatch, *device.gpu(), &init.drm_render_major, &init.drm_render_minor);
+    ww_bridge_vk_log_gpu_info("waywallen-gltf-renderer", &dispatch, *device.gpu());
+    int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &init, &host.pool);
+    if (! rc)
+        rc = ww_bridge_pool_advertise_caps(host.pool,
+                                           host.socket,
+                                           gpu.extent.width,
+                                           gpu.extent.height,
+                                           WW_MEM_HINT_DEVICE_LOCAL | WW_MEM_HINT_HOST_VISIBLE);
+    if (! rc && options.resolution == WW_RESOLUTION_AUTO)
+        rc = ww_bridge_send_render_target_capabilities(host.socket, &host.capabilities);
+    if (rc) rstd_error("bridge pool: {}", rc);
+    return rc == 0;
+}
+
+auto render_slot(Gpu& gpu, const ww_pool_slot_t& slot, bool reused, float delta,
+                 const Options& options) -> Option<int> {
+    if (! slot.vk_image || ! gpu.resize({ slot.width, slot.height })) return None();
+    auto begun = gpu.record(delta, options);
+    if (! begun) return None();
+    auto work   = begun.take().unwrap();
+    auto source = work.commands()->UseTexture(
+        { *gpu.target, tex::Access::TransferSource, tex::Stages::Transfer });
+    if (source.is_err()) return None();
+    auto command = vk::native_recording(work, gpu.session);
+    auto image   = vk::native_texture(gpu.target->texture());
+    if (command.is_err() || image.is_err()) return None();
+    const auto&          device      = gpu.session.device().handle();
+    const auto&          dispatch    = device.Dispatch();
+    VkImage              destination = reinterpret_cast<VkImage>(slot.vk_image);
+    VkImageMemoryBarrier acquire { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    acquire.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+    acquire.oldLayout           = reused ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_UNDEFINED;
+    acquire.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    acquire.srcQueueFamilyIndex = reused ? VK_QUEUE_FAMILY_FOREIGN_EXT : VK_QUEUE_FAMILY_IGNORED;
+    acquire.dstQueueFamilyIndex = reused ? gpu.queue.queue().family_index : VK_QUEUE_FAMILY_IGNORED;
+    acquire.image               = destination;
+    acquire.subresourceRange    = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+    dispatch.vkCmdPipelineBarrier(*command,
+                                  VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  0,
+                                  0,
+                                  nullptr,
+                                  0,
+                                  nullptr,
+                                  1,
+                                  &acquire);
+    VkImageBlit blit {};
+    blit.srcSubresource = blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    blit.srcOffsets[1] = blit.dstOffsets[1] = { int(slot.width), int(slot.height), 1 };
+    dispatch.vkCmdBlitImage(*command,
+                            *image,
+                            VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            destination,
+                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                            1,
+                            &blit,
+                            VK_FILTER_NEAREST);
+    VkImageMemoryBarrier release { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER };
+    release.srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+    release.oldLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    release.newLayout           = VK_IMAGE_LAYOUT_GENERAL;
+    release.srcQueueFamilyIndex = gpu.queue.queue().family_index;
+    release.dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
+    release.image               = destination;
+    release.subresourceRange    = acquire.subresourceRange;
+    dispatch.vkCmdPipelineBarrier(*command,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                                  0,
+                                  0,
+                                  nullptr,
+                                  0,
+                                  nullptr,
+                                  1,
+                                  &release);
+    VkExportSemaphoreCreateInfo export_info { VK_STRUCTURE_TYPE_EXPORT_SEMAPHORE_CREATE_INFO };
+    export_info.handleTypes = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    VkSemaphoreCreateInfo semaphore_info { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, &export_info };
+    vvk::Semaphore        semaphore;
+    if (device.CreateSemaphore(semaphore_info, semaphore) != VK_SUCCESS) return None();
+    auto handle   = *semaphore;
+    auto owner    = Arc<dyn<rstd::any::Any>>::make(rstd::move(semaphore));
+    auto attached = gpu.queue.AttachSignal(
+        work, { *device, handle, vk::NativeSemaphoreKind::Binary, 0, owner.clone() });
+    if (attached.is_err()) return None();
+    auto submitted = gpu.queue.Submit(rstd::move(work));
+    if (submitted.is_err()) return None();
+    gpu.last = submitted.unwrap();
+    VkSemaphoreGetFdInfoKHR fd_info { VK_STRUCTURE_TYPE_SEMAPHORE_GET_FD_INFO_KHR };
+    fd_info.semaphore  = handle;
+    fd_info.handleType = VK_EXTERNAL_SEMAPHORE_HANDLE_TYPE_SYNC_FD_BIT;
+    int fd             = -1;
+    if (device.GetSemaphoreFdKHR(fd_info, &fd) != VK_SUCCESS) return None();
+    return Some(fd);
+}
+
+bool publish(Host& host, Gpu& gpu, const ww_pool_slot_acquire_result_t& acquired, float delta,
+             const Options& options) {
+    auto fd = render_slot(
+        gpu, acquired.slot, acquired.status == WW_POOL_SLOT_ACQUIRE_READY_RELEASED, delta, options);
+    if (! fd) {
+        (void)gpu.session.wait_idle();
+        ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
+        return false;
+    }
+    ww_pool_slot_submit_result_t result {};
+    int                          rc = ww_bridge_pool_submit_acquired_slot(
+        host.pool, host.socket, &acquired.identity, fd.unwrap(), &result);
+    if (rc || result.status != WW_POOL_SLOT_SUBMIT_SUBMITTED) {
+        rstd_error("bridge submit failed: rc={} status={} error={}",
+                   rc,
+                   unsigned(result.status),
+                   result.error_code);
+        return false;
+    }
+    return true;
+}
+
+bool configure_target(Host& host, Gpu& gpu, const Options& options,
+                      const waywallen_render_target_config_t& config) {
+    waywallen_render_target_outcome_t result {};
+    result.revision             = config.revision;
+    result.status               = 1;
+    String              message = "invalid or stale render target"_Str;
+    ww_pool_directive_t directive {};
+    int rc = ww_bridge_render_target_directive(&host.capabilities, &config, &directive);
+    if (! rc && config.revision > host.target_revision &&
+        options.resolution == WW_RESOLUTION_AUTO) {
+        host.target_revision = config.revision;
+        result.status        = 2;
+        auto drained         = gpu.last.valid() ? gpu.queue.wait(gpu.last) : gpu.queue.Poll();
+        rc = drained.is_ok()
+                 ? ww_bridge_pool_prepare_target(host.pool, &directive, config.width, config.height)
+                 : -EIO;
+        if (! rc) {
+            ww_pool_slot_t slot {};
+            rc      = ww_bridge_pool_candidate_slot(host.pool, 0, &slot);
+            auto fd = rc ? None<int>() : render_slot(gpu, slot, false, 0, options);
+            if (fd && gpu.queue.wait(gpu.last).is_ok()) {
+                rc = ww_bridge_pool_commit_target(host.pool, host.socket, &result.pool_generation);
+                if (! rc) {
+                    ww_pool_slot_acquire_result_t acquired {};
+                    rc = ww_bridge_pool_try_acquire_any_for_render(host.pool, &acquired);
+                    if (! rc && acquired.status == WW_POOL_SLOT_ACQUIRE_READY_UNUSED &&
+                        acquired.slot.index == 0) {
+                        ww_pool_slot_submit_result_t submitted {};
+                        rc = ww_bridge_pool_submit_acquired_slot(host.pool,
+                                                                 host.socket,
+                                                                 &acquired.identity,
+                                                                 fd.take().unwrap(),
+                                                                 &submitted);
+                        if (! rc && submitted.status == WW_POOL_SLOT_SUBMIT_SUBMITTED) {
+                            result.status        = 0;
+                            result.width         = config.width;
+                            result.height        = config.height;
+                            host.ready           = true;
+                            host.frame_requested = false;
+                        }
+                    }
+                    if (result.status != 0) host.stop = true;
+                }
+            }
+            if (fd) ::close(fd.unwrap());
+            if (gpu.session.wait_idle() != VK_SUCCESS && ! gpu.session.lost()) host.stop = true;
+            ww_bridge_pool_abort_target(host.pool);
+        }
+        message =
+            result.status == 0 ? ""_Str : "render target allocation or publication failed"_Str;
+    }
+    auto wire      = terminated(message.as_str());
+    result.message = const_cast<char*>(wire.as_ptr());
+    return ww_bridge_send_render_target_result(host.socket, &result) == 0 && ! host.stop;
+}
+
+bool control(Host& host, Gpu& gpu, Options& options) {
+    ww_bridge_control_t event {};
+    int                 rc = ww_bridge_recv_control(host.socket, &event);
+    if (rc) return false;
+    bool ok = true;
+    switch (event.op) {
+    case WW_EVT_IN_SHUTDOWN: host.stop = true; break;
+    case WW_EVT_IN_PLAY:
+        host.paused          = false;
+        host.frame_requested = true;
+        break;
+    case WW_EVT_IN_PAUSE: host.paused = true; break;
+    case WW_EVT_IN_REQUEST_FRAME: host.frame_requested = true; break;
+    case WW_EVT_IN_SET_LOG_LEVEL: ww_renderer_log_set_level(event.u.set_log_level.level); break;
+    case WW_EVT_IN_SETTING_CHANGED:
+        settings(options, event.u.setting_changed.settings);
+        gpu.configure(options);
+        host.frame_requested = true;
+        break;
+    case WW_EVT_IN_NEGOTIATE_BUFFERS:
+        ok = (gpu.last.valid() ? gpu.queue.wait(gpu.last) : gpu.queue.Poll()).is_ok();
+        if (ok) {
+            rc = ww_bridge_pool_apply_directive(
+                host.pool, host.socket, &event.u.negotiate_buffers.directive);
+            ok                   = rc <= 0;
+            host.ready           = rc == 0;
+            host.frame_requested = true;
+        }
+        break;
+    case WW_EVT_IN_CONFIGURE_RENDER_TARGET:
+        ok = configure_target(host, gpu, options, event.u.configure_render_target.config);
+        break;
+    default: break;
+    }
+    ww_bridge_control_free(&event);
+    return ok;
+}
+
+bool readback(Gpu& gpu, const Options& options) {
+    VkBufferCreateInfo info { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    info.size  = uint64_t(gpu.extent.width) * gpu.extent.height * 4;
+    info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    auto allocated =
+        gpu.session.device().memory_allocator().create_buffer(info, vvk::MemoryRequest::Readback());
+    if (allocated.is_err()) return false;
+    auto buffer = allocated.unwrap();
+    auto begun  = gpu.queue.Begin();
+    if (begun.is_err()) return false;
+    auto work   = begun.unwrap();
+    auto access = work.commands()->UseTexture(
+        { *gpu.target, tex::Access::TransferSource, tex::Stages::Transfer });
+    if (access.is_err()) return false;
+    auto command = vk::native_recording(work, gpu.session);
+    auto source  = vk::native_texture(gpu.target->texture());
+    if (command.is_err() || source.is_err()) return false;
+    VkBufferImageCopy copy {};
+    copy.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    copy.imageExtent      = { gpu.extent.width, gpu.extent.height, 1 };
+    const auto& dispatch  = gpu.session.device().handle().Dispatch();
+    dispatch.vkCmdCopyImageToBuffer(
+        *command, *source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, buffer.handle(), 1, &copy);
+    VkBufferMemoryBarrier host { VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER };
+    host.srcAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+    host.dstAccessMask       = VK_ACCESS_HOST_READ_BIT;
+    host.srcQueueFamilyIndex = host.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    host.buffer                                         = buffer.handle();
+    host.size                                           = VK_WHOLE_SIZE;
+    dispatch.vkCmdPipelineBarrier(*command,
+                                  VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                  VK_PIPELINE_STAGE_HOST_BIT,
+                                  0,
+                                  0,
+                                  nullptr,
+                                  1,
+                                  &host,
+                                  0,
+                                  nullptr);
+    auto submitted = gpu.queue.Submit(rstd::move(work));
+    if (submitted.is_err()) return false;
+    gpu.last = submitted.unwrap();
+    if (gpu.queue.wait(gpu.last).is_err()) return false;
+    auto memory = buffer.allocation();
+    auto mapped = memory.map();
+    if (mapped.is_err() || memory.invalidate().is_err()) return false;
+    auto     pixels = static_cast<const unsigned char*>(mapped->data());
+    uint64_t hash   = 14695981039346656037ull, visible {};
+    for (uint64_t i = 0; i < info.size; ++i) {
+        hash ^= pixels[i];
+        hash *= 1099511628211ull;
+    }
+    for (uint64_t i = 0; i < info.size; i += 4)
+        if (pixels[i] || pixels[i + 1] || pixels[i + 2]) ++visible;
+    rstd::io::println("gltf readback: hash={:016x} non_background_pixels={}", hash, visible);
+    if (! options.capture.is_empty()) {
+        auto header = rstd::format("P6\n{} {}\n255\n", gpu.extent.width, gpu.extent.height);
+        auto bytes  = Vec<u8>::from(header.as_str().as_bytes());
+        bytes.reserve(usize(gpu.extent.width) * usize(gpu.extent.height) * usize(3));
+        for (uint64_t i = 0; i < info.size; i += 4)
+            for (unsigned c = 0; c < 3; ++c) bytes.push(u8(pixels[i + c]));
+        auto path    = rstd::path::PathBuf::from(options.capture.as_str());
+        auto written = rstd::fs::write(path.as_path(), bytes.as_slice());
+        if (written.is_err()) {
+            rstd_error("gltf capture: {}", written.unwrap_err());
+            return false;
+        }
+    }
+    return true;
+}
+
+int selftest(Gpu& gpu, const Options& options) {
+    for (unsigned i = 0; i < options.frames; ++i) {
+        auto work = gpu.record(i ? 1.0f / float(options.fps) : 0, options);
+        if (! work) return 1;
+        auto submitted = gpu.queue.Submit(work.take().unwrap());
+        if (submitted.is_err()) return 1;
+        gpu.last = submitted.unwrap();
+        if (gpu.queue.wait(gpu.last).is_err()) return 1;
+    }
+    if (! readback(gpu, options)) return 1;
+    auto statistics = gpu.renderer.statistics();
+    rstd::io::println("gltf selftest: frames={} extent={}x{} animation={} validation_errors={}",
+                      statistics.recorded_frames,
+                      gpu.extent.width,
+                      gpu.extent.height,
+                      gpu.instance.animation(),
+                      gpu.session.validation_errors());
+    return gpu.session.validation_errors() ? 1 : 0;
+}
+} // namespace
+
+int waywallen::gltf::run(int argc, char** argv) {
+    ww_renderer_log_init();
+    int  status {};
+    auto parsed = parse(argc, argv, status);
+    if (! parsed) return status;
+    auto options = parsed.take().unwrap();
+    if (options.selftest) {
+        auto gpu = create_gpu(options);
+        return gpu ? selftest(**gpu, options) : 1;
+    }
+    ::signal(SIGPIPE, SIG_IGN);
+    const auto parent = ::getppid();
+    if (::prctl(PR_SET_PDEATHSIG, SIGTERM) != 0 || ::getppid() != parent) return 1;
+    Host host;
+    auto socket = terminated(options.ipc.as_str());
+    host.socket = ww_bridge_connect(socket.as_ptr());
+    if (host.socket < 0) {
+        rstd_error("bridge connect: {}", host.socket);
+        return 1;
+    }
+    waywallen_renderer_init_t init {};
+    int                       rc = ww_bridge_recv_init(host.socket, &init);
+    if (rc) {
+        char                       reason[] = "unsupported renderer init";
+        waywallen_init_rejection_t rejection { init.protocol_version,
+                                               WW_BRIDGE_SUPPORTED_PROTOCOL_VERSION,
+                                               init.spawn_version,
+                                               WW_BRIDGE_SUPPORTED_SPAWN_VERSION,
+                                               reason };
+        ww_bridge_send_init_nack(host.socket, &rejection);
+        waywallen_renderer_init_free(&init);
+        return 1;
+    }
+    settings(options, init.settings);
+    waywallen_renderer_init_free(&init);
+    auto created = create_gpu(options);
+    if (! created) return 1;
+    auto gpu = created.take().unwrap();
+    if (! open_pool(host, *gpu, options)) return 1;
+    auto          previous = rstd::time::Instant::now();
+    auto          due      = previous;
+    Option<float> pending_delta;
+    while (! host.stop) {
+        auto   now       = rstd::time::Instant::now();
+        bool   animation = ! host.paused && gpu->animating(options);
+        bool   wanted    = host.ready && (host.frame_requested || animation);
+        int    wait      = ! wanted    ? 1000
+                           : now < due ? int((due - now).as_millis().to_primitive() + 1)
+                                       : 0;
+        pollfd descriptor { host.socket, POLLIN, 0 };
+        rc = ::poll(&descriptor, 1, wait);
+        if (rc < 0) {
+            if (errno == EINTR) continue;
+            status = 1;
+            break;
+        }
+        if (descriptor.revents & POLLIN) {
+            bool was_paused    = host.paused;
+            auto frames_before = gpu->renderer.statistics().recorded_frames;
+            if (! control(host, *gpu, options)) {
+                status = 1;
+                break;
+            }
+            if (was_paused != host.paused) previous = rstd::time::Instant::now();
+            if (gpu->renderer.statistics().recorded_frames != frames_before) {
+                previous = rstd::time::Instant::now();
+                due = previous + rstd::time::Duration::from_nanos(u64(1000000000 / options.fps));
+                pending_delta = None();
+            }
+            if (host.frame_requested || host.paused) pending_delta = Some(0.0f);
+            continue;
+        }
+        if (descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) break;
+        if (gpu->queue.Poll().is_err()) {
+            status = 1;
+            break;
+        }
+        now = rstd::time::Instant::now();
+        if (! wanted || now < due) continue;
+        if (! pending_delta)
+            pending_delta = Some(
+                host.paused || host.frame_requested ? 0.0f : float((now - previous).as_secs_f64()));
+        ww_pool_slot_acquire_result_t acquired {};
+        rc = ww_bridge_pool_try_acquire_any_for_render(host.pool, &acquired);
+        if (! rc && acquired.status == WW_POOL_SLOT_ACQUIRE_BUSY) {
+            due = now + rstd::time::Duration::from_millis(u64(5));
+            continue;
+        }
+        if (rc || (acquired.status != WW_POOL_SLOT_ACQUIRE_READY_UNUSED &&
+                   acquired.status != WW_POOL_SLOT_ACQUIRE_READY_RELEASED)) {
+            status = 1;
+            break;
+        }
+        float delta = pending_delta.take().unwrap();
+        if (! publish(host, *gpu, acquired, delta, options)) {
+            status = 1;
+            break;
+        }
+        previous = now;
+        due      = now + rstd::time::Duration::from_nanos(u64(1000000000 / options.fps));
+        host.frame_requested = false;
+    }
+    (void)gpu->session.wait_idle();
+    (void)gpu->queue.Poll();
+    host.close_pool();
+    if (options.validation) {
+        auto errors = gpu->session.validation_errors();
+        rstd_info("gltf: validation_errors={}", errors);
+        if (errors) status = 1;
+    }
+    return status;
+}

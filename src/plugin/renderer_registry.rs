@@ -1194,10 +1194,11 @@ types = ["image"]
     }
 
     #[test]
-    fn image_video_resolution_defaults_and_custom_extent() {
+    fn local_renderer_resolution_defaults_and_custom_extent() {
         for source in [
             include_str!("../../plugins/org.waywallen.image/plugin.toml"),
             include_str!("../../plugins/org.waywallen.video/plugin.toml"),
+            include_str!("../../plugins/org.waywallen.gltf/plugin.toml"),
         ] {
             let manifest: PluginManifest = toml::from_str(source).unwrap();
             for renderer in manifest.renderers.values() {
@@ -1234,6 +1235,42 @@ types = ["image"]
                 }
             }
         }
+    }
+
+    #[test]
+    fn gltf_renderer_manifest_settings() {
+        let manifest: PluginManifest =
+            toml::from_str(include_str!("../../plugins/org.waywallen.gltf/plugin.toml")).unwrap();
+        assert_eq!(manifest.plugin.id, "org.waywallen.gltf");
+        let renderer = &manifest.renderers["waywallen-gltf"];
+        assert_eq!(renderer.spawn_version, Some(10));
+        assert_eq!(renderer.types, vec![WallpaperType::from("gltf")]);
+        for (key, expected) in [
+            ("fps", "30"),
+            ("exposure", "1"),
+            ("animation", "0"),
+            ("loop", "true"),
+        ] {
+            let setting = &renderer.settings[key];
+            assert_eq!(setting_default_value(setting), expected);
+            assert!(coerce_and_validate(key, expected, setting).is_ok());
+        }
+        for (key, value) in [
+            ("fps", "0"),
+            ("fps", "241"),
+            ("exposure", "0"),
+            ("exposure", "17"),
+            ("animation", "-2"),
+        ] {
+            assert!(coerce_and_validate(key, value, &renderer.settings[key]).is_err());
+        }
+        assert_eq!(
+            coerce_and_validate("animation", "-1", &renderer.settings["animation"]).unwrap(),
+            "-1"
+        );
+        assert!(!renderer.settings["exposure"].identity);
+        assert!(!renderer.settings["animation"].identity);
+        assert!(!renderer.settings["loop"].identity);
     }
 
     fn test_setting(ty: SettingType, default: toml::Value, identity: bool) -> SettingDef {
