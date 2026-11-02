@@ -5,11 +5,14 @@ module;
 
 module waywallen.plugin.run_loop;
 
-namespace waywallen::plugin
-{
 using namespace rstd::prelude;
 using namespace rstd::literals;
+using ::alloc::collections::VecDeque;
+using rstd::sync::Condvar;
+using rstd::sync::Mutex;
 
+namespace waywallen::plugin
+{
 ControlEvent::ControlEvent(ControlEvent&& other) noexcept: value(other.value) { other.value = {}; }
 auto ControlEvent::operator=(ControlEvent&& other) noexcept -> ControlEvent& {
     if (this != &other) {
@@ -22,23 +25,23 @@ auto ControlEvent::operator=(ControlEvent&& other) noexcept -> ControlEvent& {
 ControlEvent::~ControlEvent() { ww_bridge_control_free(&value); }
 
 struct RunLoopFields {
-    ::alloc::collections::VecDeque<ControlEvent> controls;
-    int                                          error {};
-    bool                                         closing {};
+    VecDeque<ControlEvent> controls;
+    int                    error {};
+    bool                   closing {};
 };
 
 struct RunLoopState {
-    rstd::sync::Mutex<RunLoopFields> fields;
-    rstd::sync::Condvar              changed;
+    Mutex<RunLoopFields> fields;
+    Condvar              changed;
 };
 
-RunLoop::RunLoop(rstd::sync::Arc<RunLoopState> state, rstd::thread::JoinHandle<void> reader,
-                 int socket)
+RunLoop::RunLoop(Arc<RunLoopState> state, JoinHandle<void> reader, int socket)
     : state_(rstd::move(state)), reader_(Some(rstd::move(reader))), socket_(socket) {}
 
 RunLoop::RunLoop(RunLoop&& other) noexcept
     : state_(rstd::move(other.state_)),
       reader_(other.reader_.take()),
+      exit_(other.exit_.take()),
       socket_(rstd::exchange(other.socket_, -1)) {}
 
 auto RunLoop::operator=(RunLoop&& other) noexcept -> RunLoop& {
@@ -46,6 +49,7 @@ auto RunLoop::operator=(RunLoop&& other) noexcept -> RunLoop& {
         close();
         state_  = rstd::move(other.state_);
         reader_ = other.reader_.take();
+        exit_   = other.exit_.take();
         socket_ = rstd::exchange(other.socket_, -1);
     }
     return *this;
@@ -57,7 +61,7 @@ auto RunLoop::start(int socket) -> rstd::io::Result<RunLoop> {
     if (socket < 0)
         return Err(
             rstd::io::Error::from_kind(rstd::io::ErrorKind { rstd::io::ErrorKind::InvalidInput }));
-    auto state  = rstd::sync::Arc<RunLoopState>::make();
+    auto state  = Arc<RunLoopState>::make();
     auto worker = rstd::thread::builder::Builder::make();
     worker.name(String::make("renderer-control"_str));
     auto started = worker.spawn([state = state.clone(), socket] {
@@ -99,7 +103,7 @@ auto RunLoop::try_recv() -> Next {
     return Ok(None<ControlEvent>());
 }
 
-auto RunLoop::wait(Option<rstd::time::Instant> deadline) -> Next {
+auto RunLoop::wait(Option<Instant> deadline) -> Next {
     if (! state_) return Err(-ENOTCONN);
     auto fields = state_->fields.lock().unwrap();
     for (;;) {
@@ -110,7 +114,7 @@ auto RunLoop::wait(Option<rstd::time::Instant> deadline) -> Next {
         if (fields->error) return Err(fields->error);
         if (fields->closing) return Err(-ENOTCONN);
         if (deadline) {
-            auto now = rstd::time::Instant::now();
+            auto now = Instant::now();
             if (now >= *deadline) return Ok(None<ControlEvent>());
             (void)state_->changed.wait_timeout(fields, *deadline - now);
         } else {

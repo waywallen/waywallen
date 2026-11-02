@@ -22,11 +22,14 @@ import wavsen.video;
 import waywallen.bridge;
 import waywallen.plugin.run_loop;
 
+using namespace rstd::prelude;
+using namespace rstd::literals;
+using RunLoop   = waywallen::plugin::RunLoop;
+using LoopStep  = waywallen::plugin::LoopStep;
+using ExitCause = waywallen::plugin::ExitCause;
+
 namespace
 {
-
-using namespace rstd::literals;
-
 struct Options {
     std::string ipc_path;
     std::string image_path;
@@ -209,11 +212,10 @@ ParseArgsResult parse_args(int argc, char** argv) {
 }
 
 struct HostState {
-    int                                      sock { -1 };
-    ww_pool_t*                               pool { nullptr };
-    std::atomic<bool>                        shutdown { false };
-    std::atomic<bool>                        negotiated { false };
-    rstd::Option<waywallen::plugin::RunLoop> events;
+    int               sock { -1 };
+    ww_pool_t*        pool { nullptr };
+    std::atomic<bool> negotiated { false };
+    Option<RunLoop>   events;
 
     bool                                   neg_pending { false };
     bool                                   frame_request_pending { false };
@@ -226,9 +228,7 @@ struct HostState {
     ClearColor scheme_color {};
 };
 
-void signal_shutdown(HostState& s) { s.shutdown.store(true, std::memory_order_release); }
-
-void drain_controls(HostState& host);
+void apply_control(HostState& host, ww_bridge_control_t& control);
 
 // Test hook: when WAYWALLEN_IMAGE_DUMP_DIR is set, write the RGBA8
 // bytes the renderer is about to upload to the GPU to a file the
@@ -323,8 +323,10 @@ enum class UploadStatus
 
 int cancel_slot_wait(void* userdata) {
     auto& host = *static_cast<HostState*>(userdata);
-    drain_controls(host);
-    if (host.shutdown.load(std::memory_order_acquire)) return 1;
+    host.events->drain([&](auto& control) {
+        apply_control(host, control);
+    });
+    if (! host.events->running()) return 1;
     return host.neg_pending || host.target_pending ? 1 : 0;
 }
 
@@ -494,20 +496,20 @@ void apply_negotiate_request(HostState& host, wavsen::video::Producer& producer,
                              ww_image::ImageSession& session, ww_image::RgbaBuf& rgba,
                              const ww_pool_directive_t& d) {
     if (! prepare_decoded_rgba(opt, session, rgba)) {
-        signal_shutdown(host);
+        host.events->request_stop(ExitCause::Failure);
         return;
     }
 
     int rc = ww_bridge_pool_apply_directive(host.pool, host.sock, &d);
     if (rc != 0) {
         rstd_error("waywallen-image-renderer: pool_apply_directive failed: {}", rc);
-        if (rc > 0) signal_shutdown(host);
+        if (rc > 0) host.events->request_stop(ExitCause::Failure);
         return;
     }
     const auto upload = upload_to_slot(host, producer, d, rgba);
     if (upload == UploadStatus::Cancelled) return;
     if (upload == UploadStatus::Failed) {
-        signal_shutdown(host);
+        host.events->request_stop(ExitCause::Failure);
         return;
     }
 
@@ -516,7 +518,7 @@ void apply_negotiate_request(HostState& host, wavsen::video::Producer& producer,
     if (release.is_err()) {
         rstd_error("waywallen-image-renderer: release upload buffer failed: {}",
                    std::move(release).unwrap_err().message.as_str());
-        signal_shutdown(host);
+        host.events->request_stop(ExitCause::Failure);
         return;
     }
     host.negotiated.store(true, std::memory_order_release);
@@ -589,7 +591,7 @@ void apply_render_target(HostState& host, wavsen::video::Producer& producer,
                     if (sync_fd >= 0) ::close(sync_fd);
                     if (result.status != 0) {
                         message = "publish render target failed";
-                        signal_shutdown(host);
+                        host.events->request_stop(ExitCause::Failure);
                     }
                 }
             }
@@ -599,7 +601,8 @@ void apply_render_target(HostState& host, wavsen::video::Producer& producer,
         (void)producer.release_upload_buffer();
     }
     result.message = message.data();
-    if (ww_bridge_send_render_target_result(host.sock, &result) != 0) signal_shutdown(host);
+    if (ww_bridge_send_render_target_result(host.sock, &result) != 0)
+        host.events->request_stop(ExitCause::Failure);
 }
 
 void apply_control(HostState& host, ww_bridge_control_t& c) {
@@ -634,7 +637,6 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
         }
         break;
     }
-    case WW_EVT_IN_SHUTDOWN: signal_shutdown(host); break;
     case WW_EVT_IN_CONFIGURE_RENDER_TARGET: {
         host.target_config  = c.u.configure_render_target.config;
         host.target_pending = true;
@@ -657,25 +659,6 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
         rstd_warn("waywallen-image-renderer: unknown control op {}", static_cast<int>(c.op));
         break;
     }
-}
-
-bool receive_control(HostState& host, bool wait) {
-    auto received = wait ? host.events->wait() : host.events->try_recv();
-    if (received.is_err()) {
-        if (! host.shutdown.load(std::memory_order_acquire))
-            rstd_error("waywallen-image-renderer: recv_control failed: {}", received.unwrap_err());
-        signal_shutdown(host);
-        return false;
-    }
-    auto event = received.unwrap();
-    if (! event) return false;
-    apply_control(host, event->value);
-    return true;
-}
-
-void drain_controls(HostState& host) {
-    for (unsigned i = 0; i < 64 && ! host.shutdown.load(std::memory_order_acquire); ++i)
-        if (! receive_control(host, false)) break;
 }
 
 // ---------------------------------------------------------------------------
@@ -961,13 +944,13 @@ int run(int argc, char** argv) {
     }
     apply_user_properties(host, init.user_properties);
     waywallen_renderer_init_free(&init);
-    auto events = waywallen::plugin::RunLoop::start(host.sock);
+    auto events = RunLoop::start(host.sock);
     if (events.is_err()) {
         rstd_error("waywallen-image-renderer: control loop failed: {}", events.unwrap_err());
         ww_bridge_close(host.sock);
         return 1;
     }
-    host.events = rstd::Some(rstd::move(events).unwrap());
+    host.events = Some(rstd::move(events).unwrap());
 
     /* --- Decode + Vulkan setup --- */
     if (opt.image_path.empty()) die("--path <image-file> is required");
@@ -1063,33 +1046,37 @@ int run(int argc, char** argv) {
 
     /* Main loop: negotiation publishes new content; request_frame only
      * republishes the latest released slot. */
-    while (! host.shutdown.load(std::memory_order_acquire)) {
-        drain_controls(host);
-        if (host.shutdown.load(std::memory_order_acquire)) break;
-        if (host.target_pending) {
-            auto config                = host.target_config;
-            host.target_pending        = false;
-            host.frame_request_pending = false;
-            apply_render_target(host, *producer, *session, config);
-            continue;
-        }
-        if (host.neg_pending) {
-            ww_pool_directive_t d      = host.neg_directive;
-            host.neg_pending           = false;
-            host.frame_request_pending = false;
-            apply_negotiate_request(host, *producer, opt, *session, rgba_buf, d);
-            continue;
-        }
-        if (host.frame_request_pending && host.negotiated.load(std::memory_order_acquire)) {
-            host.frame_request_pending = false;
-            const auto status          = republish_latest(host);
-            if (status == RepublishStatus::Failed) {
-                signal_shutdown(host);
+    const auto exit = host.events->run(
+        [&](auto& control) {
+            apply_control(host, control);
+        },
+        [&]() -> LoopStep {
+            if (host.target_pending) {
+                auto config                = host.target_config;
+                host.target_pending        = false;
+                host.frame_request_pending = false;
+                apply_render_target(host, *producer, *session, config);
+                return LoopStep::again();
             }
-            continue;
-        }
-        (void)receive_control(host, true);
-    }
+            if (host.neg_pending) {
+                ww_pool_directive_t d      = host.neg_directive;
+                host.neg_pending           = false;
+                host.frame_request_pending = false;
+                apply_negotiate_request(host, *producer, opt, *session, rgba_buf, d);
+                return LoopStep::again();
+            }
+            if (host.frame_request_pending && host.negotiated.load(std::memory_order_acquire)) {
+                host.frame_request_pending = false;
+                const auto status          = republish_latest(host);
+                if (status == RepublishStatus::Failed) {
+                    host.events->request_stop(ExitCause::Failure);
+                }
+                return LoopStep::again();
+            }
+            return LoopStep::wait();
+        });
+    if (exit.cause == ExitCause::Transport)
+        rstd_error("waywallen-image-renderer: recv_control failed: {}", exit.code);
 
     host.events->close();
     if (host.pool) ww_bridge_pool_destroy(host.pool);

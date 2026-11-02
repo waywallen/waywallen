@@ -15,17 +15,22 @@ import vecgltf.render;
 import waywallen.bridge;
 import waywallen.plugin.run_loop;
 
-namespace
-{
 using namespace rstd::prelude;
 using namespace rstd::literals;
 using rstd::ffi::CStr;
 using rstd::ffi::CString;
 using rstd::sync::Arc;
-namespace gltf = vecgltf;
-namespace vk   = vrento::vulkan;
-namespace tex  = vrento::texture;
+using RunLoop   = waywallen::plugin::RunLoop;
+using LoopStep  = waywallen::plugin::LoopStep;
+using ExitCause = waywallen::plugin::ExitCause;
+using Instant   = rstd::time::Instant;
+using Duration  = rstd::time::Duration;
+namespace gltf  = vecgltf;
+namespace vk    = vrento::vulkan;
+namespace tex   = vrento::texture;
 
+namespace
+{
 struct Options {
     String   path, ipc, render_node, capture, asset_root;
     unsigned fps { 30 }, custom_extent { 1080 }, frames { 3 };
@@ -399,11 +404,11 @@ struct PointerInput {
 };
 
 struct Host {
-    Option<waywallen::plugin::RunLoop>     events;
+    Option<RunLoop>                        events;
     Option<vk::DeviceSession>              device_owner;
     int                                    socket { -1 };
     ww_pool_t*                             pool {};
-    bool                                   ready {}, paused {}, frame_requested { true }, stop {};
+    bool                                   ready {}, paused {}, frame_requested { true };
     bool                                   camera_changed {};
     uint64_t                               target_revision {};
     PointerInput                           pointer;
@@ -622,11 +627,12 @@ bool configure_target(Host& host, Gpu& gpu, const Options& options,
                             host.pointer.reset();
                         }
                     }
-                    if (result.status != 0) host.stop = true;
+                    if (result.status != 0) host.events->request_stop(ExitCause::Failure);
                 }
             }
             if (fd) ::close(fd.unwrap());
-            if (gpu.session.wait_idle() != VK_SUCCESS && ! gpu.session.lost()) host.stop = true;
+            if (gpu.session.wait_idle() != VK_SUCCESS && ! gpu.session.lost())
+                host.events->request_stop(ExitCause::Failure);
             ww_bridge_pool_abort_target(host.pool);
         }
         message =
@@ -634,14 +640,13 @@ bool configure_target(Host& host, Gpu& gpu, const Options& options,
     }
     auto wire      = terminated(message.as_str());
     result.message = const_cast<char*>(wire.as_ptr());
-    return ww_bridge_send_render_target_result(host.socket, &result) == 0 && ! host.stop;
+    return ww_bridge_send_render_target_result(host.socket, &result) == 0 && host.events->running();
 }
 
 bool control(Host& host, Gpu& gpu, Options& options, ww_bridge_control_t& event) {
     int  rc {};
     bool ok = true;
     switch (event.op) {
-    case WW_EVT_IN_SHUTDOWN: host.stop = true; break;
     case WW_EVT_IN_PLAY:
         host.paused          = false;
         host.frame_requested = true;
@@ -818,7 +823,7 @@ int waywallen::gltf::run(int argc, char** argv) {
     }
     settings(options, init.settings);
     waywallen_renderer_init_free(&init);
-    auto events = waywallen::plugin::RunLoop::start(host.socket);
+    auto events = RunLoop::start(host.socket);
     if (events.is_err()) {
         rstd_error("gltf: control reader failed: {}", events.unwrap_err());
         return 1;
@@ -828,74 +833,64 @@ int waywallen::gltf::run(int argc, char** argv) {
     if (! created) return 1;
     auto gpu = created.take().unwrap();
     if (! open_pool(host, *gpu, options)) return 1;
-    auto          previous = rstd::time::Instant::now();
+    auto          previous = Instant::now();
     auto          due      = previous;
     Option<float> pending_delta;
-    while (! host.stop) {
-        auto now       = rstd::time::Instant::now();
-        bool animation = ! host.paused && gpu->animating(options);
-        bool wanted    = host.ready && (host.frame_requested || host.camera_changed || animation);
-        auto deadline  = wanted ? due : now + rstd::time::Duration::from_secs(u64(1));
-        auto next      = host.events->wait(Some(deadline));
-        for (unsigned count = 0; count < 64; ++count) {
-            if (next.is_err()) {
-                rstd_error("gltf: control receive failed: {}", next.unwrap_err());
-                status    = 1;
-                host.stop = true;
-                break;
-            }
-            auto incoming = next.unwrap();
-            if (! incoming) break;
+    auto          exit = host.events->run(
+        [&](ww_bridge_control_t& event) {
             bool was_paused    = host.paused;
             auto frames_before = gpu->renderer.statistics().recorded_frames;
-            if (! control(host, *gpu, options, incoming->value)) {
-                status    = 1;
-                host.stop = true;
-                break;
+            if (! control(host, *gpu, options, event)) {
+                host.events->request_stop(ExitCause::Failure);
+                return;
             }
-            if (was_paused != host.paused) previous = rstd::time::Instant::now();
+            if (was_paused != host.paused) previous = Instant::now();
             if (gpu->renderer.statistics().recorded_frames != frames_before) {
-                previous = rstd::time::Instant::now();
-                due = previous + rstd::time::Duration::from_nanos(u64(1000000000 / options.fps));
+                previous      = Instant::now();
+                due           = previous + Duration::from_nanos(u64(1000000000 / options.fps));
                 pending_delta = None();
             }
             if (host.frame_requested || host.paused) pending_delta = Some(0.0f);
-            if (host.stop || count == 63) break;
-            next = host.events->try_recv();
-        }
-        if (host.stop) break;
-        if (gpu->queue.Poll().is_err()) {
-            status = 1;
-            break;
-        }
-        now       = rstd::time::Instant::now();
-        animation = ! host.paused && gpu->animating(options);
-        wanted    = host.ready && (host.frame_requested || host.camera_changed || animation);
-        if (! wanted || now < due) continue;
-        if (! pending_delta)
-            pending_delta = Some(
-                host.paused || host.frame_requested ? 0.0f : float((now - previous).as_secs_f64()));
-        ww_pool_slot_acquire_result_t acquired {};
-        rc = ww_bridge_pool_try_acquire_any_for_render(host.pool, &acquired);
-        if (! rc && acquired.status == WW_POOL_SLOT_ACQUIRE_BUSY) {
-            due = now + rstd::time::Duration::from_millis(u64(5));
-            continue;
-        }
-        if (rc || (acquired.status != WW_POOL_SLOT_ACQUIRE_READY_UNUSED &&
-                   acquired.status != WW_POOL_SLOT_ACQUIRE_READY_RELEASED)) {
-            status = 1;
-            break;
-        }
-        float delta = pending_delta.take().unwrap();
-        if (! publish(host, *gpu, acquired, delta, options)) {
-            status = 1;
-            break;
-        }
-        previous = now;
-        due      = now + rstd::time::Duration::from_nanos(u64(1000000000 / options.fps));
-        host.frame_requested = false;
-        host.camera_changed  = false;
-    }
+        },
+        [&]() -> LoopStep {
+            if (gpu->queue.Poll().is_err()) {
+                host.events->request_stop(ExitCause::Failure);
+                return LoopStep::again();
+            }
+            auto now       = Instant::now();
+            bool animation = ! host.paused && gpu->animating(options);
+            bool wanted = host.ready && (host.frame_requested || host.camera_changed || animation);
+            if (! wanted) return LoopStep::wait_until(now + Duration::from_secs(u64(1)));
+            if (now < due) return LoopStep::wait_until(due);
+            if (! pending_delta)
+                pending_delta = Some(host.paused || host.frame_requested
+                                         ? 0.0f
+                                         : float((now - previous).as_secs_f64()));
+            ww_pool_slot_acquire_result_t acquired {};
+            rc = ww_bridge_pool_try_acquire_any_for_render(host.pool, &acquired);
+            if (! rc && acquired.status == WW_POOL_SLOT_ACQUIRE_BUSY) {
+                due = now + Duration::from_millis(u64(5));
+                return LoopStep::wait_until(due);
+            }
+            if (rc || (acquired.status != WW_POOL_SLOT_ACQUIRE_READY_UNUSED &&
+                       acquired.status != WW_POOL_SLOT_ACQUIRE_READY_RELEASED)) {
+                host.events->request_stop(ExitCause::Failure, rc);
+                return LoopStep::again();
+            }
+            float delta = pending_delta.take().unwrap();
+            if (! publish(host, *gpu, acquired, delta, options)) {
+                host.events->request_stop(ExitCause::Failure);
+                return LoopStep::again();
+            }
+            previous             = now;
+            due                  = now + Duration::from_nanos(u64(1000000000 / options.fps));
+            host.frame_requested = false;
+            host.camera_changed  = false;
+            return LoopStep::wait_until(due);
+        });
+    if (exit.cause == ExitCause::Transport)
+        rstd_error("gltf: control receive failed: {}", exit.code);
+    status = exit.cause == ExitCause::Transport || exit.cause == ExitCause::Failure ? 1 : 0;
     host.events->close();
     (void)gpu->session.wait_idle();
     (void)gpu->queue.Poll();
