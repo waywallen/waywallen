@@ -183,6 +183,15 @@ Item {
                     }
                 }
 
+                MD.Text {
+                    Layout.fillWidth: true
+                    visible: text.length > 0
+                    text: (root.details?.stats ?? []).map(s => W.I18n.tr(s)).join("  \u00b7  ")
+                    typescale: MD.Token.typescale.body_medium
+                    color: MD.Token.color.on_surface_variant
+                    wrapMode: Text.WordWrap
+                }
+
                 Flow {
                     Layout.fillWidth: true
                     spacing: 6

@@ -424,6 +424,7 @@ function M.discover.details(ctx, id)
         height = 20,
         tags = {"tag"},
         web_url = "https://example.invalid/item/" .. id,
+        stats = { tr("%1 subscribers", 12), "plain" },
     }
 end
 function M.discover.download(ctx, id)
@@ -481,6 +482,13 @@ return M
         detail.author_avatar_url,
         "https://example.invalid/avatar/abc.png"
     );
+    // Stats keep their tr() message so the UI can translate them; plain
+    // strings pass through as they are.
+    let message = detail.stats[0].message().unwrap();
+    assert_eq!(message.plugin_id, "test.plugin");
+    assert_eq!(message.msgid, "%1 subscribers");
+    assert_eq!(message.arguments, vec!["12"]);
+    assert_eq!(detail.stats[1], LocalizedText::raw("plain"));
 }
 
 #[test]

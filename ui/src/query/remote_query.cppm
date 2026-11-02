@@ -112,6 +112,7 @@ export class RemoteDetailsQuery : public Query,
     Q_PROPERTY(int height READ height NOTIFY loaded FINAL)
     Q_PROPERTY(QStringList tags READ tags NOTIFY loaded FINAL)
     Q_PROPERTY(QString webUrl READ webUrl NOTIFY loaded FINAL)
+    Q_PROPERTY(QVariantList stats READ stats NOTIFY loaded FINAL)
 
 public:
     RemoteDetailsQuery(QObject* parent = nullptr);
@@ -129,6 +130,7 @@ public:
     auto height() const -> int;
     auto tags() const -> const QStringList&;
     auto webUrl() const -> const QString&;
+    auto stats() const -> const QVariantList&;
 
     void reload() override;
 
@@ -137,16 +139,17 @@ public:
     Q_SIGNAL void loaded();
 
 private:
-    QString     m_source_id;
-    QString     m_item_id;
-    QString     m_author;
-    QString     m_author_avatar_url;
-    QString     m_description;
-    QString     m_size;
-    int         m_width { 0 };
-    int         m_height { 0 };
-    QStringList m_tags;
-    QString     m_web_url;
+    QString      m_source_id;
+    QString      m_item_id;
+    QString      m_author;
+    QString      m_author_avatar_url;
+    QString      m_description;
+    QString      m_size;
+    int          m_width { 0 };
+    int          m_height { 0 };
+    QStringList  m_tags;
+    QString      m_web_url;
+    QVariantList m_stats;
 };
 
 export class RemoteDownloadQuery : public Query,

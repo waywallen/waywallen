@@ -368,6 +368,7 @@ auto RemoteDetailsQuery::width() const -> int { return m_width; }
 auto RemoteDetailsQuery::height() const -> int { return m_height; }
 auto RemoteDetailsQuery::tags() const -> const QStringList& { return m_tags; }
 auto RemoteDetailsQuery::webUrl() const -> const QString& { return m_web_url; }
+auto RemoteDetailsQuery::stats() const -> const QVariantList& { return m_stats; }
 
 void RemoteDetailsQuery::reload() {
     m_author.clear();
@@ -378,6 +379,7 @@ void RemoteDetailsQuery::reload() {
     m_height = 0;
     m_tags.clear();
     m_web_url.clear();
+    m_stats.clear();
     Q_EMIT loaded();
     if (m_item_id.isEmpty()) return;
     setStatus(Status::Querying);
@@ -406,6 +408,10 @@ void RemoteDetailsQuery::reload() {
             self->m_web_url           = dr.webUrl();
             self->m_tags.clear();
             for (const auto& t : dr.tags()) self->m_tags.push_back(t);
+            self->m_stats.clear();
+            for (qsizetype i = 0; i < dr.stats().size(); ++i)
+                self->m_stats.push_back(
+                    pluginMessageFromPb(dr.statsText().value(i), dr.stats().at(i)));
             Q_EMIT self->loaded();
         });
         co_return;

@@ -601,6 +601,23 @@ impl LuaPluginRuntime {
         Ok(out)
     }
 
+    fn optional_localized_text_sequence(
+        tbl: &LuaTable,
+        key: &str,
+        context: &str,
+    ) -> Result<Vec<LocalizedText>> {
+        let Some(values) = Self::optional_table(tbl, key, context)? else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for (idx, value) in values.sequence_values::<LuaValue>().enumerate() {
+            let value = value.map_err(|e| Error::Internal(anyhow!("{context}.{key}: {e}")))?;
+            let field = format!("{key}[{}]", idx + 1);
+            out.push(Self::localized_text(value, &field, context)?);
+        }
+        Ok(out)
+    }
+
     fn optional_discover_sorts(discover_tbl: &LuaTable) -> Result<Vec<DiscoverSort>> {
         let Some(sorts_tbl) =
             Self::optional_table(discover_tbl, "sorts", "info().capabilities.discover")?
@@ -2611,6 +2628,11 @@ impl LuaPluginRuntime {
             height: result.get::<u32>("height").ok(),
             tags: Self::require_string_sequence(&result, "tags", "module.discover.details result")?,
             web_url: Self::optional_string(&result, "web_url", "module.discover.details result")?,
+            stats: Self::optional_localized_text_sequence(
+                &result,
+                "stats",
+                "module.discover.details result",
+            )?,
             extra: parse_lua_string_map(&result, "extra", "module.discover.details result")?,
         };
         self.persist_state(plugin_name)?;

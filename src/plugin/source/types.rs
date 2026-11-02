@@ -345,6 +345,8 @@ pub struct DiscoverDetails {
     pub height: Option<u32>,
     pub tags: Vec<String>,
     pub web_url: String,
+    /// Short facts shown above the description, e.g. `tr("%1 subscribers", n)`.
+    pub stats: Vec<LocalizedText>,
     pub extra: HashMap<String, String>,
 }
 

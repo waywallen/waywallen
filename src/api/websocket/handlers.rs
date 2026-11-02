@@ -1560,6 +1560,8 @@ pub(super) async fn dispatch_inner(
                         web_url: String::new(),
                         author: String::new(),
                         author_avatar_url: String::new(),
+                        stats: Vec::new(),
+                        stats_text: Vec::new(),
                     }));
                 }
             };
@@ -1575,6 +1577,14 @@ pub(super) async fn dispatch_inner(
                     web_url: details.web_url,
                     author: details.author,
                     author_avatar_url: details.author_avatar_url,
+                    stats: details.stats.iter().map(|s| s.text().to_string()).collect(),
+                    stats_text: details
+                        .stats
+                        .iter()
+                        .map(|s| {
+                            crate::control_proto::plugin_message_to_proto(s).unwrap_or_default()
+                        })
+                        .collect(),
                 }),
                 Err(e) => Res::RemoteDetails(pb::RemoteDetailsResponse {
                     description: String::new(),
@@ -1586,6 +1596,8 @@ pub(super) async fn dispatch_inner(
                     web_url: String::new(),
                     author: String::new(),
                     author_avatar_url: String::new(),
+                    stats: Vec::new(),
+                    stats_text: Vec::new(),
                 }),
             }
         }

@@ -1256,6 +1256,11 @@ message RemoteDetailsResponse {
   // Same as RemoteItem.author_avatar_url, for sources that only learn the
   // author from their per-item endpoint.
   string author_avatar_url = 9;
+  // Short facts a source shows above the description, e.g. "12 subscribers".
+  // Same pairing as label / label_text: stats_text[i] is empty when stats[i]
+  // was a plain string.
+  repeated string stats = 10;
+  repeated PluginMessage stats_text = 11;
 }
 
 enum RemoteDownloadState {
