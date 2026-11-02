@@ -6,7 +6,15 @@ version.workspace = true
 name = "waywallen-plugin-common"
 module = "waywallen.bridge"
 archive = "waywallen-plugin-common"
-sources = ["Bridge.cppm"]
+sources = ["Bridge.cppm", "RunLoop.cppm", "RunLoop.cpp"]
+
+[[test]]
+name = "run-loop"
+module = "waywallen.plugin.tests"
+sources = ["tests/run_loop.cpp"]
+
+[usage]
+threads = true
 
 [dependencies.waywallen-bridge]
 workspace = true
@@ -20,4 +28,7 @@ pub = true
 workspace = true
 
 [dependencies.rstd-log]
+workspace = true
+
+[dependencies.rstd-std]
 workspace = true

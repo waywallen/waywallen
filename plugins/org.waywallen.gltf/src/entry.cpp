@@ -2,7 +2,6 @@ module;
 
 #include <rstd/macro.hpp>
 #include <errno.h>
-#include <poll.h>
 #include <signal.h>
 #include <sys/prctl.h>
 #include <unistd.h>
@@ -14,6 +13,7 @@ import rstd.argparse;
 import rstd.log;
 import vecgltf.render;
 import waywallen.bridge;
+import waywallen.plugin.run_loop;
 
 namespace
 {
@@ -399,6 +399,7 @@ struct PointerInput {
 };
 
 struct Host {
+    Option<waywallen::plugin::RunLoop>     events;
     Option<vk::DeviceSession>              device_owner;
     int                                    socket { -1 };
     ww_pool_t*                             pool {};
@@ -422,6 +423,7 @@ struct Host {
         pool = nullptr;
     }
     ~Host() {
+        if (events) events->close();
         close_pool();
         if (socket >= 0) ww_bridge_close(socket);
     }
@@ -635,10 +637,8 @@ bool configure_target(Host& host, Gpu& gpu, const Options& options,
     return ww_bridge_send_render_target_result(host.socket, &result) == 0 && ! host.stop;
 }
 
-bool control(Host& host, Gpu& gpu, Options& options) {
-    ww_bridge_control_t event {};
-    int                 rc = ww_bridge_recv_control(host.socket, &event);
-    if (rc) return false;
+bool control(Host& host, Gpu& gpu, Options& options, ww_bridge_control_t& event) {
+    int  rc {};
     bool ok = true;
     switch (event.op) {
     case WW_EVT_IN_SHUTDOWN: host.stop = true; break;
@@ -688,7 +688,6 @@ bool control(Host& host, Gpu& gpu, Options& options) {
         break;
     default: break;
     }
-    ww_bridge_control_free(&event);
     return ok;
 }
 
@@ -819,6 +818,12 @@ int waywallen::gltf::run(int argc, char** argv) {
     }
     settings(options, init.settings);
     waywallen_renderer_init_free(&init);
+    auto events = waywallen::plugin::RunLoop::start(host.socket);
+    if (events.is_err()) {
+        rstd_error("gltf: control reader failed: {}", events.unwrap_err());
+        return 1;
+    }
+    host.events  = Some(events.unwrap());
     auto created = create_gpu(options);
     if (! created) return 1;
     auto gpu = created.take().unwrap();
@@ -827,24 +832,25 @@ int waywallen::gltf::run(int argc, char** argv) {
     auto          due      = previous;
     Option<float> pending_delta;
     while (! host.stop) {
-        auto   now       = rstd::time::Instant::now();
-        bool   animation = ! host.paused && gpu->animating(options);
-        bool   wanted    = host.ready && (host.frame_requested || host.camera_changed || animation);
-        int    wait      = ! wanted    ? 1000
-                           : now < due ? int((due - now).as_millis().to_primitive() + 1)
-                                       : 0;
-        pollfd descriptor { host.socket, POLLIN, 0 };
-        rc = ::poll(&descriptor, 1, wait);
-        if (rc < 0) {
-            if (errno == EINTR) continue;
-            status = 1;
-            break;
-        }
-        if (descriptor.revents & POLLIN) {
+        auto now       = rstd::time::Instant::now();
+        bool animation = ! host.paused && gpu->animating(options);
+        bool wanted    = host.ready && (host.frame_requested || host.camera_changed || animation);
+        auto deadline  = wanted ? due : now + rstd::time::Duration::from_secs(u64(1));
+        auto next      = host.events->wait(Some(deadline));
+        for (unsigned count = 0; count < 64; ++count) {
+            if (next.is_err()) {
+                rstd_error("gltf: control receive failed: {}", next.unwrap_err());
+                status    = 1;
+                host.stop = true;
+                break;
+            }
+            auto incoming = next.unwrap();
+            if (! incoming) break;
             bool was_paused    = host.paused;
             auto frames_before = gpu->renderer.statistics().recorded_frames;
-            if (! control(host, *gpu, options)) {
-                status = 1;
+            if (! control(host, *gpu, options, incoming->value)) {
+                status    = 1;
+                host.stop = true;
                 break;
             }
             if (was_paused != host.paused) previous = rstd::time::Instant::now();
@@ -854,14 +860,17 @@ int waywallen::gltf::run(int argc, char** argv) {
                 pending_delta = None();
             }
             if (host.frame_requested || host.paused) pending_delta = Some(0.0f);
-            continue;
+            if (host.stop || count == 63) break;
+            next = host.events->try_recv();
         }
-        if (descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) break;
+        if (host.stop) break;
         if (gpu->queue.Poll().is_err()) {
             status = 1;
             break;
         }
-        now = rstd::time::Instant::now();
+        now       = rstd::time::Instant::now();
+        animation = ! host.paused && gpu->animating(options);
+        wanted    = host.ready && (host.frame_requested || host.camera_changed || animation);
         if (! wanted || now < due) continue;
         if (! pending_delta)
             pending_delta = Some(
@@ -887,6 +896,7 @@ int waywallen::gltf::run(int argc, char** argv) {
         host.frame_requested = false;
         host.camera_changed  = false;
     }
+    host.events->close();
     (void)gpu->session.wait_idle();
     (void)gpu->queue.Poll();
     host.close_pool();

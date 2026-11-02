@@ -7,7 +7,6 @@ module;
 #include <stdio.h>
 
 #include <sys/prctl.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 module waywallen.video.entry;
@@ -19,6 +18,7 @@ import rstd.log;
 import wavsen.video;
 import wavsen.audio;
 import waywallen.bridge;
+import waywallen.plugin.run_loop;
 
 namespace
 {
@@ -269,18 +269,17 @@ wavsen::audio::AudioClientIdentity audio_client_identity() {
 }
 
 struct HostState {
-    int               sock { -1 };
-    ww_pool_t*        pool { nullptr };
-    std::atomic<bool> shutdown { false };
-    std::atomic<bool> negotiated { false };
-    std::atomic<bool> paused { false };
-    std::atomic<bool> muted { false };
-    std::atomic<bool> audio_gate_open { false };
-    std::atomic<bool> settings_enable_audio { true };
-    std::atomic<bool> property_enable_audio { true };
+    int                                      sock { -1 };
+    ww_pool_t*                               pool { nullptr };
+    rstd::Option<waywallen::plugin::RunLoop> events;
+    std::atomic<bool>                        shutdown { false };
+    std::atomic<bool>                        negotiated { false };
+    std::atomic<bool>                        paused { false };
+    std::atomic<bool>                        muted { false };
+    std::atomic<bool>                        audio_gate_open { false };
+    std::atomic<bool>                        settings_enable_audio { true };
+    std::atomic<bool>                        property_enable_audio { true };
 
-    std::mutex                             neg_mu;
-    std::condition_variable                neg_cv;
     bool                                   neg_pending { false };
     uint64_t                               frame_request_revision { 0 };
     uint64_t                               served_frame_request_revision { 0 };
@@ -289,7 +288,6 @@ struct HostState {
     waywallen_render_target_config_t       target_config {};
     waywallen_render_target_capabilities_t target_caps {};
     uint64_t                               target_revision {};
-    std::mutex                             send_mu;
     std::string                            reported_hwdec;
 
     std::atomic<bool> loop_pending { false };
@@ -297,7 +295,6 @@ struct HostState {
 
     /* hwdec changes are applied at the next file/loop boundary, not
      * mid-stream — store the pending value here. */
-    std::mutex  hwdec_mu;
     std::string pending_hwdec;
     bool        hwdec_pending { false };
 
@@ -318,17 +315,17 @@ bool effective_audio_enabled(const HostState& host) {
            host.property_enable_audio.load(std::memory_order_acquire);
 }
 
-using Clock = std::chrono::steady_clock;
+using Clock = rstd::time::Instant;
 
 struct AudioRuntime {
-    uint32_t          volume_pct { 100 };
-    bool              enabled { true };
-    bool              paused { false };
-    bool              muted { false };
-    bool              device_muted { false };
-    bool              pause_pending { false };
-    Clock::time_point pause_at {};
-    float             target_scale { 1.0f };
+    uint32_t volume_pct { 100 };
+    bool     enabled { true };
+    bool     paused { false };
+    bool     muted { false };
+    bool     device_muted { false };
+    bool     pause_pending { false };
+    Clock    pause_at {};
+    float    target_scale { 1.0f };
 };
 
 wavsen::video::HwAccel parse_hwdec(const char* v) {
@@ -370,21 +367,16 @@ const char* runtime_hwdec_label(wavsen::video::FrameKind kind) {
     return "unknown";
 }
 
-void signal_shutdown(HostState& s) {
-    s.shutdown.store(true, std::memory_order_release);
-    s.neg_cv.notify_all();
-}
+void signal_shutdown(HostState& s) { s.shutdown.store(true, std::memory_order_release); }
 
 void publish_clear_color(HostState& host, const ClearColor& c) {
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
     if (int rc = ww_bridge_send_report_state_clear_color(host.sock, c.r, c.g, c.b, c.a); rc != 0) {
         rstd_warn("waywallen-video-renderer: report_state(clear_color) failed ({})", rc);
     }
 }
 
 void publish_hwdec_tag(HostState& host, wavsen::video::FrameKind kind) {
-    const char*                 value = runtime_hwdec_label(kind);
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
+    const char* value = runtime_hwdec_label(kind);
     if (host.reported_hwdec == value) return;
 
     ww_kv_t tag {
@@ -514,12 +506,10 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
         host.pause_fade_ms.store(c.u.play.transition.fade_ms, std::memory_order_release);
         host.paused.store(false, std::memory_order_release);
         host.audio_gate_open.store(true, std::memory_order_release);
-        host.neg_cv.notify_all();
         break;
     case WW_EVT_IN_PAUSE:
         host.pause_fade_ms.store(c.u.pause.transition.fade_ms, std::memory_order_release);
         host.paused.store(true, std::memory_order_release);
-        host.neg_cv.notify_all();
         break;
     case WW_EVT_IN_UNMUTE:
         host.mute_fade_ms.store(c.u.unmute.transition.fade_ms, std::memory_order_release);
@@ -544,7 +534,6 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
                 host.loop_value.store(enabled, std::memory_order_release);
                 host.loop_pending.store(true, std::memory_order_release);
             } else if (std::strcmp(key, "hwdec") == 0) {
-                std::lock_guard<std::mutex> lk(host.hwdec_mu);
                 host.pending_hwdec = val;
                 host.hwdec_pending = true;
             } else if (std::strcmp(key, "volume") == 0) {
@@ -573,38 +562,27 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
                           static_cast<const char*>(key));
             }
         }
-        host.neg_cv.notify_all();
         break;
     }
     case WW_EVT_IN_SHUTDOWN: signal_shutdown(host); break;
     case WW_EVT_IN_CONFIGURE_RENDER_TARGET: {
-        std::lock_guard<std::mutex> lk(host.neg_mu);
         host.target_config  = c.u.configure_render_target.config;
         host.target_pending = true;
-        host.neg_cv.notify_all();
         break;
     }
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
         const ww_pool_directive_t& d = c.u.negotiate_buffers.directive;
-        {
-            std::lock_guard<std::mutex> lk(host.neg_mu);
-            host.neg_directive = d;
-            host.neg_pending   = true;
-        }
-        host.neg_cv.notify_all();
+        host.neg_directive           = d;
+        host.neg_pending             = true;
         break;
     }
     case WW_EVT_IN_REQUEST_FRAME: {
-        {
-            std::lock_guard<std::mutex> lk(host.neg_mu);
-            if (host.frame_request_revision == std::numeric_limits<uint64_t>::max()) {
-                host.frame_request_revision        = 1;
-                host.served_frame_request_revision = 0;
-            } else {
-                ++host.frame_request_revision;
-            }
+        if (host.frame_request_revision == std::numeric_limits<uint64_t>::max()) {
+            host.frame_request_revision        = 1;
+            host.served_frame_request_revision = 0;
+        } else {
+            ++host.frame_request_revision;
         }
-        host.neg_cv.notify_all();
         break;
     }
     case WW_EVT_IN_SET_LOG_LEVEL: ww_renderer_log_set_level(c.u.set_log_level.level); break;
@@ -615,7 +593,6 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
 }
 
 uint64_t pending_frame_request(HostState& host) {
-    std::lock_guard<std::mutex> lk(host.neg_mu);
     return host.frame_request_revision > host.served_frame_request_revision
                ? host.frame_request_revision
                : 0;
@@ -623,21 +600,46 @@ uint64_t pending_frame_request(HostState& host) {
 
 void complete_frame_request(HostState& host, uint64_t revision) {
     if (revision == 0) return;
-    std::lock_guard<std::mutex> lk(host.neg_mu);
     host.served_frame_request_revision = std::max(host.served_frame_request_revision, revision);
+}
+
+bool receive_control(HostState& host, bool wait, rstd::Option<Clock> deadline = rstd::None()) {
+    auto received = wait ? host.events->wait(deadline) : host.events->try_recv();
+    if (received.is_err()) {
+        if (! host.shutdown.load(std::memory_order_acquire))
+            rstd_error("waywallen-video-renderer: recv_control failed: {}", received.unwrap_err());
+        signal_shutdown(host);
+        return false;
+    }
+    auto event = rstd::move(received).unwrap();
+    if (! event) return false;
+    apply_control(host, event->value);
+    return true;
+}
+
+void drain_controls(HostState& host) {
+    for (unsigned i = 0; i < 64 && ! host.shutdown.load(std::memory_order_acquire); ++i)
+        if (! receive_control(host, false)) break;
+}
+
+bool wait_for_presentation(HostState& host, const wavsen::video::PresentationSchedule& schedule) {
+    while (! host.shutdown.load(std::memory_order_acquire) && schedule.deadline &&
+           Clock::now() < *schedule.deadline) {
+        if (! receive_control(host, true, schedule.deadline)) break;
+    }
+    return ! host.shutdown.load(std::memory_order_acquire);
 }
 
 int cancel_republish_wait(void* userdata) {
     auto& host = *static_cast<HostState*>(userdata);
+    drain_controls(host);
     if (host.shutdown.load(std::memory_order_acquire)) return 1;
-    std::lock_guard<std::mutex> lk(host.neg_mu);
     return host.neg_pending || host.target_pending ? 1 : 0;
 }
 
 bool republish_latest(HostState& host, uint64_t revision) {
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
-    ww_pool_republish_result_t  result {};
-    const int                   rc = ww_bridge_pool_wait_republish_latest(
+    ww_pool_republish_result_t result {};
+    const int                  rc = ww_bridge_pool_wait_republish_latest(
         host.pool, host.sock, cancel_republish_wait, &host, &result);
     if (rc != 0) {
         rstd_error("waywallen-video-renderer: republish contract failed: {}", rc);
@@ -712,8 +714,7 @@ bool set_audio_device_enabled(wavsen::audio::AvPlayer* av_player, AudioRuntime& 
 }
 
 void sync_audio_state(wavsen::audio::AvPlayer* av_player, AudioRuntime& audio, bool paused,
-                      bool muted, uint32_t pause_fade_ms, uint32_t mute_fade_ms,
-                      Clock::time_point now) {
+                      bool muted, uint32_t pause_fade_ms, uint32_t mute_fade_ms, Clock now) {
     if (! av_player) {
         audio.paused        = paused;
         audio.muted         = muted;
@@ -762,7 +763,7 @@ void sync_audio_state(wavsen::audio::AvPlayer* av_player, AudioRuntime& audio, b
                 }
             } else if (was_audible && fade_ms > 0) {
                 audio.pause_pending = true;
-                audio.pause_at      = now + std::chrono::milliseconds(fade_ms);
+                audio.pause_at      = now + rstd::time::Duration::from_millis(rstd::u64(fade_ms));
             } else {
                 av_player->pause();
                 audio.pause_pending = false;
@@ -910,7 +911,6 @@ bool apply_video_target(HostState& host, wavsen::video::VideoDecoder& decoder,
             message = "drain candidate conversion failed";
             return false;
         }
-        std::lock_guard<std::mutex> send_lk(host.send_mu);
         rc = ww_bridge_pool_commit_target(host.pool, host.sock, &result.pool_generation);
         if (rc == 0) {
             ww_pool_slot_acquire_result_t acquired {};
@@ -946,7 +946,6 @@ bool apply_video_target(HostState& host, wavsen::video::VideoDecoder& decoder,
         }
     }
     result.message = message.data();
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
     if (ww_bridge_send_render_target_result(host.sock, &result) != 0) signal_shutdown(host);
     return applied;
 }
@@ -1201,22 +1200,6 @@ int run_selftest(const Options& opt) {
     return 0;
 }
 
-void reader_loop(HostState& host) {
-    while (! host.shutdown.load(std::memory_order_acquire)) {
-        ww_bridge_control_t msg {};
-        int                 rc = ww_bridge_recv_control(host.sock, &msg);
-        if (rc != 0) {
-            if (! host.shutdown.load(std::memory_order_acquire)) {
-                rstd_error("waywallen-video-renderer: recv_control failed: {}", rc);
-            }
-            signal_shutdown(host);
-            return;
-        }
-        apply_control(host, msg);
-        ww_bridge_control_free(&msg);
-    }
-}
-
 } // namespace
 
 namespace waywallen::video
@@ -1299,6 +1282,13 @@ int run(int argc, char** argv) {
     }
     apply_user_properties(host, init.user_properties);
     waywallen_renderer_init_free(&init);
+    auto events = waywallen::plugin::RunLoop::start(host.sock);
+    if (events.is_err()) {
+        rstd_error("waywallen-video-renderer: start control loop failed: {}", events.unwrap_err());
+        ww_bridge_close(host.sock);
+        return 1;
+    }
+    host.events = rstd::Some(rstd::move(events).unwrap());
     if (opt.video_path.empty()) die("--path <video-file> is required");
 
     /* Probe the file's native dimensions. `Producer::create_with_render_node`
@@ -1522,28 +1512,17 @@ int run(int argc, char** argv) {
               even_h,
               opt.loop_file ? 1 : 0);
 
-    std::thread reader([&]() {
-        reader_loop(host);
-    });
-
     /* Block until first NegotiateBuffers. */
     if (! automatic) {
-        std::unique_lock<std::mutex> lk(host.neg_mu);
-        host.neg_cv.wait(lk, [&] {
-            return host.neg_pending || host.shutdown.load(std::memory_order_acquire);
-        });
+        while (! host.neg_pending && ! host.shutdown.load(std::memory_order_acquire))
+            receive_control(host, true);
         if (host.neg_pending && ! host.shutdown.load(std::memory_order_acquire)) {
             ww_pool_directive_t d = host.neg_directive;
             host.neg_pending      = false;
-            lk.unlock();
             if (! prepare_pool_reconfigure(d.count)) {
                 signal_shutdown(host);
             } else {
-                int rc = 0;
-                {
-                    std::lock_guard<std::mutex> send_lk(host.send_mu);
-                    rc = ww_bridge_pool_apply_directive(host.pool, host.sock, &d);
-                }
+                int rc = ww_bridge_pool_apply_directive(host.pool, host.sock, &d);
                 if (rc != 0) {
                     rstd_error("waywallen-video-renderer: pool_apply_directive (initial) rc={}",
                                rc);
@@ -1575,18 +1554,17 @@ int run(int argc, char** argv) {
     RetainedFrame            retained;
 
     while (! host.shutdown.load(std::memory_order_acquire)) {
+        drain_controls(host);
+        if (host.shutdown.load(std::memory_order_acquire)) break;
         {
-            std::unique_lock<std::mutex> lk(host.neg_mu);
             if (automatic && ! host.negotiated.load(std::memory_order_acquire)) {
-                host.neg_cv.wait(lk, [&] {
-                    return host.target_pending || host.shutdown.load(std::memory_order_acquire);
-                });
+                while (! host.target_pending && ! host.shutdown.load(std::memory_order_acquire))
+                    receive_control(host, true);
                 if (host.shutdown.load(std::memory_order_acquire)) break;
             }
             if (host.target_pending) {
                 auto config         = host.target_config;
                 host.target_pending = false;
-                lk.unlock();
                 if (apply_video_target(host, **decoder, *yuv, retained, config)) {
                     submitted_since_negotiate = true;
                     last_submitted_pts = retained.vk      ? retained.vk->info().pts_seconds
@@ -1598,16 +1576,11 @@ int run(int argc, char** argv) {
             if (host.neg_pending) {
                 ww_pool_directive_t d = host.neg_directive;
                 host.neg_pending      = false;
-                lk.unlock();
                 if (! prepare_pool_reconfigure(d.count)) {
                     signal_shutdown(host);
                     break;
                 }
-                int rc = 0;
-                {
-                    std::lock_guard<std::mutex> send_lk(host.send_mu);
-                    rc = ww_bridge_pool_apply_directive(host.pool, host.sock, &d);
-                }
+                int rc = ww_bridge_pool_apply_directive(host.pool, host.sock, &d);
                 if (rc != 0) {
                     rstd_error("waywallen-video-renderer: pool_apply_directive (re) rc={}", rc);
                     if (rc > 0) {
@@ -1684,7 +1657,6 @@ int run(int argc, char** argv) {
             std::string new_hwdec;
             bool        do_reopen = false;
             {
-                std::lock_guard<std::mutex> lk(host.hwdec_mu);
                 if (host.hwdec_pending) {
                     new_hwdec          = host.pending_hwdec;
                     host.hwdec_pending = false;
@@ -1743,18 +1715,10 @@ int run(int argc, char** argv) {
                 }
                 continue;
             }
-            std::unique_lock<std::mutex> lk(host.neg_mu);
-            auto                         wake = [&] {
-                return host.shutdown.load(std::memory_order_acquire) || host.target_pending ||
-                       host.neg_pending || ! host.paused.load(std::memory_order_acquire) ||
-                       host.playback_rate_pending.load(std::memory_order_acquire) ||
-                       host.frame_request_revision > host.served_frame_request_revision;
-            };
-            if (audio_runtime.pause_pending) {
-                host.neg_cv.wait_until(lk, audio_runtime.pause_at, wake);
-            } else {
-                host.neg_cv.wait(lk, wake);
-            }
+            receive_control(host,
+                            true,
+                            audio_runtime.pause_pending ? rstd::Some(audio_runtime.pause_at)
+                                                        : rstd::None<Clock>());
             continue;
         }
 
@@ -1813,13 +1777,7 @@ int run(int argc, char** argv) {
                 continue;
             }
             rstd_info("waywallen-video-renderer: clean EOF (loop=off); idling until shutdown");
-            std::unique_lock<std::mutex> lk(host.neg_mu);
-            host.neg_cv.wait(lk, [&] {
-                return host.shutdown.load(std::memory_order_acquire) || host.target_pending ||
-                       host.neg_pending || host.loop_pending.load(std::memory_order_acquire) ||
-                       host.playback_rate_pending.load(std::memory_order_acquire) ||
-                       host.frame_request_revision > host.served_frame_request_revision;
-            });
+            receive_control(host, true);
             continue;
         }
         const bool decoder_looped = fs == wavsen::video::NextFrame::Looped;
@@ -1866,7 +1824,7 @@ int run(int argc, char** argv) {
             if ((stall_warn_counter++ % 30) == 0) {
                 rstd_warn("waywallen-video-renderer: all slots are busy, dropping frame");
             }
-            wavsen::video::Presenter::wait_until(presentation);
+            (void)wait_for_presentation(host, presentation);
             continue;
         }
         stall_warn_counter = 0;
@@ -1908,7 +1866,7 @@ int run(int argc, char** argv) {
             auto value = rstd::move(reserved).unwrap();
             if (value.is_none()) {
                 ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
-                wavsen::video::Presenter::wait_until(presentation);
+                (void)wait_for_presentation(host, presentation);
                 continue;
             }
             conversion_reservation = rstd::move(value);
@@ -1982,7 +1940,7 @@ int run(int argc, char** argv) {
             auto submission = rstd::move(converted).unwrap();
             if (submission.is_none()) {
                 ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
-                wavsen::video::Presenter::wait_until(presentation);
+                (void)wait_for_presentation(host, presentation);
                 continue;
             }
             cv_res = rstd::Ok(submission->sync_fd);
@@ -2004,8 +1962,11 @@ int run(int argc, char** argv) {
             break;
         }
         sync_fd = std::move(cv_res).unwrap();
-        wavsen::video::Presenter::wait_until(presentation);
-        std::lock_guard<std::mutex>  send_lk(host.send_mu);
+        if (! wait_for_presentation(host, presentation)) {
+            ::close(sync_fd);
+            ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
+            break;
+        }
         ww_pool_slot_submit_result_t submitted {};
         int                          submit_rc = ww_bridge_pool_submit_acquired_slot(
             host.pool, host.sock, &acquired.identity, sync_fd, &submitted);
@@ -2032,10 +1993,7 @@ int run(int argc, char** argv) {
         complete_frame_request(host, frame_request);
     }
 
-    if (reader.joinable()) {
-        ::shutdown(host.sock, SHUT_RD);
-        reader.join();
-    }
+    host.events->close();
     if (auto drained = yuv->drain_submissions(rstd::u64(1'000'000'000)); drained.is_err()) {
         rstd_warn("waywallen-video-renderer: final conversion drain failed: {}",
                   rstd::move(drained).unwrap_err().message.as_str());
