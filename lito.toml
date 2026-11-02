@@ -4,6 +4,7 @@ members = [
   "bridge",
   "plugins",
   "plugins/org.waywallen.image",
+  "plugins/org.waywallen.sketchfab",
   "plugins/org.waywallen.video",
   "plugins/org.waywallen.wallhaven",
   "tools/i18n",
@@ -14,6 +15,7 @@ members = [
 ]
 default-members = [
   "plugins/org.waywallen.image",
+  "plugins/org.waywallen.sketchfab",
   "plugins/org.waywallen.video",
   "plugins/org.waywallen.wallhaven",
   "tools/i18n",

@@ -668,6 +668,10 @@ MD.Page {
             root.reloadAll();
         }
         function onPluginStateChanged() {
+            root.infoPresentation?.close();
+            detailPresenter.dismiss();
+            root.closeDetail();
+            searchQuery.browsingEnabled = false;
             availabilityQuery.reload();
         }
         function onSettingsChanged() {

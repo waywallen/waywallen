@@ -94,7 +94,8 @@ private:
     QString     m_query;
     QString     m_sort_key;
     QStringList m_tags;
-    QString     m_error;
+    QString     m_next_cursor;
+    QStringList m_seen_cursors;
     bool        m_browsing_enabled { false };
     bool        m_failed_append { false };
     bool        m_reload_pending { false };
@@ -109,12 +110,14 @@ export class RemoteDetailsQuery : public Query,
     Q_PROPERTY(QString itemId READ itemId WRITE setItemId NOTIFY itemIdChanged FINAL)
     Q_PROPERTY(QString author READ author NOTIFY loaded FINAL)
     Q_PROPERTY(QString authorAvatarUrl READ authorAvatarUrl NOTIFY loaded FINAL)
+    Q_PROPERTY(QString authorUrl READ authorUrl NOTIFY loaded FINAL)
     Q_PROPERTY(QString description READ description NOTIFY loaded FINAL)
     Q_PROPERTY(QString size READ size NOTIFY loaded FINAL)
     Q_PROPERTY(int width READ width NOTIFY loaded FINAL)
     Q_PROPERTY(int height READ height NOTIFY loaded FINAL)
     Q_PROPERTY(QStringList tags READ tags NOTIFY loaded FINAL)
     Q_PROPERTY(QString webUrl READ webUrl NOTIFY loaded FINAL)
+    Q_PROPERTY(QVariantList fields READ fields NOTIFY loaded FINAL)
 
 public:
     RemoteDetailsQuery(QObject* parent = nullptr);
@@ -126,12 +129,14 @@ public:
     void setItemId(const QString&);
     auto author() const -> const QString&;
     auto authorAvatarUrl() const -> const QString&;
+    auto authorUrl() const -> const QString&;
     auto description() const -> const QString&;
     auto size() const -> const QString&;
     auto width() const -> int;
     auto height() const -> int;
     auto tags() const -> const QStringList&;
     auto webUrl() const -> const QString&;
+    auto fields() const -> const QVariantList&;
 
     void reload() override;
 
@@ -140,16 +145,18 @@ public:
     Q_SIGNAL void loaded();
 
 private:
-    QString     m_source_id;
-    QString     m_item_id;
-    QString     m_author;
-    QString     m_author_avatar_url;
-    QString     m_description;
-    QString     m_size;
-    int         m_width { 0 };
-    int         m_height { 0 };
-    QStringList m_tags;
-    QString     m_web_url;
+    QString      m_source_id;
+    QString      m_item_id;
+    QString      m_author;
+    QString      m_author_avatar_url;
+    QString      m_author_url;
+    QString      m_description;
+    QString      m_size;
+    int          m_width { 0 };
+    int          m_height { 0 };
+    QStringList  m_tags;
+    QString      m_web_url;
+    QVariantList m_fields;
 };
 
 export class RemoteDownloadQuery : public Query,

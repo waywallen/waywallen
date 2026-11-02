@@ -1114,6 +1114,13 @@ message RemoteSourceInfo {
   repeated RemoteFilterDef filters = 15;
   PluginMessage display_name_text = 16;
   PluginMessage remote_hint_text = 17;
+  RemotePagination pagination = 18;
+}
+
+enum RemotePagination {
+  REMOTE_PAGINATION_UNSPECIFIED = 0;
+  REMOTE_PAGINATION_PAGE = 1;
+  REMOTE_PAGINATION_CURSOR = 2;
 }
 
 enum RemoteCapability {
@@ -1217,11 +1224,13 @@ message RemoteSearchRequest {
   string sort_key = 3;
   uint32 page = 4;
   repeated string required_tags = 5;
+  string cursor = 6;
 }
 message RemoteSearchResponse {
   repeated RemoteItem items = 1;
   bool   has_more = 2;
   string error = 3;
+  string next_cursor = 4;
 }
 
 message RemoteDownloadRequest {
@@ -1260,6 +1269,16 @@ message RemoteDetailsResponse {
   // Same as RemoteItem.author_avatar_url, for sources that only learn the
   // author from their per-item endpoint.
   string author_avatar_url = 9;
+  repeated RemoteDetailField fields = 10;
+  string author_url = 11;
+}
+
+message RemoteDetailField {
+  string key = 1;
+  string label = 2;
+  string value = 3;
+  string url = 4;
+  PluginMessage label_text = 5;
 }
 
 enum RemoteDownloadState {

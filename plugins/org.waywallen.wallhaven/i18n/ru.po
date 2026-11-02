@@ -134,8 +134,8 @@ msgid "Not safe for work"
 msgstr "Небезопасно для работы"
 
 #: main.lua:28
-msgid "Optional. Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password."
-msgstr "Необязательно. Используйте API-ключ из настроек учётной записи Wallhaven. Не вводите пароль Wallhaven."
+msgid "Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password."
+msgstr "Используйте API-ключ из настроек учётной записи Wallhaven. Не вводите пароль Wallhaven."
 
 #: wallhaven/api.lua:86
 msgid "Pixel art"

@@ -15,9 +15,13 @@ pub(super) const RUNTIME_INACTIVE: u8 = 2;
 
 pub const ENTRY_VERSION_V3: u32 = 3;
 pub const ENTRY_VERSION_V4: u32 = 4;
-pub const ENTRY_VERSION: u32 = ENTRY_VERSION_V4;
-pub const LATEST_ENTRY_VERSION: u32 = ENTRY_VERSION_V4;
-pub const SUPPORTED_ENTRY_VERSIONS: &[u32] = &[ENTRY_VERSION_V3, ENTRY_VERSION_V4];
+pub const ENTRY_VERSION_V5: u32 = 5;
+pub const ENTRY_VERSION: u32 = ENTRY_VERSION_V5;
+pub const LATEST_ENTRY_VERSION: u32 = ENTRY_VERSION_V5;
+pub const SUPPORTED_ENTRY_VERSIONS: &[u32] =
+    &[ENTRY_VERSION_V3, ENTRY_VERSION_V4, ENTRY_VERSION_V5];
+
+pub(super) const MAX_DISCOVER_CURSOR_BYTES: usize = 4096;
 
 pub fn supports_entry_version(version: u32) -> bool {
     SUPPORTED_ENTRY_VERSIONS.contains(&version)
@@ -188,6 +192,7 @@ pub struct DiscoverSourceInfo {
     /// Human-readable display name (falls back to `name`).
     pub display_name: LocalizedText,
     pub supports_search: bool,
+    pub pagination: DiscoverPagination,
     pub remote_capability: Option<RemoteCapability>,
     pub remote_hint: LocalizedText,
     pub sorts: Vec<DiscoverSort>,
@@ -204,6 +209,14 @@ pub struct DiscoverSourceInfo {
     pub status: Vec<SourceStatus>,
     /// Provider-owned account image returned by `lifecycle.check()`.
     pub avatar_url: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DiscoverPagination {
+    #[default]
+    Page,
+    Cursor,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -336,11 +349,21 @@ pub struct DiscoverItem {
     pub extra: HashMap<String, String>,
 }
 
+/// One provider-owned information row returned with remote details.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct DiscoverDetailField {
+    pub key: String,
+    pub label: LocalizedText,
+    pub value: String,
+    pub url: String,
+}
+
 /// Detail blob returned by a plugin's `discover.details(ctx, id)`.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct DiscoverDetails {
     pub author: String,
     pub author_avatar_url: String,
+    pub author_url: String,
     pub description: String,
     pub size: String,
     pub width: Option<u32>,
@@ -348,12 +371,14 @@ pub struct DiscoverDetails {
     pub tags: Vec<String>,
     pub web_url: String,
     pub extra: HashMap<String, String>,
+    pub fields: Vec<DiscoverDetailField>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct DiscoverSearchResult {
     pub items: Vec<DiscoverItem>,
     pub has_more: bool,
+    pub next_cursor: String,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]

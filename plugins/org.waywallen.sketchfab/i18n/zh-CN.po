@@ -1,0 +1,173 @@
+msgid ""
+msgstr "Project-Id-Version: org.waywallen.sketchfab 0.1.0\nLanguage: zh-CN\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+msgid "Relevance"
+msgstr "相关性"
+
+msgid "Recently published"
+msgstr "最新发布"
+
+msgid "Most liked"
+msgstr "最多点赞"
+
+msgid "Most viewed"
+msgstr "最多浏览"
+
+msgid "Category"
+msgstr "分类"
+
+msgid "Animals & Pets"
+msgstr "动物与宠物"
+
+msgid "Architecture"
+msgstr "建筑"
+
+msgid "Art & Abstract"
+msgstr "艺术与抽象"
+
+msgid "Cars & Vehicles"
+msgstr "汽车与交通工具"
+
+msgid "Characters & Creatures"
+msgstr "角色与生物"
+
+msgid "Cultural Heritage & History"
+msgstr "文化遗产与历史"
+
+msgid "Electronics & Gadgets"
+msgstr "电子产品与设备"
+
+msgid "Fashion & Style"
+msgstr "时尚与风格"
+
+msgid "Food & Drink"
+msgstr "食物与饮品"
+
+msgid "Furniture & Home"
+msgstr "家具与家居"
+
+msgid "Music"
+msgstr "音乐"
+
+msgid "Nature & Plants"
+msgstr "自然与植物"
+
+msgid "News & Politics"
+msgstr "新闻与政治"
+
+msgid "People"
+msgstr "人物"
+
+msgid "Places & Travel"
+msgstr "地点与旅行"
+
+msgid "Science & Technology"
+msgstr "科学与技术"
+
+msgid "Sports & Fitness"
+msgstr "体育与健身"
+
+msgid "Weapons & Military"
+msgstr "武器与军事"
+
+msgid "License"
+msgstr "许可证"
+
+msgid "CC Attribution"
+msgstr "CC 署名"
+
+msgid "CC Attribution-ShareAlike"
+msgstr "CC 署名-相同方式共享"
+
+msgid "CC Attribution-NoDerivs"
+msgstr "CC 署名-禁止演绎"
+
+msgid "CC Attribution-NonCommercial"
+msgstr "CC 署名-非商业性使用"
+
+msgid "CC Attribution-NonCommercial-ShareAlike"
+msgstr "CC 署名-非商业性使用-相同方式共享"
+
+msgid "CC Attribution-NonCommercial-NoDerivs"
+msgstr "CC 署名-非商业性使用-禁止演绎"
+
+msgid "CC0 Public Domain"
+msgstr "CC0 公共领域"
+
+msgid "Downloadable only"
+msgstr "仅可下载"
+
+msgid "Animated only"
+msgstr "仅含动画"
+
+msgid "Staff picks only"
+msgstr "仅精选"
+
+msgid "License requirements"
+msgstr "许可要求"
+
+msgid "Categories"
+msgstr "分类"
+
+msgid "Vertices"
+msgstr "顶点数"
+
+msgid "Faces"
+msgstr "面数"
+
+msgid "Animations"
+msgstr "动画数"
+
+msgid "Downloadable"
+msgstr "可下载"
+
+msgid "GLB archive"
+msgstr "GLB 归档"
+
+msgid "glTF archive"
+msgstr "glTF 归档"
+
+msgid "USDZ archive"
+msgstr "USDZ 归档"
+
+msgid "Sketchfab account"
+msgstr "Sketchfab 账户"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Log in to Sketchfab"
+msgstr "登录 Sketchfab"
+
+msgid "Use your Sketchfab API Token from https://sketchfab.com/settings/password. Do not enter your password or Epic Games token."
+msgstr "请使用 https://sketchfab.com/settings/password 中的 Sketchfab API Token。请勿输入密码或 Epic Games 令牌。"
+
+msgid "API Token"
+msgstr "API Token"
+
+msgid "Copy the API Token from Sketchfab Settings → Password & API."
+msgstr "从 Sketchfab 设置 → Password & API 复制 API Token。"
+
+msgid "Sketchfab API Token"
+msgstr "Sketchfab API Token"
+
+msgid "Remove API Token"
+msgstr "移除 API Token"
+
+msgid "Guest mode"
+msgstr "访客模式"
+
+msgid "API Token not verified"
+msgstr "API Token 尚未验证"
+
+msgid "API Token expired"
+msgstr "API Token 已失效"
+
+msgid "API Token verification failed"
+msgstr "API Token 验证失败"
+
+msgid "Could not verify the Sketchfab API Token. Try again later."
+msgstr "无法验证 Sketchfab API Token，请稍后重试。"
+
+msgid "Signed in as %1"
+msgstr "已登录为 %1"

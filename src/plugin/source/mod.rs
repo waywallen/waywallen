@@ -23,6 +23,10 @@ pub use runtime::{LuaPluginRuntime, WallpaperApply};
 pub use types::*;
 
 #[cfg(test)]
+mod discover_tests;
+#[cfg(test)]
 mod image_tests;
+#[cfg(test)]
+mod sketchfab_tests;
 #[cfg(test)]
 mod tests;

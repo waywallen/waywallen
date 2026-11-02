@@ -1,0 +1,9 @@
+[plugin]
+id = "org.waywallen.sketchfab"
+name = "Sketchfab"
+version = "0.1.0"
+entry = "main.lua"
+entry_version = 5
+
+[plugin.i18n]
+directory = "i18n"

@@ -24,6 +24,7 @@ pub(super) struct DiscoverCapability {
     pub(super) supports_details: bool,
     pub(super) supports_download: bool,
     pub(super) supports_resolve: bool,
+    pub(super) pagination: DiscoverPagination,
     pub(super) remote: Option<RemoteCapability>,
     pub(super) remote_hint: LocalizedText,
     pub(super) sorts: Vec<DiscoverSort>,
@@ -68,6 +69,7 @@ pub(super) struct LoadedPluginInfo {
     pub(super) display_name: LocalizedText,
     pub(super) plugin_id: String,
     pub(super) version: String,
+    entry_version: u32,
     pub(super) capabilities: PluginCapabilities,
     pub(super) settings: Vec<SourceSetting>,
     pub(super) actions: Vec<SourceAction>,
@@ -1003,6 +1005,26 @@ impl LuaPluginRuntime {
                 }
                 let discover_api = Self::require_module_table(module, "discover")?;
                 Self::require_table_function(&discover_api, "search", "module.discover")?;
+                let pagination = match Self::optional_string(
+                    &discover_tbl,
+                    "pagination",
+                    "info().capabilities.discover",
+                )?
+                .as_str()
+                {
+                    "" | "page" => DiscoverPagination::Page,
+                    "cursor" if entry_version >= ENTRY_VERSION_V5 => DiscoverPagination::Cursor,
+                    "cursor" => {
+                        return Err(Error::Internal(anyhow!(
+                            "cursor pagination requires Lua entry_version 5"
+                        )))
+                    }
+                    _ => {
+                        return Err(Error::Internal(anyhow!(
+                            "info().capabilities.discover.pagination must be page or cursor"
+                        )))
+                    }
+                };
                 let supports_details = Self::optional_bool(
                     &discover_tbl,
                     "details",
@@ -1107,6 +1129,7 @@ impl LuaPluginRuntime {
                     supports_details,
                     supports_download,
                     supports_resolve,
+                    pagination,
                     remote,
                     remote_hint: Self::optional_localized_text(
                         &discover_tbl,
@@ -1223,6 +1246,7 @@ impl LuaPluginRuntime {
             display_name,
             plugin_id: plugin_id.to_owned(),
             version: plugin_version.to_owned(),
+            entry_version,
             capabilities: PluginCapabilities {
                 source,
                 source_item_remove,
@@ -1825,6 +1849,10 @@ impl LuaPluginRuntime {
 
     fn install_json_context(&self, ctx: &LuaTable) -> LuaResult<()> {
         let json = mlua_extra::json::create_nullable_module(&self.lua)?;
+        json.set(
+            "strict",
+            mlua_extra::json::strict::create_module(&self.lua)?,
+        )?;
         let parse = json.get::<LuaFunction>("parse")?;
         let encode = json.get::<LuaFunction>("encode")?;
         ctx.set("json_parse", parse)?;
@@ -2402,6 +2430,112 @@ impl LuaPluginRuntime {
     // -----------------------------------------------------------------------
     // Discover API — generic remote browsing relayed into plugin Lua.
 
+    fn validate_discover_cursor(cursor: &str) -> Result<()> {
+        if cursor.len() > MAX_DISCOVER_CURSOR_BYTES || cursor.chars().any(char::is_control) {
+            return Err(Error::InvalidArgument(format!(
+                "discover cursor must be at most {MAX_DISCOVER_CURSOR_BYTES} bytes without control characters"
+            )));
+        }
+        Ok(())
+    }
+
+    fn optional_discover_url(tbl: &LuaTable, key: &str, context: &str) -> Result<String> {
+        let url = Self::optional_string(tbl, key, context)?;
+        if !url.is_empty() {
+            let parsed = reqwest::Url::parse(&url).ok();
+            if url.len() > 4096
+                || url.chars().any(char::is_whitespace)
+                || url.chars().any(char::is_control)
+                || !parsed.is_some_and(|parsed| {
+                    matches!(parsed.scheme(), "http" | "https")
+                        && parsed.host_str().is_some()
+                        && parsed.username().is_empty()
+                        && parsed.password().is_none()
+                })
+            {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.{key} must be an http or https URL without credentials"
+                )));
+            }
+        }
+        Ok(url)
+    }
+
+    fn discover_detail_fields(
+        result: &LuaTable,
+        entry_version: u32,
+    ) -> Result<Vec<DiscoverDetailField>> {
+        let context = "module.discover.details result";
+        if entry_version < ENTRY_VERSION_V5 {
+            Self::require_field_absent(result, "fields", context)?;
+            return Ok(Vec::new());
+        }
+        let Some(fields) = Self::optional_table(result, "fields", context)? else {
+            return Ok(Vec::new());
+        };
+        let count = fields.raw_len();
+        if count > 32 {
+            return Err(Error::Internal(anyhow!("{context}.fields exceeds 32 rows")));
+        }
+        for pair in fields.clone().pairs::<LuaValue, LuaValue>() {
+            let (key, _) = pair?;
+            if !matches!(key, LuaValue::Integer(index) if index > 0 && index as usize <= count) {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.fields must be a dense sequence"
+                )));
+            }
+        }
+        let mut out = Vec::with_capacity(count);
+        let mut keys = HashSet::new();
+        for index in 1..=count {
+            let field: LuaTable = fields.raw_get(index).map_err(|error| {
+                Error::Internal(anyhow!(
+                    "{context}.fields[{index}] must be a table: {error}"
+                ))
+            })?;
+            let context = format!("{context}.fields[{index}]");
+            let key = Self::require_string(&field, "key", &context)?;
+            if key.is_empty()
+                || key.len() > 128
+                || !key
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+                || !keys.insert(key.clone())
+            {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.key must be a unique identifier of at most 128 bytes"
+                )));
+            }
+            let label = Self::require_localized_text(&field, "label", &context)?;
+            if label.text().len() > 512
+                || label.message().is_some_and(|message| {
+                    message
+                        .arguments
+                        .iter()
+                        .any(|argument| argument.len() > 512)
+                })
+            {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.label exceeds 512 bytes"
+                )));
+            }
+            let value = Self::require_string(&field, "value", &context)?;
+            if value.len() > 8192 {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.value exceeds 8192 bytes"
+                )));
+            }
+            let url = Self::optional_discover_url(&field, "url", &context)?;
+            out.push(DiscoverDetailField {
+                key,
+                label,
+                value,
+                url,
+            });
+        }
+        Ok(out)
+    }
+
     /// List plugins that opt into discovery and their declared sort/filter
     /// options.
     pub fn discover_sources(&self) -> Result<Vec<DiscoverSourceInfo>> {
@@ -2415,6 +2549,7 @@ impl LuaPluginRuntime {
                 name: info.name.clone(),
                 display_name: info.display_name.clone(),
                 supports_search: disc.supports_search,
+                pagination: disc.pagination,
                 remote_capability: disc.remote,
                 remote_hint: disc.remote_hint.clone(),
                 sorts: disc.sorts.clone(),
@@ -2431,7 +2566,7 @@ impl LuaPluginRuntime {
     }
 
     /// Relay a discover/search request to a plugin's `discover.search(ctx, params)`
-    /// Lua function. `params` is `{ query, sort, page, tags }`.
+    /// Lua function with page-based pagination.
     pub async fn call_discover(
         &mut self,
         plugin_name: &str,
@@ -2439,6 +2574,19 @@ impl LuaPluginRuntime {
         sort: &str,
         page: u32,
         tags: &[String],
+    ) -> Result<DiscoverSearchResult> {
+        self.call_discover_with_cursor(plugin_name, query, sort, page, tags, "")
+            .await
+    }
+
+    pub async fn call_discover_with_cursor(
+        &mut self,
+        plugin_name: &str,
+        query: &str,
+        sort: &str,
+        page: u32,
+        tags: &[String],
+        cursor: &str,
     ) -> Result<DiscoverSearchResult> {
         let callbacks = self
             .callbacks
@@ -2453,6 +2601,22 @@ impl LuaPluginRuntime {
             .as_ref()
             .ok_or_else(|| Error::DiscoverUnsupported(plugin_name.to_string()))?;
         Self::validate_discover_filter_values(plugin_name, discover, tags)?;
+        Self::validate_discover_cursor(cursor)?;
+        match discover.pagination {
+            DiscoverPagination::Page if !cursor.is_empty() => {
+                return Err(Error::InvalidArgument(
+                    "page pagination does not accept a cursor".into(),
+                ));
+            }
+            DiscoverPagination::Cursor if page > 1 && cursor.is_empty() => {
+                return Err(Error::InvalidArgument(
+                    "cursor pagination requires the preceding next_cursor for later pages".into(),
+                ));
+            }
+            _ => {}
+        }
+        let pagination = discover.pagination;
+        let entry_version = info.entry_version;
         let default_wp_type = info
             .capabilities
             .source
@@ -2471,6 +2635,9 @@ impl LuaPluginRuntime {
         params.set("query", query)?;
         params.set("sort", sort)?;
         params.set("page", page)?;
+        if !cursor.is_empty() {
+            params.set("cursor", cursor)?;
+        }
         let tags_tbl = self.lua.create_table()?;
         for (i, t) in tags.iter().enumerate() {
             tags_tbl.set(i + 1, t.clone())?;
@@ -2525,8 +2692,38 @@ impl LuaPluginRuntime {
                 plugin: plugin_name.to_string(),
                 message: format!("discover.search result.has_more required: {e}"),
             })?;
+        if entry_version < ENTRY_VERSION_V5 {
+            Self::require_field_absent(&result, "next_cursor", "module.discover.search result")?;
+        }
+        let next_cursor =
+            Self::optional_string(&result, "next_cursor", "module.discover.search result")?;
+        Self::validate_discover_cursor(&next_cursor)?;
+        match pagination {
+            DiscoverPagination::Page if !next_cursor.is_empty() => {
+                return Err(Error::Internal(anyhow!(
+                    "page pagination must not return next_cursor"
+                )));
+            }
+            DiscoverPagination::Cursor => {
+                if has_more == next_cursor.is_empty() {
+                    return Err(Error::Internal(anyhow!(
+                        "cursor pagination has_more must match a nonempty next_cursor"
+                    )));
+                }
+                if !next_cursor.is_empty() && next_cursor == cursor {
+                    return Err(Error::Internal(anyhow!(
+                        "cursor pagination returned the current cursor again"
+                    )));
+                }
+            }
+            _ => {}
+        }
         self.persist_state(plugin_name)?;
-        Ok(DiscoverSearchResult { items, has_more })
+        Ok(DiscoverSearchResult {
+            items,
+            has_more,
+            next_cursor,
+        })
     }
 
     /// Fetch a legacy plugin's live tag taxonomy via `discover.tags(ctx)`.
@@ -2622,6 +2819,11 @@ impl LuaPluginRuntime {
                 "author_avatar_url",
                 "module.discover.details result",
             )?,
+            author_url: Self::optional_discover_url(
+                &result,
+                "author_url",
+                "module.discover.details result",
+            )?,
             description: Self::require_string(
                 &result,
                 "description",
@@ -2633,6 +2835,7 @@ impl LuaPluginRuntime {
             tags: Self::require_string_sequence(&result, "tags", "module.discover.details result")?,
             web_url: Self::optional_string(&result, "web_url", "module.discover.details result")?,
             extra: parse_lua_string_map(&result, "extra", "module.discover.details result")?,
+            fields: Self::discover_detail_fields(&result, info.entry_version)?,
         };
         self.persist_state(plugin_name)?;
         Ok(details)

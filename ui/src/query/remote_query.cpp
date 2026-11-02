@@ -93,6 +93,7 @@ void RemoteAvailabilityQuery::reload() {
                 m[u"ownerPluginId"_s]    = src.ownerPluginId();
                 m[u"displayName"_s]      = src.displayName();
                 m[u"remoteCapability"_s] = static_cast<int>(src.remoteCapability());
+                m[u"pagination"_s]       = static_cast<int>(src.pagination());
                 m[u"remoteHint"_s]       = src.remoteHint();
                 m[u"avatarUrl"_s]        = src.avatarUrl();
                 m[u"displayNameText"_s] =
@@ -253,9 +254,7 @@ auto RemoteSearchQuery::hasMore() const -> bool {
     const auto t = model();
     return t && t->hasMore();
 }
-auto RemoteSearchQuery::errorText() const -> const QString& {
-    return m_error.isEmpty() ? error() : m_error;
-}
+auto RemoteSearchQuery::errorText() const -> const QString& { return error(); }
 
 void RemoteSearchQuery::reload() {
     if (! m_browsing_enabled || m_source_id.isEmpty()) {
@@ -264,6 +263,8 @@ void RemoteSearchQuery::reload() {
     }
     setOffset(0);
     setNoMore(false);
+    m_next_cursor.clear();
+    m_seen_cursors.clear();
     fetchPage(1, false);
 }
 
@@ -288,6 +289,8 @@ void RemoteSearchQuery::retry() {
 void RemoteSearchQuery::invalidateSearch() {
     m_reload_pending = true;
     m_failed_append  = false;
+    m_next_cursor.clear();
+    m_seen_cursors.clear();
     if (auto t = model()) t->setHasMore(false);
     delayReload();
 }
@@ -297,7 +300,8 @@ void RemoteSearchQuery::clearResults() {
     m_failed_append  = false;
     setOffset(0);
     setNoMore(true);
-    m_error.clear();
+    m_next_cursor.clear();
+    m_seen_cursors.clear();
     setError({});
     if (auto t = model()) t->reset({}, false);
     setStatus(Status::Finished);
@@ -310,7 +314,7 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
     m_reload_pending = false;
     t->setHasMore(false);
     m_failed_append = append;
-    m_error.clear();
+    setError({});
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -321,6 +325,7 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
     inner.setSortKey(m_sort_key);
     inner.setPage(page);
     inner.setRequiredTags(m_tags);
+    if (append) inner.setCursor(m_next_cursor);
     req.setRemoteSearch(std::move(inner));
 
     const auto revision = beginRequest();
@@ -331,8 +336,24 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
         if (! self) co_return;
         if (! self->isCurrentRequest(revision)) co_return;
 
-        self->inspect_set(result, [self, page, append](const proto::Response& rsp) {
-            const auto&             sr = rsp.remoteSearch();
+        if (! result) {
+            self->setError(result.unwrap_err_unchecked());
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        const auto& sr = result->remoteSearch();
+        if (! sr.error().isEmpty()) {
+            self->setError(sr.error());
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        if (sr.hasMore() && ! sr.nextCursor().isEmpty() &&
+            self->m_seen_cursors.contains(sr.nextCursor())) {
+            self->setError(tr("The source returned a repeated continuation token."));
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        {
             QList<model::RemoteRow> rows;
             rows.reserve(sr.items().size());
             for (const auto& it : sr.items()) {
@@ -350,18 +371,23 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
                 });
             }
             auto t = self->model();
-            if (! t) return;
-            const bool more = sr.hasMore() && ! rows.isEmpty();
+            if (! t) co_return;
+            const bool more = sr.hasMore() && (! rows.isEmpty() || ! sr.nextCursor().isEmpty());
             self->setOffset(static_cast<qint32>(page - 1));
             self->setNoMore(! more);
-            self->m_error         = sr.error();
+            self->m_next_cursor = sr.nextCursor();
+            if (! sr.nextCursor().isEmpty()) {
+                if (self->m_seen_cursors.size() == 128) self->m_seen_cursors.removeFirst();
+                self->m_seen_cursors.push_back(sr.nextCursor());
+            }
             self->m_failed_append = false;
             if (append)
                 t->append(rows, more);
             else
                 t->reset(std::move(rows), more);
             Q_EMIT self->stateChanged();
-        });
+        }
+        self->setStatus(Status::Finished);
         co_return;
     });
 }
@@ -388,25 +414,33 @@ void RemoteDetailsQuery::setItemId(const QString& v) {
 }
 auto RemoteDetailsQuery::author() const -> const QString& { return m_author; }
 auto RemoteDetailsQuery::authorAvatarUrl() const -> const QString& { return m_author_avatar_url; }
+auto RemoteDetailsQuery::authorUrl() const -> const QString& { return m_author_url; }
 auto RemoteDetailsQuery::description() const -> const QString& { return m_description; }
 auto RemoteDetailsQuery::size() const -> const QString& { return m_size; }
 auto RemoteDetailsQuery::width() const -> int { return m_width; }
 auto RemoteDetailsQuery::height() const -> int { return m_height; }
 auto RemoteDetailsQuery::tags() const -> const QStringList& { return m_tags; }
 auto RemoteDetailsQuery::webUrl() const -> const QString& { return m_web_url; }
+auto RemoteDetailsQuery::fields() const -> const QVariantList& { return m_fields; }
 
 void RemoteDetailsQuery::reload() {
     const auto revision = beginRequest();
     m_author.clear();
     m_author_avatar_url.clear();
+    m_author_url.clear();
     m_description.clear();
     m_size.clear();
     m_width  = 0;
     m_height = 0;
     m_tags.clear();
     m_web_url.clear();
+    m_fields.clear();
+    setError({});
     Q_EMIT loaded();
-    if (m_item_id.isEmpty()) return;
+    if (m_item_id.isEmpty()) {
+        setStatus(Status::Finished);
+        return;
+    }
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -422,10 +456,21 @@ void RemoteDetailsQuery::reload() {
         if (! co_await QAsyncResult::qexecutor()) co_return;
         if (! self || ! self->isCurrentRequest(revision)) co_return;
 
-        self->inspect_set(result, [self](const proto::Response& rsp) {
-            const auto& dr            = rsp.remoteDetails();
+        if (! result) {
+            self->setError(result.unwrap_err_unchecked());
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        const auto& dr = result->remoteDetails();
+        if (! dr.error().isEmpty()) {
+            self->setError(dr.error());
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        {
             self->m_author            = dr.author();
             self->m_author_avatar_url = dr.authorAvatarUrl();
+            self->m_author_url        = dr.authorUrl();
             self->m_description       = dr.description();
             self->m_size              = dr.size();
             self->m_width             = static_cast<int>(dr.width());
@@ -433,8 +478,22 @@ void RemoteDetailsQuery::reload() {
             self->m_web_url           = dr.webUrl();
             self->m_tags.clear();
             for (const auto& t : dr.tags()) self->m_tags.push_back(t);
+            for (const auto& field : dr.fields()) {
+                QVariantMap row;
+                row[u"key"_s]       = field.key();
+                row[u"label"_s]     = field.label();
+                row[u"labelText"_s] = pluginMessageFromPb(field.labelText(), field.label());
+                row[u"value"_s]     = field.value();
+                const QUrl url(field.url());
+                if (url.isValid() && ! url.host().isEmpty() &&
+                    (url.scheme() == u"https"_s || url.scheme() == u"http"_s)) {
+                    row[u"url"_s] = url;
+                }
+                self->m_fields.push_back(row);
+            }
             Q_EMIT self->loaded();
-        });
+        }
+        self->setStatus(Status::Finished);
         co_return;
     });
 }

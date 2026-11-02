@@ -25,7 +25,7 @@ function M.info()
                 id = "wallhaven_sign_in",
                 kind = "form",
                 label = tr("Log in to Wallhaven"),
-                description = tr([[Optional. Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password.]]),
+                description = tr([[Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password.]]),
                 group = "account",
                 group_label = account_group,
                 order = 20,

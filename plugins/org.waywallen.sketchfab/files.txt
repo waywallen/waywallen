@@ -1,0 +1,7 @@
+i18n/zh-CN.po
+main.lua
+plugin.toml
+sketchfab/api.lua
+sketchfab/discover.lua
+sketchfab/map.lua
+sketchfab/session.lua

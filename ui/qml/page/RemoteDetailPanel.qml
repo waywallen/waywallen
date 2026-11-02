@@ -21,6 +21,7 @@ Item {
         const own = String(root.item?.authorAvatarUrl ?? "");
         return own.length > 0 ? own : String(root.details?.authorAvatarUrl ?? "");
     }
+    readonly property string authorUrl: String(root.details?.authorUrl ?? "")
     property int remoteCapability: 0
     property string remoteHint: ""
     property var tagOptions: []
@@ -121,6 +122,22 @@ Item {
                     Layout.fillWidth: true
                     spacing: 8
                     visible: root.authorName.length > 0
+                    Accessible.role: root.authorUrl.length > 0 ? Accessible.Link : Accessible.StaticText
+                    Accessible.name: root.authorName
+                    Accessible.onPressAction: {
+                        if (root.authorUrl.length > 0)
+                            MD.Util.openUrlExternally(root.authorUrl);
+                    }
+
+                    TapHandler {
+                        enabled: root.authorUrl.length > 0
+                        onTapped: MD.Util.openUrlExternally(root.authorUrl)
+                    }
+
+                    HoverHandler {
+                        enabled: root.authorUrl.length > 0
+                        cursorShape: Qt.PointingHandCursor
+                    }
 
                     W.ThumbnailImage {
                         Layout.preferredWidth: 32
@@ -137,6 +154,7 @@ Item {
                     MD.Text {
                         Layout.fillWidth: true
                         text: qsTr("by %1").arg(root.authorName)
+                        textFormat: Text.PlainText
                         typescale: MD.Token.typescale.body_medium
                         color: MD.Token.color.on_surface_variant
                         wrapMode: Text.WordWrap
@@ -181,6 +199,12 @@ Item {
                         typescale: MD.Token.typescale.body_medium
                         color: MD.Token.color.on_surface
                     }
+                }
+
+                W.RemoteDetailFields {
+                    Layout.fillWidth: true
+                    fields: root.details?.fields ?? []
+                    labelForField: field => W.I18n.tr(field.labelText) || String(field.label ?? "")
                 }
 
                 Flow {

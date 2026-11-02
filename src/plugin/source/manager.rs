@@ -457,6 +457,7 @@ impl LuaPluginRegistry {
                 name: info.name.clone(),
                 display_name: info.display_name.clone(),
                 supports_search: disc.supports_search,
+                pagination: disc.pagination,
                 remote_capability: disc.remote,
                 remote_hint: disc.remote_hint.clone(),
                 sorts: disc.sorts.clone(),
@@ -549,11 +550,24 @@ impl LuaPluginRegistry {
         page: u32,
         tags: &[String],
     ) -> Result<DiscoverSearchResult> {
+        self.call_discover_with_cursor(plugin_name, query, sort, page, tags, "")
+            .await
+    }
+
+    pub async fn call_discover_with_cursor(
+        &self,
+        plugin_name: &str,
+        query: &str,
+        sort: &str,
+        page: u32,
+        tags: &[String],
+        cursor: &str,
+    ) -> Result<DiscoverSearchResult> {
         self.handle(plugin_name)?
             .runtime
             .lock()
             .await
-            .call_discover(plugin_name, query, sort, page, tags)
+            .call_discover_with_cursor(plugin_name, query, sort, page, tags, cursor)
             .await
     }
 

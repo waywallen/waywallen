@@ -60,6 +60,7 @@ qt.qml_module({
     "qml/component/FlipButtons.qml",
     "qml/component/ApplyTextField.qml",
     "qml/component/DetailActionBar.qml",
+    "qml/component/RemoteDetailFields.qml",
     "qml/component/PresentationTargetState.qml",
     "qml/component/PresentationTargetFlow.qml",
     "qml/component/SidebarNowPlaying.qml",

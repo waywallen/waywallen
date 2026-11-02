@@ -894,7 +894,7 @@ return bad
 }
 
 #[test]
-fn entry_versions_v3_and_v4_are_supported_and_other_versions_are_rejected() {
+fn entry_versions_v3_v4_and_v5_are_supported_and_other_versions_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let plugin_path = dir.path().join("main.lua");
     std::fs::write(
@@ -929,6 +929,10 @@ return M
     let mgr = SourceManager::new().unwrap();
     assert!(mgr
         .load_plugin(&plugin_path, "test.plugin", "1.0", ENTRY_VERSION_V4)
+        .is_ok());
+    let mgr = SourceManager::new().unwrap();
+    assert!(mgr
+        .load_plugin(&plugin_path, "test.plugin", "1.0", ENTRY_VERSION_V5)
         .is_ok());
     let mgr = SourceManager::new().unwrap();
     assert!(mgr
