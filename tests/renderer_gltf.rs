@@ -12,6 +12,76 @@ use waywallen::wallframe::renderer_manager::render_target::{Capabilities, Size};
 use waywallen::wallframe::renderer_manager::DrmNode;
 use waywallen::wallframe::sync::{DrmDevice, SyncobjHandle};
 
+nix::ioctl_write_ptr!(dma_buf_sync, b'b', 0, u64);
+
+fn pixel_hash(pool: &BufferPool, buffers: &[OwnedFd], frame: &Frame, fence: &OwnedFd) -> u64 {
+    assert!(
+        readable(fence.as_raw_fd(), Duration::from_secs(10)),
+        "renderer GPU work did not complete"
+    );
+    assert_eq!(pool.format.modifier, dma::DRM_FORMAT_MOD_LINEAR);
+    assert_eq!(pool.format.plane_count, 1);
+    let index = frame.image_index as usize;
+    let fd = &buffers[index];
+    let size = usize::try_from(pool.size[index]).unwrap();
+    let offset = pool.plane_offset[index] as usize;
+    let stride = pool.stride[index] as usize;
+    let row_bytes = pool.extent.width as usize * 4;
+    assert!(offset + stride * (pool.extent.height as usize - 1) + row_bytes <= size);
+    unsafe {
+        let ptr = libc::mmap(
+            std::ptr::null_mut(),
+            size,
+            libc::PROT_READ,
+            libc::MAP_SHARED,
+            fd.as_raw_fd(),
+            0,
+        );
+        assert_ne!(ptr, libc::MAP_FAILED);
+        dma_buf_sync(fd.as_raw_fd(), &1).unwrap();
+        let data = std::slice::from_raw_parts(ptr.cast::<u8>(), size);
+        let mut hash = 0xcbf29ce484222325_u64;
+        for row in 0..pool.extent.height as usize {
+            for byte in &data[offset + row * stride..offset + row * stride + row_bytes] {
+                hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+        dma_buf_sync(fd.as_raw_fd(), &5).unwrap();
+        assert_eq!(libc::munmap(ptr, size), 0);
+        hash
+    }
+}
+
+fn motion(stream: &UnixStream, x: f32, y: f32) {
+    send(
+        stream,
+        ControlMsg::PointerMotion {
+            event: PointerMotion {
+                x,
+                y,
+                timestamp_us: 0,
+                modifiers: 0,
+            },
+        },
+    );
+}
+
+fn button(stream: &UnixStream, x: f32, y: f32, button: u32, state: PointerButtonState) {
+    send(
+        stream,
+        ControlMsg::PointerButton {
+            event: PointerButton {
+                x,
+                y,
+                button,
+                state,
+                timestamp_us: 0,
+                modifiers: 0,
+            },
+        },
+    );
+}
+
 fn readable(fd: i32, timeout: Duration) -> bool {
     let mut poll = libc::pollfd {
         fd,
@@ -194,7 +264,8 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
     let mut timeline = None;
     let mut formats = None;
     let mut targets = None;
-    while !ready || timeline.is_none() || formats.is_none() || targets.is_none() {
+    let mut subscribed = false;
+    while !ready || timeline.is_none() || formats.is_none() || targets.is_none() || !subscribed {
         let (event, mut fds) = receive(&stream);
         match event {
             EventMsg::Ready { .. } => ready = true,
@@ -204,6 +275,23 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
             }
             EventMsg::FormatCaps { capabilities } => formats = Some(capabilities),
             EventMsg::RenderTargetCapabilities { capabilities } => targets = Some(capabilities),
+            EventMsg::SetEventSubscriptions { subscription } => {
+                assert!(!subscribed, "subscribed more than once");
+                assert_eq!(subscription.revision, 1);
+                assert_eq!(subscription.kinds, ["pointer"]);
+                send(
+                    &stream,
+                    ControlMsg::EventSubscriptionsApplied {
+                        result: EventSubscriptionResult {
+                            revision: subscription.revision,
+                            status: EventSubscriptionStatus::Applied,
+                            kinds: subscription.kinds,
+                            reason: String::new(),
+                        },
+                    },
+                );
+                subscribed = true;
+            }
             EventMsg::ReportState { .. } => {}
             _ => panic!("renderer allocated before its first target: {event:?}"),
         }
@@ -321,6 +409,9 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
         },
     );
     send(&stream, ControlMsg::RequestFrame);
+    button(&stream, 100.0, 100.0, 0x110, PointerButtonState::Pressed);
+    motion(&stream, 120.0, 110.0);
+    button(&stream, 120.0, 110.0, 0x110, PointerButtonState::Released);
     assert_no_frames(&stream, Duration::from_millis(250));
     let (frame, fence) = held_frames.last().unwrap();
     release(&drm, &timeline, frame, fence);
@@ -339,8 +430,110 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
     release(&drm, &timeline, &static_frame, &static_fence);
     send(&stream, ControlMsg::RequestFrame);
     let (requested, requested_fence) = receive_frame(&stream, &mut sequence);
+    let original_hash = pixel_hash(&pool, &old_buffers, &requested, &requested_fence);
     release(&drm, &timeline, &requested, &requested_fence);
     assert_no_frames(&stream, Duration::from_millis(250));
+
+    let x = pool.extent.width as f32 * 0.5;
+    let y = pool.extent.height as f32 * 0.5;
+    motion(&stream, x, y);
+    assert_no_frames(&stream, Duration::from_millis(100));
+    button(&stream, x, y, 0x110, PointerButtonState::Pressed);
+    motion(&stream, x + 35.0, y + 15.0);
+    button(
+        &stream,
+        x + 35.0,
+        y + 15.0,
+        0x110,
+        PointerButtonState::Released,
+    );
+    let (rotated, rotated_fence) = receive_frame(&stream, &mut sequence);
+    let rotated_hash = pixel_hash(&pool, &old_buffers, &rotated, &rotated_fence);
+    assert_ne!(original_hash, rotated_hash, "drag did not rotate the model");
+    release(&drm, &timeline, &rotated, &rotated_fence);
+    motion(&stream, x + 60.0, y + 30.0);
+    assert_no_frames(&stream, Duration::from_millis(100));
+
+    button(&stream, x, y, 0x110, PointerButtonState::Pressed);
+    motion(&stream, -1.0, -1.0);
+    motion(&stream, x + 60.0, y + 30.0);
+    motion(&stream, f32::NAN, y);
+    assert_no_frames(&stream, Duration::from_millis(100));
+
+    let mut previous_hash = rotated_hash;
+    for pan_button in [0x111, 0x112] {
+        button(&stream, x, y, pan_button, PointerButtonState::Pressed);
+        motion(&stream, x + 12.0, y - 8.0);
+        button(
+            &stream,
+            x + 12.0,
+            y - 8.0,
+            pan_button,
+            PointerButtonState::Released,
+        );
+        let (panned, panned_fence) = receive_frame(&stream, &mut sequence);
+        let panned_hash = pixel_hash(&pool, &old_buffers, &panned, &panned_fence);
+        assert_ne!(previous_hash, panned_hash, "drag did not pan the model");
+        previous_hash = panned_hash;
+        release(&drm, &timeline, &panned, &panned_fence);
+        assert_no_frames(&stream, Duration::from_millis(100));
+    }
+    send(
+        &stream,
+        ControlMsg::Play {
+            transition: ControlTransition { fade_ms: 0 },
+        },
+    );
+    let (played, played_fence) = receive_frame(&stream, &mut sequence);
+    assert_eq!(
+        previous_hash,
+        pixel_hash(&pool, &old_buffers, &played, &played_fence),
+        "playing a static model changed the frame"
+    );
+    release(&drm, &timeline, &played, &played_fence);
+    assert_no_frames(&stream, Duration::from_millis(100));
+    for (axis_x, delta_x, delta_y) in [(x, 2.0, 0.0), (x, 0.0, f32::NAN), (f32::NAN, 0.0, 2.0)] {
+        send(
+            &stream,
+            ControlMsg::PointerAxis {
+                event: PointerAxis {
+                    x: axis_x,
+                    y,
+                    delta_x,
+                    delta_y,
+                    source: PointerAxisSource::Wheel,
+                    timestamp_us: 0,
+                    modifiers: 0,
+                },
+            },
+        );
+    }
+    assert_no_frames(&stream, Duration::from_millis(100));
+    send(
+        &stream,
+        ControlMsg::PointerAxis {
+            event: PointerAxis {
+                x,
+                y,
+                delta_x: 0.0,
+                delta_y: 2.0,
+                source: PointerAxisSource::Wheel,
+                timestamp_us: 0,
+                modifiers: 0,
+            },
+        },
+    );
+    let (zoomed, zoomed_fence) = receive_frame(&stream, &mut sequence);
+    let zoomed_hash = pixel_hash(&pool, &old_buffers, &zoomed, &zoomed_fence);
+    assert_ne!(previous_hash, zoomed_hash, "wheel did not zoom the model");
+    release(&drm, &timeline, &zoomed, &zoomed_fence);
+    assert_no_frames(&stream, Duration::from_millis(100));
+    send(
+        &stream,
+        ControlMsg::Pause {
+            transition: ControlTransition { fade_ms: 0 },
+        },
+    );
 
     let mut invalid = config.clone();
     invalid.revision = 2;
@@ -368,11 +561,13 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
         height,
         ..config
     };
+    button(&stream, x, y, 0x110, PointerButtonState::Pressed);
     let (resized, new_buffers, resized_frame, resized_fence) =
         configure(&stream, resize, &mut sequence);
     assert!(resized.generation > pool.generation);
     assert_eq!(old_buffers.len(), 3);
     assert_eq!(new_buffers.len(), 3);
+    motion(&stream, width as f32 * 0.5, height as f32 * 0.5);
     assert_no_frames(&stream, Duration::from_millis(250));
     send(
         &stream,

@@ -336,12 +336,76 @@ auto create_gpu(const Options& options) -> Option<Box<Gpu>> {
     return Some(rstd::move(gpu));
 }
 
+struct PointerInput {
+    static constexpr uint64_t revision = 1;
+    static constexpr unsigned left = 0x110, right = 0x111, middle = 0x112;
+    struct Drag {
+        unsigned button;
+        float    x, y;
+    };
+    bool         enabled {};
+    Option<Drag> drag;
+
+    static bool valid(float x, float y) {
+        return f32(x).is_finite() && f32(y).is_finite() && x >= 0 && y >= 0;
+    }
+    void reset() { drag = None(); }
+    void applied(const waywallen_event_subscription_result_t& result) {
+        if (result.revision != revision) return;
+        reset();
+        enabled = false;
+        if (result.status == WAYWALLEN_EVENT_SUBSCRIPTION_STATUS_APPLIED)
+            for (unsigned i = 0; i < result.kinds.count; ++i)
+                if (text(result.kinds.data[i]) == "pointer"_str) enabled = true;
+        if (! enabled) rstd_warn("gltf: pointer subscription unavailable: {}", text(result.reason));
+    }
+    void button(const waywallen_pointer_button_t& event) {
+        if (! enabled) return;
+        if (event.state == WAYWALLEN_POINTER_BUTTON_STATE_RELEASED) {
+            if (drag && drag->button == event.button) reset();
+        } else if (event.state == WAYWALLEN_POINTER_BUTTON_STATE_PRESSED &&
+                   (event.button == left || event.button == right || event.button == middle)) {
+            reset();
+            if (valid(event.x, event.y)) drag = Some(Drag { event.button, event.x, event.y });
+        }
+    }
+    bool motion(gltf::OrbitCamera& camera, VkExtent2D extent,
+                const waywallen_pointer_motion_t& event) {
+        if (! enabled) return false;
+        if (! valid(event.x, event.y)) {
+            reset();
+            return false;
+        }
+        if (! drag) return false;
+        float x = event.x - drag->x, y = event.y - drag->y;
+        drag->x = event.x;
+        drag->y = event.y;
+        if (! f32(x).is_finite() || ! f32(y).is_finite() || (x == 0 && y == 0)) return false;
+        if (drag->button == left)
+            camera.rotate(-x * 0.008f, -y * 0.008f);
+        else if (extent.height)
+            camera.pan(x / float(extent.height), y / float(extent.height));
+        else
+            return false;
+        return true;
+    }
+    bool axis(gltf::OrbitCamera& camera, const waywallen_pointer_axis_t& event) {
+        if (! enabled || ! valid(event.x, event.y) || ! f32(event.delta_y).is_finite() ||
+            event.delta_y == 0)
+            return false;
+        camera.zoom(event.delta_y);
+        return true;
+    }
+};
+
 struct Host {
     Option<vk::DeviceSession>              device_owner;
     int                                    socket { -1 };
     ww_pool_t*                             pool {};
     bool                                   ready {}, paused {}, frame_requested { true }, stop {};
+    bool                                   camera_changed {};
     uint64_t                               target_revision {};
+    PointerInput                           pointer;
     waywallen_render_target_capabilities_t capabilities { .revision         = 1,
                                                           .reference_width  = 1920,
                                                           .reference_height = 1080,
@@ -398,6 +462,12 @@ bool open_pool(Host& host, Gpu& gpu, const Options& options) {
                                            WW_MEM_HINT_DEVICE_LOCAL | WW_MEM_HINT_HOST_VISIBLE);
     if (! rc && options.resolution == WW_RESOLUTION_AUTO)
         rc = ww_bridge_send_render_target_capabilities(host.socket, &host.capabilities);
+    if (! rc) {
+        char                                 pointer[] = "pointer";
+        char*                                kinds[]   = { pointer };
+        const waywallen_event_subscription_t subscription { PointerInput::revision, { 1, kinds } };
+        rc = ww_bridge_set_event_subscriptions(host.socket, &subscription);
+    }
     if (rc) rstd_error("bridge pool: {}", rc);
     return rc == 0;
 }
@@ -546,6 +616,8 @@ bool configure_target(Host& host, Gpu& gpu, const Options& options,
                             result.height        = config.height;
                             host.ready           = true;
                             host.frame_requested = false;
+                            host.camera_changed  = false;
+                            host.pointer.reset();
                         }
                     }
                     if (result.status != 0) host.stop = true;
@@ -576,6 +648,24 @@ bool control(Host& host, Gpu& gpu, Options& options) {
         break;
     case WW_EVT_IN_PAUSE: host.paused = true; break;
     case WW_EVT_IN_REQUEST_FRAME: host.frame_requested = true; break;
+    case WW_EVT_IN_EVENT_SUBSCRIPTIONS_APPLIED:
+        host.pointer.applied(event.u.event_subscriptions_applied.result);
+        break;
+    case WW_EVT_IN_POINTER_BUTTON:
+        if (host.ready) host.pointer.button(event.u.pointer_button.event);
+        break;
+    case WW_EVT_IN_POINTER_MOTION: {
+        VkExtent2D extent {};
+        if (host.ready &&
+            ww_bridge_pool_get_extent(host.pool, &extent.width, &extent.height) == 0 &&
+            host.pointer.motion(gpu.camera, extent, event.u.pointer_motion.event))
+            host.camera_changed = true;
+        break;
+    }
+    case WW_EVT_IN_POINTER_AXIS:
+        if (host.ready && host.pointer.axis(gpu.camera, event.u.pointer_axis.event))
+            host.camera_changed = true;
+        break;
     case WW_EVT_IN_SET_LOG_LEVEL: ww_renderer_log_set_level(event.u.set_log_level.level); break;
     case WW_EVT_IN_SETTING_CHANGED:
         settings(options, event.u.setting_changed.settings);
@@ -590,6 +680,7 @@ bool control(Host& host, Gpu& gpu, Options& options) {
             ok                   = rc <= 0;
             host.ready           = rc == 0;
             host.frame_requested = true;
+            host.pointer.reset();
         }
         break;
     case WW_EVT_IN_CONFIGURE_RENDER_TARGET:
@@ -738,7 +829,7 @@ int waywallen::gltf::run(int argc, char** argv) {
     while (! host.stop) {
         auto   now       = rstd::time::Instant::now();
         bool   animation = ! host.paused && gpu->animating(options);
-        bool   wanted    = host.ready && (host.frame_requested || animation);
+        bool   wanted    = host.ready && (host.frame_requested || host.camera_changed || animation);
         int    wait      = ! wanted    ? 1000
                            : now < due ? int((due - now).as_millis().to_primitive() + 1)
                                        : 0;
@@ -794,6 +885,7 @@ int waywallen::gltf::run(int argc, char** argv) {
         previous = now;
         due      = now + rstd::time::Duration::from_nanos(u64(1000000000 / options.fps));
         host.frame_requested = false;
+        host.camera_changed  = false;
     }
     (void)gpu->session.wait_idle();
     (void)gpu->queue.Poll();
