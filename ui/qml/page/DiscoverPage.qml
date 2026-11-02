@@ -200,7 +200,8 @@ MD.Page {
                 sourceName: root.sourceName(root.detailRow.sourceId),
                 remoteCapability: root.sourceCapability(root.detailRow.sourceId),
                 remoteHint: root.sourceRemoteHint(root.detailRow.sourceId),
-                tagOptions: root.sourceFilterOptions(root.detailRow.sourceId)
+                tagOptions: root.sourceFilterOptions(root.detailRow.sourceId),
+                typeLabels: pluginQuery.typeLabels || ({})
             }
         });
     }
@@ -286,6 +287,11 @@ MD.Page {
         text: qsTr("Refresh")
         enabled: searchQuery.browsingEnabled && !searchQuery.querying
         onTriggered: searchQuery.reload()
+    }
+
+    // Renderer-declared labels for the wallpaper type keys of remote items.
+    W.RendererPluginListQuery {
+        id: pluginQuery
     }
 
     W.RemoteAvailabilityQuery {
@@ -415,6 +421,7 @@ MD.Page {
 
     function reloadAll() {
         availabilityQuery.reload();
+        pluginQuery.reload();
     }
 
     Connections {
@@ -427,6 +434,9 @@ MD.Page {
         }
         function onPluginStateChanged() {
             availabilityQuery.reload();
+        }
+        function onPluginChanged() {
+            pluginQuery.reload();
         }
     }
 
@@ -443,6 +453,7 @@ MD.Page {
         remoteCapability: root.detailRow ? root.sourceCapability(root.detailRow.sourceId) : 0
         remoteHint: root.detailRow ? root.sourceRemoteHint(root.detailRow.sourceId) : ""
         tagOptions: root.detailRow ? root.sourceFilterOptions(root.detailRow.sourceId) : []
+        typeLabels: pluginQuery.typeLabels || ({})
         downloadState: Number(root.detailRow?.acquisitionState ?? 0)
         subscriptionState: Number(root.detailRow?.acquisitionState ?? 0)
         onBack: detailPresenter.dismiss()

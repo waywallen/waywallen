@@ -24,6 +24,7 @@ Item {
     property int remoteCapability: 0
     property string remoteHint: ""
     property var tagOptions: []
+    property var typeLabels: ({})
     property int downloadState: 0
     property int subscriptionState: 0
 
@@ -105,7 +106,7 @@ Item {
 
                     MD.Text {
                         Layout.fillWidth: true
-                        text: root.item?.wpType ?? ""
+                        text: W.I18n.valueLabel(root.typeLabels, root.item?.wpType)
                         typescale: MD.Token.typescale.label_large
                         color: MD.Token.color.on_surface_variant
                         maximumLineCount: 1
