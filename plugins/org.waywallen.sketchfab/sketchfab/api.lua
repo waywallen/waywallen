@@ -85,17 +85,22 @@ local function cursor(value, null)
     return value
 end
 
-local function request_json(ctx, path, query, headers, allow_unauthorized)
+local function request_json(ctx, path, query, headers, purpose)
     local now = ctx.time.unix()
     if now < cooldown_until then
         error("Sketchfab rate limit; retry in " .. tostring(math.ceil(cooldown_until - now)) .. " seconds")
     end
-    local response = ctx.http:get(API .. path)
-        :headers(headers or {})
-        :query(query)
-        :timeout(20)
-        :response_limit(4 * 1024 * 1024)
-        :send()
+    local sent, response = pcall(function()
+        return ctx.http:get(API .. path)
+            :headers(headers or {})
+            :query(query)
+            :timeout(20)
+            :response_limit(4 * 1024 * 1024)
+            :send()
+    end)
+    if not sent then
+        error("Sketchfab request failed; try again later")
+    end
     local status = response:status()
     if status == 429 then
         local retry = response:header_values("retry-after")
@@ -112,8 +117,19 @@ local function request_json(ctx, path, query, headers, allow_unauthorized)
     end
     if not response:ok() then
         response:close()
-        if status == 401 and allow_unauthorized then
+        if status == 401 and purpose == "account" then
             return nil, 401
+        end
+        if purpose == "download" then
+            if status == 400 then
+                error("This Sketchfab model is not downloadable")
+            end
+            if status == 401 then
+                error("Sketchfab authentication failed; log in again to download models")
+            end
+            if status == 403 then
+                error("Your Sketchfab account does not have permission to download this model")
+            end
         end
         if status == 404 then
             error("Sketchfab model was not found")
@@ -210,7 +226,45 @@ function M.me(ctx, token)
     if type(token) ~= "string" or token == "" then
         error("Sketchfab API Token is required")
     end
-    return request_json(ctx, "/me", {}, { Authorization = "Token " .. token }, true)
+    return request_json(ctx, "/me", {}, { Authorization = "Token " .. token }, "account")
+end
+
+function M.download(ctx, id, headers)
+    if type(id) ~= "string" or #id ~= 32 or not id:match("^[a-fA-F0-9]+$") then
+        error("Invalid Sketchfab model id")
+    end
+    if type(headers) ~= "table" or type(headers.Authorization) ~= "string"
+        or not headers.Authorization:match("^Token .+") then
+        error("Log in to Sketchfab to download models")
+    end
+    local payload = request_json(ctx, "/models/" .. id .. "/download", {}, headers, "download")
+    local value = payload.gltf
+    if ctx.json.strict.kind(value) ~= "object" then
+        error("Sketchfab did not provide a glTF archive")
+    end
+    if type(value.url) ~= "string" or #value.url == 0 or #value.url > 16384
+        or value.url:find("[%c]") then
+        error("Sketchfab returned an invalid archive URL")
+    end
+    local parsed = ctx.url.parse(value.url)
+    if not parsed or parsed.scheme ~= "https" or not parsed.host or parsed.host == ""
+        or parsed.fragment ~= nil then
+        error("Sketchfab returned an invalid archive URL")
+    end
+    if type(value.expires) ~= "number" or value.expires <= 0 or value.expires == math.huge
+        or value.expires ~= value.expires then
+        error("Sketchfab returned an invalid archive expiration")
+    end
+    if value.size ~= nil and value.size ~= ctx.json.strict.null then
+        if type(value.size) ~= "number" or value.size < 0 or value.size > 9007199254740991
+            or value.size ~= math.floor(value.size) then
+            error("Sketchfab returned an invalid archive size")
+        end
+    end
+    return {
+        url = value.url,
+        size = value.size ~= ctx.json.strict.null and value.size or nil,
+    }
 end
 
 return M

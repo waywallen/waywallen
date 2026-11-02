@@ -104,6 +104,9 @@ function M.normalize(item, json)
     if type(item.isDownloadable) == "boolean" then
         model.downloadable = item.isDownloadable
     end
+    if type(item.isAgeRestricted) == "boolean" then
+        model.restricted = item.isAgeRestricted
+    end
     if json.kind(item.user) == "object" then
         model.author = {
             name = text(item.user.displayName, 1024),
@@ -218,6 +221,50 @@ function M.details(model)
         web_url = model.web_url or "",
         tags = model.tags or {},
         fields = fields,
+    }
+end
+
+function M.download(model, archive)
+    local author, license = model.author or {}, model.license or {}
+    local attribution = {
+        author = author.name or author.username or "",
+        author_url = author.url or "",
+        license = license.name or license.label or license.slug or "",
+        license_url = license.url or "",
+        requirements = license.requirements or "",
+    }
+    if attribution.author == "" or attribution.license == "" then
+        error("Sketchfab model author and license information are required for downloading")
+    end
+    local web_url = model.web_url or ("https://sketchfab.com/models/" .. model.id)
+    local credits = {
+        "Provided by Sketchfab",
+        "Author: " .. attribution.author,
+        "Model: " .. web_url,
+        "License: " .. attribution.license,
+    }
+    if attribution.author_url ~= "" then table.insert(credits, "Author URL: " .. attribution.author_url) end
+    if attribution.license_url ~= "" then table.insert(credits, "License URL: " .. attribution.license_url) end
+    if attribution.requirements ~= "" then table.insert(credits, attribution.requirements) end
+    local description = table.concat(credits, "\n")
+    if model.description and model.description ~= "" then
+        description = model.description .. "\n\n" .. description
+    end
+    local known_archive = (model.archives or {}).gltf or {}
+    return {
+        wp_type = "gltf",
+        url = archive.url,
+        filename = model.id .. ".zip",
+        archive = "zip",
+        title = model.title or ("Sketchfab " .. model.id),
+        preview_url = model.preview_url or "",
+        description = description,
+        tags = model.tags or {},
+        external_id = model.id,
+        web_url = web_url,
+        size = archive.size or known_archive.size,
+        content_rating = model.restricted ~= nil and (model.restricted and "Mature" or "Everyone") or nil,
+        attribution = attribution,
     }
 end
 

@@ -301,7 +301,7 @@ Item {
             }
 
             MD.Text {
-                visible: root.remoteCapability === 2 && root.remoteHint.length > 0
+                visible: root.remoteCapability !== 0 && root.remoteHint.length > 0
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: MD.Token.color.on_surface_variant

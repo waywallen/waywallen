@@ -1,6 +1,8 @@
 local api = import("sketchfab.api")
 local discover = import("sketchfab.discover")
 local session = import("sketchfab.session")
+local source = import("sketchfab.source")
+local wallpaper = import("sketchfab.wallpaper")
 
 local M = {}
 local account_group = tr("Sketchfab account")
@@ -52,6 +54,9 @@ function M.info()
             discover = {
                 search = true,
                 details = true,
+                download = true,
+                resolve = true,
+                remote_hint = tr("Log in with a Sketchfab API Token to download models."),
                 pagination = "cursor",
                 sorts = {
                     { key = "relevance", label = tr("Relevance") },
@@ -60,6 +65,9 @@ function M.info()
                     { key = "views", label = tr("Most viewed") },
                 },
                 filters = api.filters,
+            },
+            wallpaper = {
+                apply = true,
             },
         },
     }
@@ -96,5 +104,7 @@ function M.actions.invoke(ctx, action_id, values)
 end
 
 M.discover = discover
+M.source = source
+M.wallpaper = wallpaper
 
 return M

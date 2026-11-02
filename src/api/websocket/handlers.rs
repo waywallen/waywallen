@@ -1488,7 +1488,7 @@ pub(super) async fn dispatch_inner(
             let task_state = state.clone();
             let task_source_id = source_id.clone();
             let task_id = r.id.clone();
-            state.tasks.spawn_async_unique(
+            state.tasks.spawn_async_once(
                 tasks::TaskKind::Generic,
                 format!("remote/download/{task_source_id}/{task_id}"),
                 format!("remote/download {task_source_id}:{task_id}"),

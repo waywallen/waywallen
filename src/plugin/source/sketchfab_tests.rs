@@ -15,7 +15,7 @@ fn manager_with_entry(root: &Path, entry: &Path) -> SourceManager {
     )
     .unwrap();
     manager
-        .load_plugin(entry, "org.waywallen.sketchfab", "0.1.0", ENTRY_VERSION_V5)
+        .load_plugin(entry, "org.waywallen.sketchfab", "0.1.0", ENTRY_VERSION_V6)
         .unwrap();
     manager
 }
@@ -34,7 +34,7 @@ fn lua_test(body: &str) {
         .plugin_lua_env(entry().parent().unwrap(), "org.waywallen.sketchfab")
         .unwrap();
     let import: LuaFunction = environment.get("import").unwrap();
-    for name in ["api", "discover", "map", "session"] {
+    for name in ["api", "discover", "map", "session", "source", "wallpaper"] {
         runtime
             .lua
             .globals()
@@ -136,14 +136,18 @@ end
 }
 
 #[test]
-fn sketchfab_plugin_is_browse_only_and_installed_with_translations() {
+fn sketchfab_plugin_supports_model_downloads_and_installs_translations() {
     let (_directory, manager) = manager();
     assert!(manager.plugins().unwrap().is_empty());
     let sources = manager.discover_sources().unwrap();
     assert_eq!(sources.len(), 1);
     assert_eq!(sources[0].plugin_id, "sketchfab");
     assert!(sources[0].supports_search);
-    assert!(sources[0].remote_capability.is_none());
+    assert!(matches!(
+        sources[0].remote_capability,
+        Some(RemoteCapability::Download)
+    ));
+    assert!(manager.supports_item_remove("sketchfab"));
     assert_eq!(sources[0].actions.len(), 2);
     let login = sources[0]
         .actions
@@ -175,6 +179,8 @@ fn sketchfab_plugin_is_browse_only_and_installed_with_translations() {
         "sketchfab/map.lua",
         "sketchfab/session.lua",
         "sketchfab/discover.lua",
+        "sketchfab/source.lua",
+        "sketchfab/wallpaper.lua",
         "i18n/zh-CN.po",
     ] {
         assert!(root.join(path).is_file());
@@ -396,6 +402,218 @@ reply(string.rep(' ',4194305)); assert(not pcall(api.search, ctx, {})); assert(l
 }
 
 #[test]
+fn sketchfab_download_requires_login_and_preserves_visible_attribution() {
+    lua_test(
+        r#"
+local ok, message = pcall(discover.download, ctx, uid(1))
+assert(not ok and message:find('Log in to Sketchfab', 1, true))
+assert(request_count() == 0)
+assert(not pcall(api.download, ctx, uid(1), {}))
+assert(request_count() == 0)
+reply({uid=uid(1),username='artist'})
+session.sign_in(ctx,'test-token')
+search({model(1, {
+    name='Cached title', user={username='artist',profileUrl='https://sketchfab.com/artist'},
+    license={label='CC Attribution',slug='by',url='https://creativecommons.org/licenses/by/4.0/',requirements='Credit the author'},
+    tags={{name='Landscape'}}, archives={gltf={size=100}}
+})})
+reply(model(1, {name='Current title',description='Current description',isDownloadable=true,isAgeRestricted=false,
+    thumbnails={images={{url='https://images.example/preview.jpg',width=512,height=512}}}}))
+reply({gltf={url='https://cdn.example/first.zip?signature=temporary',expires=300,size=200}})
+local result = discover.download(ctx,uid(1))
+assert(result.wp_type == 'gltf' and result.archive == 'zip' and result.filename == uid(1)..'.zip')
+assert(result.title == 'Current title' and result.external_id == uid(1) and result.size == 200)
+assert(result.preview_url == 'https://images.example/preview.jpg' and result.content_rating == 'Everyone')
+assert(result.tags[1] == 'Landscape' and result.width == nil and result.height == nil)
+assert(result.attribution.author == 'artist' and result.attribution.license == 'CC Attribution')
+assert(result.attribution.author_url == 'https://sketchfab.com/artist')
+assert(result.attribution.license_url == 'https://creativecommons.org/licenses/by/4.0/')
+assert(result.attribution.requirements == 'Credit the author')
+assert(result.description:find('Current description',1,true))
+assert(result.description:find('Provided by Sketchfab',1,true))
+assert(result.description:find('Author: artist',1,true) and result.description:find('License: CC Attribution',1,true))
+assert(not result.description:find('signature',1,true) and not result.description:find('test-token',1,true))
+assert(last_request().path == 'https://api.sketchfab.com/v3/models/'..uid(1)..'/download')
+assert(last_request().headers.Authorization == 'Token test-token')
+local before = request_count()
+advance(301)
+reply(model(1, {name='Retried',user={username='artist'},license={slug='by'},isDownloadable=true}))
+reply({gltf={url='https://cdn.example/retry.zip?signature=fresh',expires=60}})
+local retried = discover.download(ctx,uid(1))
+assert(request_count() == before+2 and retried.url ~= result.url)
+assert(retried.url == 'https://cdn.example/retry.zip?signature=fresh')
+assert(retried.title == 'Retried' and retried.size == nil)
+assert(last_request().headers.Authorization == 'Token test-token')
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_download_rejects_invalid_archive_data_without_reusing_urls() {
+    lua_test(
+        r#"
+local headers = {Authorization='Token test-token'}
+for _, value in ipairs({
+    {}, {gltf=json.strict.null}, {gltf=false}, {gltf={}},
+    {gltf={url='http://cdn.example/model.zip',expires=300}},
+    {gltf={url='file:///model.zip',expires=300}},
+    {gltf={url='https://',expires=300}},
+    {gltf={url='https://cdn.example/model.zip#fragment',expires=300}},
+    {gltf={url='https://cdn.example/model.zip\nbad',expires=300}},
+    {gltf={url='https://cdn.example/'..string.rep('a',16384),expires=300}},
+    {gltf={url='https://cdn.example/model.zip'}},
+    {gltf={url='https://cdn.example/model.zip',expires=0}},
+    {gltf={url='https://cdn.example/model.zip',expires=-1}},
+    {gltf={url='https://cdn.example/model.zip',expires='300'}},
+    {gltf={url='https://cdn.example/model.zip',expires=300,size=-1}},
+    {gltf={url='https://cdn.example/model.zip',expires=300,size=1.5}},
+    {gltf={url='https://cdn.example/model.zip',expires=300,size='200'}},
+    {gltf={url='https://cdn.example/model.zip',expires=300,size=9007199254740992}},
+}) do
+    reply(value)
+    local ok, message = pcall(api.download,ctx,uid(1),headers)
+    assert(not ok and not message:find('test-token',1,true))
+    assert(last_request().response.closed)
+end
+reply({gltf={url='https://cdn.example/fresh.zip',expires=0.5,size=0}})
+local value = api.download(ctx,uid(1),headers)
+assert(value.url == 'https://cdn.example/fresh.zip' and value.size == 0)
+reply({gltf={url='https://cdn.example/fresh.zip',expires=300,size=json.strict.null}})
+assert(api.download(ctx,uid(1),headers).size == nil)
+for _, id in ipairs({'bad','../model',string.rep('g',32)}) do
+    local before = request_count()
+    assert(not pcall(api.download,ctx,id,headers) and request_count() == before)
+end
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_download_errors_are_specific_and_do_not_disclose_credentials() {
+    lua_test(
+        r#"
+for _, failure in ipairs({
+    {400,'not downloadable'}, {401,'authentication failed'},
+    {403,'does not have permission'}, {404,'not found'}, {500,'HTTP error 500'},
+}) do
+    reply('{}',failure[1])
+    local ok,message = pcall(api.download,ctx,uid(1),{Authorization='Token test-token'})
+    assert(not ok and message:find(failure[2],1,true),message)
+    assert(not message:find('test-token',1,true) and last_request().response.closed)
+end
+reply('{}',429,'60')
+local ok,message = pcall(api.download,ctx,uid(1),{Authorization='Token test-token'})
+assert(not ok and message:find('rate limit',1,true) and last_request().response.closed)
+local before = request_count()
+assert(not pcall(api.download,ctx,uid(1),{Authorization='Token test-token'}))
+assert(request_count() == before)
+advance(60)
+reply('{}',200,nil,nil,'Authorization: Token test-token https://api.sketchfab.com/request')
+ok,message = pcall(api.download,ctx,uid(1),{Authorization='Token test-token'})
+assert(not ok and message:find('request failed',1,true) and not message:find('test-token',1,true))
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_download_requires_consistent_model_author_and_license_metadata() {
+    lua_test(
+        r#"
+reply({uid=uid(1),username='artist'})
+session.sign_in(ctx,'test-token')
+for _, fields in ipairs({
+    {name='No attribution'}, {user={username='artist'}}, {license={slug='by'}},
+    {user={username='artist'},license={slug='by'},isDownloadable=false},
+}) do
+    session.sign_out()
+    reply({uid=uid(1),username='artist'})
+    session.sign_in(ctx,'test-token')
+    local before = request_count()
+    reply(model(1,fields))
+    assert(not pcall(discover.download,ctx,uid(1)))
+    assert(request_count() == before+1)
+end
+local before = request_count()
+reply(model(2,{user={username='artist'},license={slug='by'},isDownloadable=true}))
+assert(not pcall(discover.download,ctx,uid(1)) and request_count() == before+1)
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_resolve_uses_download_metadata_and_rejects_ambiguous_archives() {
+    lua_test(
+        r#"
+local files,dirs,links = {},{},{}
+ctx.fs = {
+    is_file=function(path) return files[path] == true end,
+    is_symlink=function(path) return links[path] == true end,
+    list_files=function(path)
+        local out={}
+        for file in pairs(files) do if file:match('^(.*)/[^/]+$') == path then out[#out+1]=file end end
+        table.sort(out)
+        return out
+    end,
+}
+ctx.list_dirs = function(path) return dirs[path] or {} end
+ctx.extension = function(path) return path:match('%.([^./]+)$') end
+local metadata = {wp_type='gltf',title='Model',external_id=uid(1),description='Author and license',tags={'tag'},size=42,content_rating='Mature'}
+local params = {id=uid(1),dir='/download',metadata=metadata}
+files['/download/scene.gltf']=true
+files['/download/extra.gltf']=true
+local result = discover.resolve(ctx,params)
+assert(result.resource == 'scene.gltf' and result.name == metadata.title and result.wp_type == 'gltf')
+assert(result.description == metadata.description and result.tags[1] == 'tag')
+assert(result.external_id == uid(1) and result.size == 42 and result.content_rating == 'Mature')
+assert(result.preview == nil and request_count() == 0)
+files = {['/download/nested/model.gltf']=true}
+dirs = {['/download']={'/download/nested'}}
+result = discover.resolve(ctx,params)
+assert(result.resource == 'nested/model.gltf' and request_count() == 0)
+files['/download/other.gltf']=true
+assert(not pcall(discover.resolve,ctx,params))
+files={}
+assert(not pcall(discover.resolve,ctx,params))
+files={['/download/nested/model.gltf']=true}
+links['/download/nested/model.gltf']=true
+assert(not pcall(discover.resolve,ctx,params))
+links={['/download/nested']=true}
+assert(not pcall(discover.resolve,ctx,params))
+assert(not pcall(discover.resolve,ctx,{id=uid(2),dir='/download',metadata=metadata}))
+assert(not pcall(discover.resolve,ctx,{id=uid(1),dir='/download'}))
+assert(request_count() == 0)
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_local_model_apply_and_remove_use_public_resource_interfaces() {
+    lua_test(
+        r#"
+local path='/remote/sketchfab/item/scene.gltf'
+ctx.remote_artifact_root=function(resource)
+    assert(resource == path)
+    return '/storage/opaque-package-root'
+end
+local applied = wallpaper.apply({resource=path},ctx)
+assert(applied.extras.path == path and next(applied.default_user_properties) == nil)
+assert(applied.extras['asset-root'] == '/storage/opaque-package-root')
+ctx.remote_artifact_root=function() error('resource is not an installed artifact') end
+assert(not pcall(wallpaper.apply,{resource=path},ctx))
+local removed
+ctx.remove_remote_artifact=function(resource) removed=resource end
+ctx.remove_dir=function() error('must not infer a directory to remove') end
+ctx.remove_file=function() error('must not remove only the model entry') end
+source.remove(ctx,{resource=path,path='/incorrect/path'})
+assert(removed == path)
+source.remove(ctx,{path=path})
+assert(removed == path)
+assert(not pcall(source.remove,ctx,{}))
+"#,
+    );
+}
+
+#[test]
 fn sketchfab_session_verifies_candidates_and_authenticates_api_requests() {
     lua_test(
         r#"
@@ -532,7 +750,7 @@ assert(last_request().headers.Authorization == nil)
 fn session_action_entry(root: &Path) -> PathBuf {
     let source = entry().parent().unwrap().to_owned();
     std::fs::create_dir_all(root.join("sketchfab")).unwrap();
-    for module in ["api", "discover", "map", "session"] {
+    for module in ["api", "discover", "map", "session", "source", "wallpaper"] {
         let path = format!("sketchfab/{module}.lua");
         std::fs::copy(source.join(&path), root.join(&path)).unwrap();
     }
@@ -562,6 +780,81 @@ return main
     )
     .unwrap();
     entry
+}
+
+#[tokio::test]
+async fn sketchfab_public_download_and_resolve_preserve_the_same_model_metadata() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let entry = session_action_entry(root);
+    let callbacks = std::fs::read_to_string(&entry).unwrap();
+    std::fs::write(
+        &entry,
+        format!(
+            r#"
+local api = import('sketchfab.api')
+local download_test_model_calls = 0
+api.model = function(ctx, id)
+    download_test_model_calls = download_test_model_calls + 1
+    assert(download_test_model_calls == 1, 'resolve must reuse download metadata')
+    return ctx.json.strict.decode('{{"uid":"' .. id .. '","name":"Downloaded model","description":"Model description","isDownloadable":true,"user":{{"username":"artist","profileUrl":"https://sketchfab.com/artist"}},"license":{{"label":"CC Attribution","url":"https://creativecommons.org/licenses/by/4.0/","requirements":"Credit the author"}},"tags":[{{"name":"Landscape"}}]}}')
+end
+api.download = function(ctx, id, headers)
+    assert(headers.Authorization == 'Token valid-token')
+    return {{url='https://cdn.example/model.zip?signature=ephemeral',size=42}}
+end
+{callbacks}
+"#
+        ),
+    )
+    .unwrap();
+    let manager = manager_with_entry(root, &entry);
+    manager
+        .invoke_action(
+            "sketchfab",
+            "sketchfab_sign_in",
+            &HashMap::from([("api_token".into(), "valid-token".into())]),
+        )
+        .await
+        .unwrap();
+    let id = "00000000000000000000000000000001";
+    let download = manager.call_download("sketchfab", id).await.unwrap();
+    assert_eq!(download.transfer.format, DownloadFormat::Zip);
+    assert_eq!(download.transfer.filename, format!("{id}.zip"));
+    assert!(download.transfer.url.contains("signature=ephemeral"));
+    assert_eq!(download.metadata.title, "Downloaded model");
+    assert_eq!(download.metadata.wp_type, "gltf");
+    assert_eq!(download.metadata.size, Some(42));
+    let attribution = download.metadata.attribution.as_ref().unwrap();
+    assert_eq!(attribution.author, "artist");
+    assert_eq!(attribution.license, "CC Attribution");
+    assert_eq!(attribution.requirements, "Credit the author");
+    let persistent = serde_json::to_string(&download.metadata).unwrap();
+    assert!(!persistent.contains("signature=ephemeral"));
+    assert!(!persistent.contains("valid-token"));
+    let artifact = root.join("artifact");
+    std::fs::create_dir(&artifact).unwrap();
+    std::fs::write(
+        artifact.join("scene.gltf"),
+        b"model parsing belongs to vecgltf",
+    )
+    .unwrap();
+    let resolved = manager
+        .call_resolve(
+            "sketchfab",
+            id,
+            artifact.to_str().unwrap(),
+            Some(&download.metadata),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resolved.name, download.metadata.title);
+    assert_eq!(resolved.resource, "scene.gltf");
+    assert_eq!(resolved.description, download.metadata.description);
+    assert_eq!(resolved.tags, download.metadata.tags);
+    assert_eq!(resolved.size, Some(42));
+    assert_eq!(resolved.external_id, id);
+    assert!(resolved.preview.is_none());
 }
 
 async fn session_test_mode(manager: &SourceManager, mode: &str, time: i64) {

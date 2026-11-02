@@ -27,7 +27,7 @@ namespace vk   = vrento::vulkan;
 namespace tex  = vrento::texture;
 
 struct Options {
-    String   path, ipc, render_node, capture;
+    String   path, ipc, render_node, capture, asset_root;
     unsigned fps { 30 }, custom_extent { 1080 }, frames { 3 };
     int      resolution { -2 }, animation {};
     float    exposure { 1 };
@@ -90,6 +90,8 @@ auto parse(int argc, char** argv, int& status) -> Option<Options> {
         command.add_arg(Arg<String>::value("frames"_str, string_parser()).long_name("frames"_str));
     auto capture = command.add_arg(
         Arg<String>::value("capture"_str, string_parser()).long_name("capture"_str));
+    auto asset_root = command.add_arg(
+        Arg<String>::value("asset-root"_str, string_parser()).long_name("asset-root"_str));
     command.add_arg(Arg<bool>::flag("selftest"_str).long_name("selftest"_str));
     command.add_arg(Arg<bool>::flag("validation"_str).long_name("validation"_str));
     auto built = rstd::move(command).build();
@@ -125,6 +127,7 @@ auto parse(int argc, char** argv, int& status) -> Option<Options> {
     copy(ipc, options.ipc);
     copy(node, options.render_node);
     copy(capture, options.capture);
+    copy(asset_root, options.asset_root);
     String count;
     copy(frames, count);
     if (! count.is_empty()) {
@@ -256,7 +259,10 @@ auto create_gpu(const Options& options) -> Option<Box<Gpu>> {
         rstd_error("gltf: model path is not UTF-8");
         return None();
     }
-    auto loaded = gltf::LoadAsset(source.unwrap());
+    auto              root = rstd::path::PathBuf::from(options.asset_root.as_str());
+    gltf::LoadOptions load_options;
+    if (! options.asset_root.is_empty()) load_options.resource_root = Some(root.as_path());
+    auto loaded = gltf::LoadAsset(source.unwrap(), load_options);
     if (loaded.is_err()) {
         report(loaded.unwrap_err());
         return None();

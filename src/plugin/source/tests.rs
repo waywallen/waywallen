@@ -467,13 +467,14 @@ return M
     );
 
     let dl = block_value(async { mgr.call_download("imported", "abc").await.unwrap() });
-    assert_eq!(dl.wp_type, "image");
-    assert_eq!(dl.filename, "abc.jpg");
-    assert_eq!(dl.title, "Imported");
-    assert_eq!(dl.tags, vec!["tag"]);
-    assert_eq!(dl.external_id, "abc");
-    assert_eq!(dl.web_url, "https://example.invalid/item/abc");
-    assert_eq!(dl.size, Some(42));
+    assert_eq!(dl.metadata.wp_type, "image");
+    assert_eq!(dl.transfer.filename, "abc.jpg");
+    assert_eq!(dl.transfer.format, DownloadFormat::File);
+    assert_eq!(dl.metadata.title, "Imported");
+    assert_eq!(dl.metadata.tags, vec!["tag"]);
+    assert_eq!(dl.metadata.external_id, "abc");
+    assert_eq!(dl.metadata.web_url, "https://example.invalid/item/abc");
+    assert_eq!(dl.metadata.size, Some(42));
     let detail = block_value(async { mgr.call_details("imported", "abc").await.unwrap() });
     assert_eq!(detail.width, Some(10));
     assert_eq!(detail.height, Some(20));
@@ -894,7 +895,7 @@ return bad
 }
 
 #[test]
-fn entry_versions_v3_v4_and_v5_are_supported_and_other_versions_are_rejected() {
+fn entry_versions_v3_through_v6_are_supported_and_other_versions_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let plugin_path = dir.path().join("main.lua");
     std::fs::write(
@@ -933,6 +934,10 @@ return M
     let mgr = SourceManager::new().unwrap();
     assert!(mgr
         .load_plugin(&plugin_path, "test.plugin", "1.0", ENTRY_VERSION_V5)
+        .is_ok());
+    let mgr = SourceManager::new().unwrap();
+    assert!(mgr
+        .load_plugin(&plugin_path, "test.plugin", "1.0", ENTRY_VERSION_V6)
         .is_ok());
     let mgr = SourceManager::new().unwrap();
     assert!(mgr
@@ -1141,10 +1146,13 @@ fn call_resolve_relays_directory_item() {
         r#"
 local M = {}
 function M.info()
-    return { name = "resolver", capabilities = { discover = { search = true, resolve = true } } }
+    return { name = "resolver", capabilities = { discover = { search = true, download = true, resolve = true } } }
 end
 M.discover = {}
 function M.discover.search(ctx, params) return { items = {}, has_more = false } end
+function M.discover.download(ctx, id)
+    return { wp_type = "scene", title = "R " .. id, external_id = id }
+end
 function M.discover.resolve(ctx, params)
     return {
         name = "R " .. params.id,
@@ -1165,8 +1173,8 @@ return M
     let mgr = SourceManager::new().unwrap();
     mgr.load_plugin(&path, "test.plugin", "1.0", ENTRY_VERSION)
         .unwrap();
-    let got =
-        block_value(async { mgr.call_resolve("resolver", "id1", "/some/dir").await }).unwrap();
+    let got = block_value(async { mgr.call_resolve("resolver", "id1", "/some/dir", None).await })
+        .unwrap();
     assert_eq!(got.name, "R id1");
     assert_eq!(got.wp_type, "scene");
     assert_eq!(got.resource, "scene.pkg");

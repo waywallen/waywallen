@@ -4,6 +4,9 @@ msgstr "Project-Id-Version: org.waywallen.sketchfab 0.1.0\nLanguage: zh-CN\nMIME
 msgid "Relevance"
 msgstr "相关性"
 
+msgid "Log in with a Sketchfab API Token to download models."
+msgstr "使用 Sketchfab API Token 登录后即可下载模型。"
+
 msgid "Recently published"
 msgstr "最新发布"
 

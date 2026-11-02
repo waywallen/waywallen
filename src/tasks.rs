@@ -268,6 +268,35 @@ impl TaskManager {
         id
     }
 
+    /// Reuse an active task under the key without cancelling its work.
+    pub fn spawn_async_once<F>(
+        &self,
+        kind: TaskKind,
+        key: impl Into<String>,
+        name: impl Into<String>,
+        fut: F,
+    ) -> TaskId
+    where
+        F: Future<Output = Result<()>> + Send + 'static,
+    {
+        let key = key.into();
+        let mut keys = self.unique_keys.write().unwrap();
+        if let Some(id) = keys.get(&key).copied() {
+            if self
+                .records
+                .read()
+                .unwrap()
+                .get(&id)
+                .is_some_and(|record| matches!(record.state, TaskState::Running))
+            {
+                return id;
+            }
+        }
+        let id = self.spawn_async(kind, name, fut);
+        keys.insert(key, id);
+        id
+    }
+
     pub fn spawn_progress_async_once<F, Fut>(
         &self,
         kind: TaskKind,
@@ -976,6 +1005,122 @@ mod tests {
 
         gate.notify_one();
         let _ = tx.send(true);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn async_once_reuses_concurrent_task_until_completion() {
+        let (shutdown, receiver) = watch::channel(false);
+        let manager = TaskManager::spawn(receiver);
+        let mut events = manager.subscribe();
+        let started = Arc::new(AtomicU32::new(0));
+        let finished = Arc::new(AtomicU32::new(0));
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let barrier = Arc::new(std::sync::Barrier::new(9));
+        let mut submitters = Vec::new();
+        for _ in 0..8 {
+            let manager = manager.clone();
+            let barrier = barrier.clone();
+            let gate = gate.clone();
+            let started = started.clone();
+            let finished = finished.clone();
+            submitters.push(std::thread::spawn(move || {
+                barrier.wait();
+                manager.spawn_async_once(
+                    TaskKind::Generic,
+                    "unit/shared-download",
+                    "unit/shared-download",
+                    async move {
+                        started.fetch_add(1, Ordering::SeqCst);
+                        gate.notified().await;
+                        finished.fetch_add(1, Ordering::SeqCst);
+                        Ok(())
+                    },
+                )
+            }));
+        }
+        barrier.wait();
+        let ids: Vec<_> = submitters
+            .into_iter()
+            .map(|thread| thread.join().unwrap())
+            .collect();
+        let first = ids[0];
+        assert!(ids.iter().all(|id| *id == first));
+        assert!(
+            wait_for(
+                || started.load(Ordering::SeqCst) == 1,
+                Duration::from_secs(1)
+            )
+            .await,
+            "the shared future did not start exactly once"
+        );
+        let duplicate = manager.spawn_async_once(
+            TaskKind::Generic,
+            "unit/shared-download",
+            "unit/duplicate",
+            async { anyhow::bail!("the duplicate future must not run") },
+        );
+        assert_eq!(duplicate, first);
+        assert_eq!(finished.load(Ordering::SeqCst), 0);
+        assert_eq!(manager.list().len(), 1);
+        assert!(matches!(manager.list()[0].state, TaskState::Running));
+        gate.notify_one();
+        assert!(
+            wait_for(
+                || manager
+                    .list()
+                    .iter()
+                    .any(|task| task.id == first && task.state == TaskState::Completed),
+                Duration::from_secs(1)
+            )
+            .await,
+            "duplicate submission cancelled or replaced the original future"
+        );
+        assert_eq!(finished.load(Ordering::SeqCst), 1);
+
+        let next_started = started.clone();
+        let next_finished = finished.clone();
+        let second = manager.spawn_async_once(
+            TaskKind::Generic,
+            "unit/shared-download",
+            "unit/next-download",
+            async move {
+                next_started.fetch_add(1, Ordering::SeqCst);
+                next_finished.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        assert_ne!(second, first);
+        assert!(
+            wait_for(
+                || manager
+                    .list()
+                    .iter()
+                    .any(|task| task.id == second && task.state == TaskState::Completed),
+                Duration::from_secs(1)
+            )
+            .await
+        );
+        assert_eq!(started.load(Ordering::SeqCst), 2);
+        assert_eq!(finished.load(Ordering::SeqCst), 2);
+        let mut created = Vec::new();
+        let mut completed = Vec::new();
+        tokio::time::timeout(Duration::from_secs(1), async {
+            for _ in 0..4 {
+                match events.recv().await.unwrap() {
+                    TaskEvent::Started(task) => created.push(task.id),
+                    TaskEvent::Completed(id) => completed.push(id),
+                    event => panic!("unexpected lifecycle event: {event:?}"),
+                }
+            }
+        })
+        .await
+        .expect("missing shared task lifecycle events");
+        assert_eq!(created, [first, second]);
+        assert_eq!(completed, [first, second]);
+        shutdown.send(true).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), manager.wait_stopped())
+            .await
+            .expect("task supervisor did not stop");
     }
 
     #[tokio::test]

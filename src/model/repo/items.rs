@@ -26,7 +26,10 @@ pub struct ItemUpsertArgs<'a> {
 
 /// Upsert an item keyed by `(library_id, path)`. Every non-key column
 /// (except `create_at`) is refreshed on conflict — new scan is truth.
-pub async fn upsert_item(db: &DatabaseConnection, args: ItemUpsertArgs<'_>) -> Result<item::Model> {
+pub async fn upsert_item(
+    db: &impl ConnectionTrait,
+    args: ItemUpsertArgs<'_>,
+) -> Result<item::Model> {
     let ty_norm = args.ty.to_lowercase();
     let now = now_ms();
     let am = item::ActiveModel {

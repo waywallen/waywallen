@@ -5,3 +5,5 @@ sketchfab/api.lua
 sketchfab/discover.lua
 sketchfab/map.lua
 sketchfab/session.lua
+sketchfab/source.lua
+sketchfab/wallpaper.lua

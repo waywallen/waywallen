@@ -1,5 +1,6 @@
 pub(crate) mod api;
 pub(crate) mod application;
+mod archive;
 pub mod catalog;
 pub mod control_proto;
 pub mod daemon;
@@ -11,6 +12,7 @@ pub mod model;
 pub mod playback;
 pub mod plugin;
 pub mod probe;
+mod remote_asset;
 pub mod settings;
 pub mod system;
 pub mod tasks;

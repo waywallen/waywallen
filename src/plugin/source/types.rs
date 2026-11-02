@@ -16,10 +16,15 @@ pub(super) const RUNTIME_INACTIVE: u8 = 2;
 pub const ENTRY_VERSION_V3: u32 = 3;
 pub const ENTRY_VERSION_V4: u32 = 4;
 pub const ENTRY_VERSION_V5: u32 = 5;
-pub const ENTRY_VERSION: u32 = ENTRY_VERSION_V5;
-pub const LATEST_ENTRY_VERSION: u32 = ENTRY_VERSION_V5;
-pub const SUPPORTED_ENTRY_VERSIONS: &[u32] =
-    &[ENTRY_VERSION_V3, ENTRY_VERSION_V4, ENTRY_VERSION_V5];
+pub const ENTRY_VERSION_V6: u32 = 6;
+pub const ENTRY_VERSION: u32 = ENTRY_VERSION_V6;
+pub const LATEST_ENTRY_VERSION: u32 = ENTRY_VERSION_V6;
+pub const SUPPORTED_ENTRY_VERSIONS: &[u32] = &[
+    ENTRY_VERSION_V3,
+    ENTRY_VERSION_V4,
+    ENTRY_VERSION_V5,
+    ENTRY_VERSION_V6,
+];
 
 pub(super) const MAX_DISCOVER_CURSOR_BYTES: usize = 4096;
 
@@ -381,11 +386,32 @@ pub struct DiscoverSearchResult {
     pub next_cursor: String,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
-pub struct DiscoverDownload {
-    pub wp_type: String,
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DownloadFormat {
+    #[default]
+    File,
+    Zip,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DiscoverTransfer {
     pub url: String,
     pub filename: String,
+    pub format: DownloadFormat,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct DiscoverAttribution {
+    pub author: String,
+    pub author_url: String,
+    pub license: String,
+    pub license_url: String,
+    pub requirements: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct DiscoverMetadata {
+    pub wp_type: String,
     pub title: String,
     pub preview_url: String,
     pub description: String,
@@ -397,6 +423,20 @@ pub struct DiscoverDownload {
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub content_rating: Option<String>,
+    #[serde(default)]
+    pub attribution: Option<DiscoverAttribution>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DiscoverDownload {
+    pub transfer: DiscoverTransfer,
+    pub metadata: DiscoverMetadata,
+}
+
+/// Retains remote filesystem ownership until the caller finishes deleting its DB row.
+#[derive(Debug)]
+pub struct SourceRemoval {
+    pub(super) _artifact: Option<crate::remote_asset::Removal>,
 }
 
 /// Directory item resolved by `discover.resolve` after a provider fetch.

@@ -57,4 +57,73 @@ function M.details(ctx, id)
     return map.details(remember(ctx, model))
 end
 
+function M.download(ctx, id)
+    if not session.authenticated() then
+        error("Log in to Sketchfab to download models")
+    end
+    sync_session()
+    local headers = session.headers()
+    local model = map.normalize(api.model(ctx, id, headers), ctx.json.strict)
+    if model.id ~= id then
+        error("Sketchfab returned a different model id")
+    end
+    model = remember(ctx, model)
+    if model.downloadable == false then
+        error("This Sketchfab model is not downloadable")
+    end
+    local metadata = map.download(model, {})
+    local archive = api.download(ctx, id, headers)
+    metadata.url = archive.url
+    if archive.size ~= nil then metadata.size = archive.size end
+    return metadata
+end
+
+function M.resolve(ctx, params)
+    local root, metadata = params.dir, params.metadata
+    if type(root) ~= "string" or root == "" or type(metadata) ~= "table"
+        or metadata.wp_type ~= "gltf" or metadata.external_id ~= params.id then
+        error("Sketchfab download metadata is missing or inconsistent")
+    end
+    root = root:gsub("/+$", "")
+    local entry = root .. "/scene.gltf"
+    if not ctx.fs.is_file(entry) or ctx.fs.is_symlink(entry) then
+        local candidates, visited = {}, 0
+        local function walk(directory, depth)
+            visited = visited + 1
+            if depth > 16 or visited > 4096 then
+                error("Sketchfab archive directory structure exceeds the supported limits")
+            end
+            for _, path in ipairs(ctx.fs.list_files(directory)) do
+                local extension = ctx.extension(path)
+                if extension and extension:lower() == "gltf" then
+                    if ctx.fs.is_symlink(path) then error("Sketchfab archive contains a linked model entry") end
+                    table.insert(candidates, path)
+                    if #candidates > 1 then error("Sketchfab archive contains multiple glTF model entries") end
+                end
+            end
+            for _, directory in ipairs(ctx.list_dirs(directory)) do
+                if ctx.fs.is_symlink(directory) then error("Sketchfab archive contains a linked directory") end
+                walk(directory, depth + 1)
+            end
+        end
+        walk(root, 0)
+        if #candidates ~= 1 then error("Sketchfab archive does not contain a glTF model entry") end
+        entry = candidates[1]
+    end
+    local prefix = root .. "/"
+    if entry:sub(1, #prefix) ~= prefix then
+        error("Sketchfab model entry is outside the downloaded archive")
+    end
+    return {
+        name = metadata.title,
+        wp_type = "gltf",
+        resource = entry:sub(#prefix + 1),
+        description = metadata.description or "",
+        tags = metadata.tags or {},
+        external_id = metadata.external_id,
+        size = metadata.size,
+        content_rating = metadata.content_rating,
+    }
+end
+
 return M

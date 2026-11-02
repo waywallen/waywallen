@@ -44,6 +44,193 @@ return M
     )
 }
 
+fn download_script(fields: &str, resolve: Option<&str>) -> String {
+    let resolver = resolve
+        .map(|body| format!("function M.discover.resolve(ctx, params)\n{body}\nend"))
+        .unwrap_or_default();
+    let capability = if resolve.is_some() {
+        "resolve=true,"
+    } else {
+        ""
+    };
+    format!(
+        r#"
+local M = {{}}
+function M.info()
+    return {{ name = "test", capabilities = {{ discover = {{ search=true, download=true, {capability} }} }} }}
+end
+M.discover = {{}}
+function M.discover.search(ctx, params) return {{items={{}},has_more=false}} end
+function M.discover.download(ctx, id)
+    return {{
+        wp_type="gltf", title="Model", external_id=id,
+        url="https://example.invalid/model?Signature=temporary-secret", filename="model.zip",
+        preview_url="https://example.invalid/preview.jpg", description="description",
+        tags={{"model"}}, web_url="https://example.invalid/models/uid",
+        size=42, width=16, height=9, content_rating="Everyone",
+        {fields}
+    }}
+end
+{resolver}
+return M
+"#
+    )
+}
+
+const RESOLVE_MODEL: &str =
+    "return {name='Model',wp_type='gltf',resource='scene.gltf',external_id=params.id}";
+
+#[tokio::test]
+async fn discover_download_preserves_legacy_flat_file_results() {
+    for version in [
+        ENTRY_VERSION_V3,
+        ENTRY_VERSION_V4,
+        ENTRY_VERSION_V5,
+        ENTRY_VERSION_V6,
+    ] {
+        let (_directory, manager) = plugin(&download_script("", None), version);
+        let download = manager.call_download("test", "uid").await.unwrap();
+        assert_eq!(download.transfer.format, DownloadFormat::File);
+        assert_eq!(download.transfer.filename, "model.zip");
+        assert_eq!(
+            download.transfer.url,
+            "https://example.invalid/model?Signature=temporary-secret"
+        );
+        assert_eq!(download.metadata.wp_type, "gltf");
+        assert_eq!(download.metadata.title, "Model");
+        assert_eq!(download.metadata.external_id, "uid");
+        assert_eq!(
+            download.metadata.preview_url,
+            "https://example.invalid/preview.jpg"
+        );
+        assert_eq!(download.metadata.description, "description");
+        assert_eq!(download.metadata.tags, ["model"]);
+        assert_eq!(
+            download.metadata.web_url,
+            "https://example.invalid/models/uid"
+        );
+        assert_eq!(download.metadata.size, Some(42));
+        assert_eq!(download.metadata.width, Some(16));
+        assert_eq!(download.metadata.height, Some(9));
+        assert_eq!(
+            download.metadata.content_rating.as_deref(),
+            Some("Everyone")
+        );
+        assert!(download.metadata.attribution.is_none());
+        let serialized = serde_json::to_value(&download.metadata).unwrap();
+        assert!(serialized.get("url").is_none());
+        assert!(serialized.get("filename").is_none());
+        assert!(!serialized.to_string().contains("temporary-secret"));
+    }
+}
+
+#[tokio::test]
+async fn discover_download_archive_and_attribution_require_version_six() {
+    for version in [ENTRY_VERSION_V3, ENTRY_VERSION_V4, ENTRY_VERSION_V5] {
+        for fields in ["archive='zip',", "attribution={},"] {
+            let (_directory, manager) =
+                plugin(&download_script(fields, Some(RESOLVE_MODEL)), version);
+            let error = manager.call_download("test", "uid").await.unwrap_err();
+            assert!(error.to_string().contains("requires Lua entry_version 6"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn discover_download_zip_requires_resolve_and_rejects_unknown_formats() {
+    let (_directory, manager) = plugin(&download_script("archive='zip',", None), ENTRY_VERSION_V6);
+    let error = manager.call_download("test", "uid").await.unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("requires discover.resolve capability"));
+    for archive in ["'tar'", "''", "{}", "1", "false"] {
+        let script = download_script(&format!("archive={archive},"), Some(RESOLVE_MODEL));
+        let (_directory, manager) = plugin(&script, ENTRY_VERSION_V6);
+        assert!(
+            manager.call_download("test", "uid").await.is_err(),
+            "accepted archive={archive}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn discover_download_validates_attribution_types() {
+    for value in [
+        "false",
+        "'author'",
+        "{author={}}",
+        "{license=false}",
+        "{requirements=1}",
+    ] {
+        let script = download_script(&format!("attribution={value},"), None);
+        let (_directory, manager) = plugin(&script, ENTRY_VERSION_V6);
+        assert!(
+            manager.call_download("test", "uid").await.is_err(),
+            "accepted attribution={value}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn discover_resolve_receives_metadata_without_transfer_secrets() {
+    let script = download_script(
+        r#"
+archive="zip",
+attribution={
+    author="Artist", author_url="https://example.invalid/artist",
+    license="CC BY", license_url="https://example.invalid/license",
+    requirements="Credit the artist",
+},
+"#,
+        Some(
+            r#"
+assert(params.id == 'uid' and params.dir == '/staging/model')
+local metadata = params.metadata
+assert(type(metadata) == 'table')
+assert(metadata.wp_type == 'gltf' and metadata.title == 'Model')
+assert(metadata.external_id == 'uid' and metadata.tags[1] == 'model')
+assert(metadata.attribution.author == 'Artist')
+assert(metadata.attribution.author_url == 'https://example.invalid/artist')
+assert(metadata.attribution.license == 'CC BY')
+assert(metadata.attribution.license_url == 'https://example.invalid/license')
+assert(metadata.attribution.requirements == 'Credit the artist')
+assert(metadata.url == nil and metadata.filename == nil and metadata.archive == nil)
+assert(not ctx.json.encode(metadata):find('temporary-secret', 1, true))
+return {name=metadata.title,wp_type=metadata.wp_type,resource='scene.gltf',external_id=params.id}
+"#,
+        ),
+    );
+    let (_directory, manager) = plugin(&script, ENTRY_VERSION_V6);
+    let download = manager.call_download("test", "uid").await.unwrap();
+    assert_eq!(download.transfer.format, DownloadFormat::Zip);
+    let attribution = download.metadata.attribution.as_ref().unwrap();
+    assert_eq!(attribution.author, "Artist");
+    assert_eq!(attribution.requirements, "Credit the artist");
+    let persisted = serde_json::to_string(&download.metadata).unwrap();
+    let restored: DiscoverMetadata = serde_json::from_str(&persisted).unwrap();
+    assert_eq!(restored.attribution.unwrap().license, "CC BY");
+    assert!(!persisted.contains("temporary-secret"));
+    let resolved = manager
+        .call_resolve("test", "uid", "/staging/model", Some(&download.metadata))
+        .await
+        .unwrap();
+    assert_eq!(resolved.resource, "scene.gltf");
+    assert_eq!(resolved.name, "Model");
+}
+
+#[tokio::test]
+async fn discover_resolve_omits_metadata_when_not_provided() {
+    let script = download_script(
+        "",
+        Some("assert(params.metadata == nil); return {name='Model',wp_type='gltf',resource='scene.gltf'}"),
+    );
+    let (_directory, manager) = plugin(&script, ENTRY_VERSION_V6);
+    manager
+        .call_resolve("test", "uid", "/staging/model", None)
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 async fn discover_json_strict_preserves_shapes_without_changing_legacy_parse() {
     let script = search_script(

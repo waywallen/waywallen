@@ -59,7 +59,7 @@ impl LuaPluginRegistry {
         )
     }
 
-    pub(super) fn with_probe_and_state_store(
+    pub(crate) fn with_probe_and_state_store(
         probe: Arc<dyn MediaProbe>,
         state_store: crate::plugin::state_store::PluginStateStore,
     ) -> Result<Self> {
@@ -638,12 +638,13 @@ impl LuaPluginRegistry {
         plugin_name: &str,
         id: &str,
         dir: &str,
+        metadata: Option<&DiscoverMetadata>,
     ) -> Result<DiscoverResolve> {
         self.handle(plugin_name)?
             .runtime
             .lock()
             .await
-            .call_resolve(plugin_name, id, dir)
+            .call_resolve(plugin_name, id, dir, metadata)
             .await
     }
 
@@ -705,7 +706,7 @@ impl LuaPluginRegistry {
         plugin_name: &str,
         entry: &WallpaperEntry,
         libraries: &[String],
-    ) -> Result<()> {
+    ) -> Result<SourceRemoval> {
         self.handle(plugin_name)?
             .runtime
             .lock()

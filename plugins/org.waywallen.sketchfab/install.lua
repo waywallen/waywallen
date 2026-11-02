@@ -12,6 +12,8 @@ lito.install({
         { source = "sketchfab/discover.lua", destination = plugin_path("sketchfab/discover.lua") },
         { source = "sketchfab/map.lua", destination = plugin_path("sketchfab/map.lua") },
         { source = "sketchfab/session.lua", destination = plugin_path("sketchfab/session.lua") },
+        { source = "sketchfab/source.lua", destination = plugin_path("sketchfab/source.lua") },
+        { source = "sketchfab/wallpaper.lua", destination = plugin_path("sketchfab/wallpaper.lua") },
         { source = "i18n/zh-CN.po", destination = plugin_path("i18n/zh-CN.po") },
     },
     inventories = {

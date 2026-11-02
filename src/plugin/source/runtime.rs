@@ -2045,6 +2045,25 @@ impl LuaPluginRuntime {
         })?;
         ctx.set("remove_dir", remove_dir_fn.clone())?;
 
+        let artifact_plugin = plugin_name.map(str::to_owned);
+        ctx.set(
+            "remote_artifact_root",
+            self.lua.create_function(move |_, resource: String| {
+                let name = artifact_plugin
+                    .as_deref()
+                    .ok_or_else(|| mlua::Error::external("remote artifact has no owning source"))?;
+                crate::remote_asset::artifact_root(
+                    &crate::settings::remote_content_dir(name),
+                    name,
+                    Path::new(&resource),
+                )
+                .map_err(mlua::Error::external)?
+                .into_os_string()
+                .into_string()
+                .map_err(|_| mlua::Error::external("remote artifact root is not UTF-8"))
+            })?,
+        )?;
+
         let fs = self.lua.create_table()?;
         fs.set("glob", glob_fn)?;
         fs.set("list_dirs", list_dirs_fn)?;
@@ -2873,14 +2892,65 @@ impl LuaPluginRuntime {
                 message: redact_secrets(&e.to_string()),
             })?;
 
-        let download = DiscoverDownload {
-            wp_type: Self::require_string(&result, "wp_type", "module.discover.download result")?,
+        let archive = result.get::<LuaValue>("archive")?;
+        let attribution = result.get::<LuaValue>("attribution")?;
+        if info.entry_version < ENTRY_VERSION_V6 {
+            if !matches!(archive, LuaValue::Nil) {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.archive requires Lua entry_version 6"
+                )));
+            }
+            if !matches!(attribution, LuaValue::Nil) {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.attribution requires Lua entry_version 6"
+                )));
+            }
+        }
+        let format = match archive {
+            LuaValue::Nil => DownloadFormat::File,
+            LuaValue::String(value) if value.to_str()?.as_ref() == "zip" => {
+                if !discover.supports_resolve {
+                    return Err(Error::Internal(anyhow!(
+                        "module.discover.download result.archive requires discover.resolve capability"
+                    )));
+                }
+                DownloadFormat::Zip
+            }
+            _ => {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.archive must be 'zip' when present"
+                )))
+            }
+        };
+        let attribution = match attribution {
+            LuaValue::Nil => None,
+            LuaValue::Table(value) => {
+                let context = "module.discover.download result.attribution";
+                Some(DiscoverAttribution {
+                    author: Self::optional_string(&value, "author", context)?,
+                    author_url: Self::optional_string(&value, "author_url", context)?,
+                    license: Self::optional_string(&value, "license", context)?,
+                    license_url: Self::optional_string(&value, "license_url", context)?,
+                    requirements: Self::optional_string(&value, "requirements", context)?,
+                })
+            }
+            _ => {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.attribution must be a table when present"
+                )))
+            }
+        };
+        let transfer = DiscoverTransfer {
             url: Self::optional_string(&result, "url", "module.discover.download result")?,
             filename: Self::optional_string(
                 &result,
                 "filename",
                 "module.discover.download result",
             )?,
+            format,
+        };
+        let metadata = DiscoverMetadata {
+            wp_type: Self::require_string(&result, "wp_type", "module.discover.download result")?,
             title: Self::require_string(&result, "title", "module.discover.download result")?,
             preview_url: Self::optional_string(
                 &result,
@@ -2907,9 +2977,10 @@ impl LuaPluginRuntime {
             width: result.get::<u32>("width").ok(),
             height: result.get::<u32>("height").ok(),
             content_rating: result.get::<String>("content_rating").ok(),
+            attribution,
         };
         self.persist_state(plugin_name)?;
-        Ok(download)
+        Ok(DiscoverDownload { transfer, metadata })
     }
 
     /// Classify a directory fetched by a download provider. `dir` is the absolute
@@ -2919,6 +2990,7 @@ impl LuaPluginRuntime {
         plugin_name: &str,
         id: &str,
         dir: &str,
+        metadata: Option<&DiscoverMetadata>,
     ) -> Result<DiscoverResolve> {
         let callbacks = self
             .callbacks
@@ -2944,6 +3016,9 @@ impl LuaPluginRuntime {
         let params = self.lua.create_table()?;
         params.set("id", id.to_string())?;
         params.set("dir", dir.to_string())?;
+        if let Some(metadata) = metadata {
+            params.set("metadata", self.lua.to_value(metadata)?)?;
+        }
         let result: LuaTable = self
             .call_plugin_callback_async(plugin_name, &resolve_fn, (ctx, params))
             .await
@@ -3511,7 +3586,7 @@ impl LuaPluginRuntime {
         plugin_name: &str,
         entry: &WallpaperEntry,
         libraries: &[String],
-    ) -> Result<()> {
+    ) -> Result<SourceRemoval> {
         let callbacks = self
             .callbacks
             .get(plugin_name)
@@ -3531,14 +3606,47 @@ impl LuaPluginRuntime {
         )?;
         let ctx = self.build_ctx(Some(plugin_name), libraries)?;
         let entry_tbl = self.wallpaper_entry_table(entry)?;
-        self.call_plugin_callback_async::<()>(plugin_name, &remove_fn, (ctx, entry_tbl))
-            .await
-            .map_err(|e| Error::SourceItemRemoveFailed {
-                plugin: plugin_name.to_string(),
-                message: redact_secrets(&e.to_string()),
-            })?;
+        let artifact = Arc::new(StdMutex::new(None::<crate::remote_asset::Removal>));
+        let retained = artifact.clone();
+        let source_id = plugin_name.to_owned();
+        let expected_resource = entry.resource.clone();
+        ctx.set(
+            "remove_remote_artifact",
+            self.lua.create_async_function(move |_, resource: String| {
+                let retained = retained.clone();
+                let source_id = source_id.clone();
+                let expected = expected_resource.clone();
+                async move {
+                    if resource != expected || retained.lock().unwrap().is_some() {
+                        return Err(mlua::Error::external(
+                            "removal must identify the selected artifact once",
+                        ));
+                    }
+                    let receipt = crate::remote_asset::remove(
+                        &crate::settings::remote_content_dir(&source_id),
+                        &source_id,
+                        Path::new(&resource),
+                    )
+                    .await
+                    .map_err(mlua::Error::external)?;
+                    let removed = receipt.removed;
+                    *retained.lock().unwrap() = Some(receipt);
+                    Ok(removed)
+                }
+            })?,
+        )?;
+        let result = self
+            .call_plugin_callback_async::<()>(plugin_name, &remove_fn, (ctx, entry_tbl))
+            .await;
+        let removal = SourceRemoval {
+            _artifact: artifact.lock().unwrap().take(),
+        };
+        result.map_err(|e| Error::SourceItemRemoveFailed {
+            plugin: plugin_name.to_string(),
+            message: redact_secrets(&e.to_string()),
+        })?;
         self.persist_state(plugin_name)?;
-        Ok(())
+        Ok(removal)
     }
 
     pub fn plugin_version(&self, plugin_name: &str) -> Option<String> {

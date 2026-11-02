@@ -44,6 +44,7 @@ toml = "0.8"
 glob = "0.3"
 zip = { version = "2", default-features = false, features = ["deflate", "zstd"] }
 base64 = "0.22"
+tempfile = "3"
 qrcode = "0.14"
 mlua = { version = "0.10", features = ["lua54", "vendored", "send", "async", "serialize"] }
 mlua-extra = { git = "https://github.com/hypengw/mlua-extra", rev = "7b50183a900f8bea8c5cf239b0be64d04205a388", default-features = false, features = ["native-tls"] }
@@ -60,7 +61,6 @@ sea-orm-migration = { version = "1.1", default-features = false, features = [
 ] }
 
 [dev-dependencies]
-tempfile = "3"
 tokio = { version = "1.0", features = ["full", "test-util"] }
 
 [[bin]]
