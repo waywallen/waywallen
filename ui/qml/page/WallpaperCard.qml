@@ -20,6 +20,7 @@ Item {
     property bool masonry: false
     required property MD.LazyRow row
     property bool selected: false
+    property MD.Shimmer shimmer: null
     property real spacing: 12
     readonly property var wallpaper: row.value.item
 
@@ -59,6 +60,7 @@ Item {
                 resource: root.wallpaper?.resource ?? ""
                 resourceSize: Qt.size(Number(root.wallpaper?.width ?? 0), Number(root.wallpaper?.height ?? 0))
                 retainWhileLoading: true
+                shimmer: root.shimmer
                 source: root.wallpaper?.preview ?? ""
                 wpType: root.wallpaper?.wpType ?? ""
             }

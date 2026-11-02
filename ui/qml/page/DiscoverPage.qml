@@ -401,6 +401,7 @@ MD.Page {
                             itemWidth: m_grid.displayItemWidth
                             masonry: m_grid.masonry
                             remoteCapability: root.sourceCapability(root.sourceId)
+                            shimmer: m_grid.shimmer
                             spacing: m_grid.itemSpacing
 
                             onClicked: {

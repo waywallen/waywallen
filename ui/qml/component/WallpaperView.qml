@@ -28,6 +28,7 @@ FocusScope {
     readonly property bool positioning: view.item?.positioning ?? false
     property real rightMargin: itemSpacing / 2
     property list<string> roles: ["item"]
+    readonly property MD.Shimmer shimmer: sharedShimmer
     property real topMargin: itemSpacing / 2
     required property var tweak
 
@@ -85,6 +86,12 @@ FocusScope {
             switchLayout();
     }
 
+    MD.Shimmer {
+        id: sharedShimmer
+
+        boundsItem: root
+        boundsMode: MD.Shimmer.Item
+    }
     MD.ItemModelSource {
         id: itemSource
 

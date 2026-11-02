@@ -91,6 +91,54 @@ TestCase {
         tryVerify(() => Math.abs(view.itemRect(backIndex).y - backY) <= 1);
         compare(view.currentKey, "key-46");
     }
+    function test_sharedShimmerSurvivesReuseAndLayoutSwitch() {
+        const view = createTemporaryObject(shimmerViewComponent, test);
+        verify(view);
+        tryCompare(view, "count", 120);
+        tryVerify(() => findChild(view, "shimmerCell-key-0") !== null);
+        const controller = view.shimmer;
+        verify(controller);
+        compare(controller.boundsMode, MD.Shimmer.Item);
+        compare(controller.boundsItem, view);
+        controller.running = false;
+        controller.seek(0.375);
+        compare(controller.phase, 0.375);
+        for (const index of [0, 1, 2]) {
+            const cell = findChild(view, "shimmerCell-key-" + index);
+            verify(cell);
+            compare(cell.shimmer, controller);
+        }
+
+        verify(view.positionAtIndex(60));
+        tryVerify(() => !view.positioning);
+        tryVerify(() => view.anchorIndex > 40);
+        const anchor = view.anchorIndex;
+        const visibleCell = findChild(view, "shimmerCell-key-" + anchor);
+        verify(visibleCell);
+        compare(visibleCell.shimmer, controller);
+        compare(view.shimmer, controller);
+        compare(controller.phase, 0.375);
+
+        settings.viewMode = settings.viewMasonry;
+        tryVerify(() => view.itemRect(anchor).height === rows.get(anchor).extent);
+        tryVerify(() => !view.positioning);
+        const masonryCell = findChild(view, "shimmerCell-key-" + anchor);
+        verify(masonryCell);
+        compare(masonryCell.shimmer, controller);
+        compare(view.shimmer, controller);
+        compare(controller.boundsItem, view);
+        compare(controller.phase, 0.375);
+
+        settings.viewMode = settings.viewGrid;
+        tryVerify(() => !view.positioning);
+        verify(view.positionAtIndex(0));
+        tryVerify(() => !view.positioning);
+        tryVerify(() => findChild(view, "shimmerCell-key-0") !== null);
+        compare(findChild(view, "shimmerCell-key-0").shimmer, controller);
+        compare(view.shimmer, controller);
+        compare(controller.phase, 0.375);
+        compare(view.errorString, "");
+    }
     function test_layoutSwitchWithEarlierTallImage() {
         settings.viewMode = settings.viewMasonry;
         rows.setProperty(0, "extent", 10000);
@@ -238,6 +286,27 @@ TestCase {
 
                 color: "transparent"
                 implicitHeight: row.value.extent
+            }
+        }
+    }
+    Component {
+        id: shimmerViewComponent
+
+        W.WallpaperView {
+            id: shimmerView
+
+            height: 500
+            model: rows
+            roles: ["extent"]
+            tweak: settings
+            width: 500
+
+            delegate: MD.Skeleton {
+                required property MD.LazyRow row
+
+                implicitHeight: row.value.extent
+                objectName: "shimmerCell-" + row.key
+                shimmer: shimmerView.shimmer
             }
         }
     }

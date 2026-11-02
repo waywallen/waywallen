@@ -20,6 +20,7 @@ Item {
     readonly property string previewUrl: item.previewUrl
     required property int remoteCapability
     required property MD.LazyRow row
+    property MD.Shimmer shimmer: null
     property real spacing: 12
     readonly property string title: item.title
 
@@ -50,6 +51,7 @@ Item {
                 preparationScope: root.row.view
                 radius: root._radius
                 resourceSize: Qt.size(Number(root.item?.width ?? 0), Number(root.item?.height ?? 0))
+                shimmer: root.shimmer
                 source: root.previewUrl
                 verticalAlignment: Image.AlignVCenter
             }

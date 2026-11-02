@@ -16,6 +16,8 @@ Item {
     id: root
 
     readonly property url _displayUrl: _useDirect ? (/^[a-z][a-z0-9+.-]*:/i.test(root.source) ? root.source : Qt.url("file://" + root.source)) : req.cachePath
+    readonly property bool _failed: state === W.ThumbnailRequest.Failed || status === (_useQExtra ? QE.Image.Error : Image.Error)
+    readonly property bool _hasInput: source.length > 0 || resource.length > 0
     readonly property bool _useDirect: root.source.length > 0
     readonly property bool _useQExtra: useQExtra && /^(file|qrc|https?):/i.test(String(_displayUrl))
     readonly property real aspectRatio: {
@@ -28,16 +30,21 @@ Item {
     readonly property url cachePath: _displayUrl
     property real fallbackAspectRatio: 1
     property int fillMode: Image.PreserveAspectFit
+    readonly property bool hasFrame: _useQExtra ? (m_image.item?.hasFrame ?? false) : status === Image.Ready
     readonly property size intrinsicSize: root._useQExtra ? (m_image.item?.intrinsicSize ?? Qt.size(0, 0)) : Qt.size(0, 0)
+    readonly property bool loading: _hasInput && !_failed && (state === W.ThumbnailRequest.Loading || status === (_useQExtra ? QE.Image.Loading : Image.Loading))
     property int loadingMode: QE.Image.Automatic
     property size maxSize: Qt.size(512, 512)
     readonly property real paintedHeight: m_image.item?.paintedHeight ?? 0
     readonly property real paintedWidth: m_image.item?.paintedWidth ?? 0
+    readonly property bool placeholderActive: placeholderVisible && loading && loadingMode === QE.Image.Automatic && visible
+    readonly property bool placeholderVisible: shimmer !== null && _hasInput && !hasFrame && (loading || _failed)
     property Item preparationScope
     property int radius: MD.Token.shape.corner.extra_small
     property string resource
     property size resourceSize: Qt.size(0, 0)
     property bool retainWhileLoading: false
+    property MD.Shimmer shimmer: null
     property string source
     property size sourceSize: Qt.size(-1, -1)
     readonly property int state: _useDirect ? W.ThumbnailRequest.Ready : req.state
@@ -52,6 +59,12 @@ Item {
         resource: root._useDirect ? "" : root.resource
         source: ""
         wpType: root._useDirect ? "" : root.wpType
+    }
+    MD.Skeleton {
+        anchors.fill: parent
+        radius: root.radius
+        shimmer: root.placeholderActive ? root.shimmer : null
+        visible: root.placeholderVisible
     }
     Loader {
         id: m_image

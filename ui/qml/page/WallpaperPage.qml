@@ -613,6 +613,7 @@ MD.Page {
                             itemWidth: m_grid_view.displayItemWidth
                             masonry: m_grid_view.masonry
                             selected: row.value.selected ?? false
+                            shimmer: m_grid_view.shimmer
                             spacing: m_grid_view.itemSpacing
 
                             onClicked: modifiers => root.handleWallpaperClick(index, modifiers)
