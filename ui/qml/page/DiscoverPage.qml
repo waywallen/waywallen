@@ -11,6 +11,9 @@ MD.Page {
     property RemoteDetailPanel detailPanel: RemoteDetailPanel {
         details: detailsQuery
         downloadState: Number(root.detailRow?.acquisitionState ?? 0)
+        downloadTransferActive: root.detailRow?.downloadTransferActive ?? false
+        downloadReceivedBytes: Number(root.detailRow?.downloadReceivedBytes ?? 0)
+        downloadTotalBytes: Number(root.detailRow?.downloadTotalBytes ?? 0)
         item: root.detailRow
         nestedScrollEnabled: sheetSite.current
         parent: null

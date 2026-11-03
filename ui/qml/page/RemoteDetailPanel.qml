@@ -27,6 +27,9 @@ Item {
     property var downloadAction: null
     property var tagOptions: []
     property int downloadState: 0
+    property bool downloadTransferActive: false
+    property real downloadReceivedBytes: 0
+    property real downloadTotalBytes: 0
     property int subscriptionState: 0
 
     signal back
@@ -255,6 +258,42 @@ Item {
             Layout.bottomMargin: 8
             spacing: 8
             visible: root.remoteCapability === 1 || root.remoteCapability === 2
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+                visible: root.remoteCapability === 1 && (root.downloadState === 1 || root.downloadState === 2)
+
+                MD.LinearIndicator {
+                    id: downloadProgress
+                    objectName: "remoteDownloadProgress"
+                    Layout.fillWidth: true
+                    indeterminate: !root.downloadTransferActive || root.downloadTotalBytes <= 0
+                    value: indeterminate ? 0 : Math.max(0, Math.min(1, root.downloadReceivedBytes / root.downloadTotalBytes))
+                    running: visible && indeterminate
+                    completionBehavior: MD.LinearIndicator.Keep
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: root.downloadTransferActive
+
+                    MD.Text {
+                        Layout.fillWidth: true
+                        typescale: MD.Token.typescale.body_small
+                        color: MD.Token.color.on_surface_variant
+                        text: root.downloadTotalBytes > 0
+                            ? W.I18n.formatBytes(root.downloadReceivedBytes) + " / " + W.I18n.formatBytes(root.downloadTotalBytes)
+                            : W.I18n.formatBytes(root.downloadReceivedBytes)
+                    }
+                    MD.Text {
+                        visible: !downloadProgress.indeterminate
+                        typescale: MD.Token.typescale.body_small
+                        color: MD.Token.color.on_surface_variant
+                        text: Math.floor(downloadProgress.value * 100) + "%"
+                    }
+                }
+            }
 
             Item {
                 id: downloadControl

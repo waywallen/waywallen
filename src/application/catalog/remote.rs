@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use futures_util::StreamExt;
@@ -9,7 +9,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::catalog::entry::WallpaperEntry;
 use crate::error::Error;
-use crate::events::{GlobalEvent, RemoteDownloadState};
+use crate::events::{GlobalEvent, RemoteDownloadState, RemoteDownloadTransfer};
 use crate::model::repo;
 use crate::plugin::source::{
     DiscoverDownload, DiscoverMetadata, DownloadFormat, RemoteCapability, SourceManager,
@@ -26,12 +26,33 @@ mod tests;
 
 const DOWNLOAD_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 const PREVIEW_LIMIT: u64 = 8 * 1024 * 1024;
+const DOWNLOAD_PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 const ZIP_LIMITS: crate::archive::Limits = crate::archive::Limits {
     max_entries: 10_000,
     max_file_bytes: 2 * 1024 * 1024 * 1024,
     max_total_bytes: 4 * 1024 * 1024 * 1024,
     max_depth: 64,
 };
+
+#[derive(Default)]
+struct DownloadProgressThrottle {
+    last_reported: Option<Instant>,
+}
+
+impl DownloadProgressThrottle {
+    fn should_report(&mut self, now: Instant, force: bool) -> bool {
+        if force
+            || self.last_reported.is_none_or(|previous| {
+                now.saturating_duration_since(previous) >= DOWNLOAD_PROGRESS_INTERVAL
+            })
+        {
+            self.last_reported = Some(now);
+            true
+        } else {
+            false
+        }
+    }
+}
 
 fn safe_remote_filename(filename: &str, id: &str) -> String {
     Path::new(filename)
@@ -60,6 +81,7 @@ pub fn publish_remote_download_progress(
         id: id.to_string(),
         state: download_state,
         error: error.into(),
+        transfer: None,
     });
 }
 
@@ -139,7 +161,12 @@ async fn write_remote_sidecar(path: &Path, info: &DiscoverMetadata) -> Result<()
     Ok(())
 }
 
-async fn download_remote_file(url: &str, path: &Path, limit: u64) -> Result<()> {
+async fn download_remote_file(
+    url: &str,
+    path: &Path,
+    limit: u64,
+    mut progress: impl FnMut(RemoteDownloadTransfer),
+) -> Result<()> {
     let url = reqwest::Url::parse(url).context("invalid download URL")?;
     if !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
@@ -171,10 +198,8 @@ async fn download_remote_file(url: &str, path: &Path, limit: u64) -> Result<()> 
         .error_for_status()
         .map_err(reqwest::Error::without_url)
         .context("download response failed")?;
-    if response
-        .content_length()
-        .is_some_and(|length| length > limit)
-    {
+    let total_bytes = response.content_length();
+    if total_bytes.is_some_and(|length| length > limit) {
         return Err(anyhow!("download exceeds the size limit"));
     }
     let mut stream = response.bytes_stream();
@@ -183,6 +208,13 @@ async fn download_remote_file(url: &str, path: &Path, limit: u64) -> Result<()> 
         .open(&temporary)
         .await?;
     let mut received = 0_u64;
+    let mut throttle = DownloadProgressThrottle::default();
+    if throttle.should_report(Instant::now(), true) {
+        progress(RemoteDownloadTransfer {
+            received_bytes: 0,
+            total_bytes,
+        });
+    }
     while let Some(chunk) = stream.next().await {
         let chunk = chunk
             .map_err(reqwest::Error::without_url)
@@ -192,10 +224,22 @@ async fn download_remote_file(url: &str, path: &Path, limit: u64) -> Result<()> 
             .filter(|value| *value <= limit)
             .ok_or_else(|| anyhow!("download exceeds the size limit"))?;
         file.write_all(&chunk).await?;
+        if throttle.should_report(Instant::now(), false) {
+            progress(RemoteDownloadTransfer {
+                received_bytes: received,
+                total_bytes,
+            });
+        }
     }
     file.flush().await?;
     drop(file);
     tokio::fs::rename(&temporary, path).await?;
+    if throttle.should_report(Instant::now(), true) {
+        progress(RemoteDownloadTransfer {
+            received_bytes: received,
+            total_bytes,
+        });
+    }
     Ok(())
 }
 
@@ -272,13 +316,18 @@ async fn prepare_artifact(
     id: &str,
     dir: &Path,
     info: DiscoverDownload,
+    mut progress: impl FnMut(Option<RemoteDownloadTransfer>),
 ) -> Result<PreparedArtifact> {
     let staged = StagedArtifact::create(dir)?;
     let (staged, bytes, entries) = match info.transfer.format {
         DownloadFormat::File => {
             let filename = safe_remote_filename(&info.transfer.filename, id);
             let path = staged.content().join(&filename);
-            download_remote_file(&info.transfer.url, &path, DOWNLOAD_LIMIT).await?;
+            download_remote_file(&info.transfer.url, &path, DOWNLOAD_LIMIT, |transfer| {
+                progress(Some(transfer));
+            })
+            .await?;
+            progress(None);
             let bytes = tokio::fs::metadata(&path).await?.len();
             let entries = vec![crate::archive::ExtractedFile {
                 path: PathBuf::from(filename),
@@ -287,8 +336,14 @@ async fn prepare_artifact(
             (staged, bytes, entries)
         }
         DownloadFormat::Zip => {
-            download_remote_file(&info.transfer.url, &staged.download_path(), DOWNLOAD_LIMIT)
-                .await?;
+            download_remote_file(
+                &info.transfer.url,
+                &staged.download_path(),
+                DOWNLOAD_LIMIT,
+                |transfer| progress(Some(transfer)),
+            )
+            .await?;
+            progress(None);
             tokio::task::spawn_blocking(move || -> Result<_> {
                 let extracted = crate::archive::extract_zip(
                     &staged.download_path(),
@@ -332,7 +387,7 @@ async fn prepare_artifact(
         )?)
     } else if !metadata.preview_url.is_empty() {
         let path = staged.preview_path();
-        match download_remote_file(&metadata.preview_url, &path, PREVIEW_LIMIT).await {
+        match download_remote_file(&metadata.preview_url, &path, PREVIEW_LIMIT, |_| {}).await {
             Ok(()) => Some(path),
             Err(error) => {
                 log::warn!("remote preview was not downloaded: {error:#}");
@@ -383,10 +438,23 @@ pub async fn download_remote(
     if info.transfer.url.trim().is_empty() {
         return Err(anyhow!("download url is empty"));
     }
+    let mut transfer_progress = |transfer| {
+        state.events.publish(GlobalEvent::RemoteDownloadProgress {
+            source_id: source_id.clone(),
+            id: id.clone(),
+            state: RemoteDownloadState::Downloading,
+            error: String::new(),
+            transfer,
+        });
+    };
     match info.transfer.format {
         DownloadFormat::File if !info.transfer.resolve => {
             let target = dir.join(safe_remote_filename(&info.transfer.filename, &id));
-            download_remote_file(&info.transfer.url, &target, DOWNLOAD_LIMIT).await?;
+            download_remote_file(&info.transfer.url, &target, DOWNLOAD_LIMIT, |transfer| {
+                transfer_progress(Some(transfer));
+            })
+            .await?;
+            transfer_progress(None);
             write_remote_sidecar(&target, &info.metadata).await?;
             upsert_remote_download(
                 &state.db,
@@ -424,8 +492,15 @@ pub async fn download_remote(
                 return Ok(());
             }
             drop(mutation);
-            let prepared =
-                prepare_artifact(&state.source_manager, &source_id, &id, &dir, info).await?;
+            let prepared = prepare_artifact(
+                &state.source_manager,
+                &source_id,
+                &id,
+                &dir,
+                info,
+                &mut transfer_progress,
+            )
+            .await?;
             // Once publication starts, its owner completes the DB transaction
             // even when the requesting task is cancelled.
             return tokio::spawn(async move {

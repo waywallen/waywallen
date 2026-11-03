@@ -1303,6 +1303,12 @@ message RemoteDownloadProgress {
   string id = 2;
   RemoteDownloadState state = 3;
   string error = 4;
+  RemoteDownloadTransfer transfer = 5;
+}
+
+message RemoteDownloadTransfer {
+  uint64 received_bytes = 1;
+  optional uint64 total_bytes = 2;
 }
 
 enum SubscriptionState {

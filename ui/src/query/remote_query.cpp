@@ -365,7 +365,7 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
             QList<model::RemoteRow> rows;
             rows.reserve(sr.items().size());
             for (const auto& it : sr.items()) {
-                rows.push_back(model::RemoteRow {
+                rows.push_back(AppStore::instance()->mergeRemoteRow(model::RemoteRow {
                     it.sourceId(),
                     it.id_proto(),
                     it.title(),
@@ -376,7 +376,7 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
                     it.downloaded() ? 3 : 0,
                     it.hasWidth() ? it.width() : 0,
                     it.hasHeight() ? it.height() : 0,
-                });
+                }));
             }
             auto t = self->model();
             if (! t) co_return;

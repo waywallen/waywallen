@@ -58,14 +58,21 @@ impl Http {
                     format!("HTTP/1.1 {} Test\r\nConnection: close\r\n", reply.status);
                 if reply.chunked {
                     response.push_str("Transfer-Encoding: chunked\r\n\r\n");
-                    response.push_str(&format!("{:x}\r\n", reply.bytes.len()));
+                    if !reply.bytes.is_empty() {
+                        response.push_str(&format!("{:x}\r\n", reply.bytes.len()));
+                    }
                 } else {
                     response.push_str(&format!("Content-Length: {}\r\n\r\n", reply.bytes.len()));
                 }
                 let _ = stream.write_all(response.as_bytes()).await;
                 let _ = stream.write_all(&reply.bytes).await;
                 if reply.chunked {
-                    let _ = stream.write_all(b"\r\n0\r\n\r\n").await;
+                    let ending = if reply.bytes.is_empty() {
+                        b"0\r\n\r\n".as_slice()
+                    } else {
+                        b"\r\n0\r\n\r\n".as_slice()
+                    };
+                    let _ = stream.write_all(ending).await;
                 }
                 let _ = stream.shutdown().await;
             }
@@ -187,6 +194,72 @@ fn assert_empty(path: &Path) {
     );
 }
 
+#[test]
+fn remote_download_progress_throttles_but_always_reports_boundaries() {
+    let now = Instant::now();
+    let mut throttle = DownloadProgressThrottle::default();
+    assert!(throttle.should_report(now, false));
+    assert!(!throttle.should_report(now + Duration::from_millis(1), false));
+    assert!(!throttle.should_report(now + Duration::from_millis(249), false));
+    assert!(throttle.should_report(now + Duration::from_millis(250), false));
+    assert!(!throttle.should_report(now + Duration::from_millis(251), false));
+    assert!(throttle.should_report(now + Duration::from_millis(251), true));
+    assert!(!throttle.should_report(now + Duration::from_millis(500), false));
+    assert!(throttle.should_report(now + Duration::from_millis(501), false));
+}
+
+#[tokio::test]
+async fn remote_download_progress_uses_received_bytes_and_optional_response_length() {
+    for chunked in [false, true] {
+        for bytes in [Vec::new(), vec![1; 17]] {
+            let http = Http::new(HashMap::from([(
+                "/model".into(),
+                Reply {
+                    status: 200,
+                    bytes: bytes.clone(),
+                    chunked,
+                },
+            )]))
+            .await;
+            let root = tempfile::tempdir().unwrap();
+            let target = root.path().join("model");
+            let mut progress = Vec::new();
+            download_remote_file(
+                &format!("{}/model", http.url),
+                &target,
+                DOWNLOAD_LIMIT,
+                |value| progress.push(value),
+            )
+            .await
+            .unwrap();
+            assert_eq!(std::fs::read(&target).unwrap(), bytes);
+            let total_bytes = (!chunked).then_some(bytes.len() as u64);
+            assert_eq!(
+                progress.first(),
+                Some(&RemoteDownloadTransfer {
+                    received_bytes: 0,
+                    total_bytes,
+                })
+            );
+            assert_eq!(
+                progress.last(),
+                Some(&RemoteDownloadTransfer {
+                    received_bytes: bytes.len() as u64,
+                    total_bytes,
+                })
+            );
+            assert!(progress.len() >= 2);
+            assert!(progress
+                .iter()
+                .all(|value| value.total_bytes == total_bytes));
+            assert!(progress
+                .windows(2)
+                .all(|values| values[0].received_bytes <= values[1].received_bytes));
+            http.assert_requests(1);
+        }
+    }
+}
+
 #[tokio::test]
 async fn remote_download_keeps_single_file_layout_and_nonsecret_sidecar() {
     let bytes = b"image bytes";
@@ -214,6 +287,7 @@ async fn remote_download_keeps_single_file_layout_and_nonsecret_sidecar() {
         &format!("{}/image.png?signature=temporary-signature", http.url),
         &target,
         DOWNLOAD_LIMIT,
+        |_| {},
     )
     .await
     .unwrap();
@@ -249,19 +323,42 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     let scene = br#"{"asset":{"version":"2.0"},"buffers":[{"uri":"scene.bin","byteLength":4}]}"#;
     let mesh = b"mesh";
     let texture = b"texture bytes";
-    let http = Http::new(routes(archive(&[
+    let zip = archive(&[
         ("scene.gltf", scene),
         ("scene.bin", mesh),
         ("textures/base.png", texture),
-    ])))
-    .await;
+    ]);
+    let transfer_bytes = zip.len() as u64;
+    let http = Http::new(routes(zip)).await;
     let (_plugin, manager) = source(&http.url, "scene.gltf");
     let root = tempfile::tempdir().unwrap();
     let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
     let info = manager.call_download("test", "model").await.unwrap();
-    let prepared = prepare_artifact(&manager, "test", "model", root.path(), info.clone())
-        .await
-        .unwrap();
+    let mut progress = Vec::new();
+    let prepared = prepare_artifact(
+        &manager,
+        "test",
+        "model",
+        root.path(),
+        info.clone(),
+        |value| progress.push(value),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        progress.first(),
+        Some(&Some(RemoteDownloadTransfer {
+            received_bytes: 0,
+            total_bytes: Some(transfer_bytes),
+        }))
+    );
+    assert_eq!(progress.last(), Some(&None));
+    assert_eq!(progress.iter().filter(|value| value.is_none()).count(), 1);
+    let transfers: Vec<_> = progress.iter().flatten().collect();
+    assert!(transfers
+        .iter()
+        .all(|value| value.total_bytes == Some(transfer_bytes)));
+    assert_eq!(transfers.last().unwrap().received_bytes, transfer_bytes);
     let publication = prepared.publish(root.path()).unwrap();
     let installed = &publication.installed;
     assert_eq!(std::fs::read(installed.resource()).unwrap(), scene);
@@ -355,7 +452,7 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     );
     use std::os::unix::fs::MetadataExt;
     let original_inode = std::fs::metadata(installed.resource()).unwrap().ino();
-    let replacement = prepare_artifact(&manager, "test", "model", root.path(), info)
+    let replacement = prepare_artifact(&manager, "test", "model", root.path(), info, |_| {})
         .await
         .unwrap();
     let reused = replacement.publish(root.path()).unwrap().commit();
@@ -383,16 +480,17 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     .unwrap()
     .clone();
     info.metadata.provider_data = Some(provider_data.clone());
-    let publication = prepare_artifact(&manager, "test", "model", root.path(), info.clone())
-        .await
-        .unwrap()
-        .publish(root.path())
-        .unwrap();
+    let publication =
+        prepare_artifact(&manager, "test", "model", root.path(), info.clone(), |_| {})
+            .await
+            .unwrap()
+            .publish(root.path())
+            .unwrap();
     assert!(publication.installed.resource().is_file());
     drop(publication);
     assert_empty(root.path());
 
-    let installed = prepare_artifact(&manager, "test", "model", root.path(), info.clone())
+    let installed = prepare_artifact(&manager, "test", "model", root.path(), info.clone(), |_| {})
         .await
         .unwrap()
         .publish(root.path())
@@ -420,7 +518,7 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
             .unwrap()
             .clone(),
     );
-    let reused = prepare_artifact(&manager, "test", "model", root.path(), info)
+    let reused = prepare_artifact(&manager, "test", "model", root.path(), info, |_| {})
         .await
         .unwrap()
         .publish(root.path())
@@ -461,7 +559,7 @@ async fn remote_download_rejects_unsafe_archive_and_invalid_resolve_without_resi
         let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
         let info = manager.call_download("test", "model").await.unwrap();
         assert!(
-            prepare_artifact(&manager, "test", "model", root.path(), info)
+            prepare_artifact(&manager, "test", "model", root.path(), info, |_| {})
                 .await
                 .is_err()
         );
@@ -489,7 +587,11 @@ async fn remote_download_error_redacts_signed_query_and_cleans_temporary_files()
         "{}/denied?Signature=temporary-signature&token=temporary-token",
         http.url
     );
-    let error = download_remote_file(&url, &target, 1024).await.unwrap_err();
+    let mut progress = Vec::new();
+    let error = download_remote_file(&url, &target, 1024, |value| progress.push(value))
+        .await
+        .unwrap_err();
+    assert!(progress.is_empty());
     let error = format!("{error:#}");
     assert!(error.contains("403"));
     assert!(!error.contains("temporary-signature"));
@@ -512,14 +614,20 @@ async fn remote_download_size_limits_cover_headers_and_streaming_cleanup() {
         )]))
         .await;
         let root = tempfile::tempdir().unwrap();
+        let mut progress = Vec::new();
         let error = download_remote_file(
             &format!("{}/large", http.url),
             &root.path().join("large"),
             8,
+            |value| progress.push(value),
         )
         .await
         .unwrap_err();
         assert!(format!("{error:#}").contains("size limit"));
+        assert!(progress.iter().all(|value| value.received_bytes <= 8));
+        if !chunked {
+            assert!(progress.is_empty());
+        }
         assert_empty(root.path());
         http.assert_requests(1);
     }
@@ -537,7 +645,7 @@ async fn remote_download_database_failure_rolls_back_item_tags_and_publication()
         "CREATE TRIGGER reject_remote_tags BEFORE INSERT ON tag BEGIN SELECT RAISE(FAIL, 'reject remote tags'); END".to_owned()
     )).await.unwrap();
     let info = manager.call_download("test", "model").await.unwrap();
-    let prepared = prepare_artifact(&manager, "test", "model", root.path(), info)
+    let prepared = prepare_artifact(&manager, "test", "model", root.path(), info, |_| {})
         .await
         .unwrap();
     let publication = prepared.publish(root.path()).unwrap();
