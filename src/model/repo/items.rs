@@ -705,7 +705,7 @@ pub struct ItemWriteOutcome {
     pub changed: bool,
 }
 
-/// Tier-1 stat result: writes `size`, `modified_at`, `stat_at`. Bumps
+/// Tier-1 stat result: fills missing `size` and writes `modified_at`, `stat_at`. Bumps
 /// `update_at` only when size or modified_at actually changed.
 pub async fn update_item_stat<C: ConnectionTrait>(
     db: &C,
@@ -718,7 +718,8 @@ pub async fn update_item_stat<C: ConnectionTrait>(
         .with_context(|| format!("reload item id={id}"))?
         .ok_or_else(|| Error::Internal(anyhow!("item id={id} disappeared before stat write")))?;
 
-    let new_size = Some(stat.size);
+    // Source/package sizes may include more than the resource entry file.
+    let new_size = existing.size.or(Some(stat.size));
     let new_modified = Some(stat.modified_at);
     let changed = new_size != existing.size || new_modified != existing.modified_at;
 

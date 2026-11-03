@@ -40,7 +40,36 @@ pub(super) fn can_remove(path: &Path) -> Option<bool> {
     Some(true)
 }
 
+fn directory_size(path: &Path) -> Option<i64> {
+    let root = std::fs::canonicalize(path).ok()?;
+    if !root.is_dir() {
+        return None;
+    }
+    let mut pending = vec![root];
+    let mut total = 0_i64;
+    while let Some(directory) = pending.pop() {
+        for entry in std::fs::read_dir(directory).ok()? {
+            let entry = entry.ok()?;
+            let metadata = std::fs::symlink_metadata(entry.path()).ok()?;
+            if metadata.is_dir() {
+                pending.push(entry.path());
+            } else if metadata.is_file() {
+                total = total.checked_add(i64::try_from(metadata.len()).ok()?)?;
+            }
+        }
+    }
+    Some(total)
+}
+
 pub(super) fn install(lua: &Lua, fs: &LuaTable) -> LuaResult<()> {
+    fs.set(
+        "directory_size",
+        lua.create_async_function(|_, path: String| async move {
+            tokio::task::spawn_blocking(move || directory_size(Path::new(&path)))
+                .await
+                .map_err(LuaError::external)
+        })?,
+    )?;
     fs.set(
         "list_files",
         lua.create_function(|_, path: String| {
@@ -102,6 +131,30 @@ pub(super) fn install(lua: &Lua, fs: &LuaTable) -> LuaResult<()> {
 mod tests {
     use super::*;
     use std::os::unix::fs::{symlink, PermissionsExt};
+
+    #[test]
+    fn directory_size_counts_nested_files_without_following_child_symlinks() {
+        let root = tempfile::tempdir().unwrap();
+        let model = root.path().join("model");
+        std::fs::create_dir_all(model.join("textures/nested")).unwrap();
+        std::fs::write(model.join("scene.gltf"), b"model").unwrap();
+        std::fs::write(model.join("scene.bin"), b"buffer").unwrap();
+        std::fs::write(model.join("textures/nested/image.png"), b"texture").unwrap();
+        std::fs::write(model.join(".hidden"), b"extra").unwrap();
+        let outside = root.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("unrelated"), b"outside content").unwrap();
+        symlink(&outside, model.join("linked-directory")).unwrap();
+        symlink(&model, model.join("textures/loop")).unwrap();
+        symlink(model.join("scene.bin"), model.join("alias.bin")).unwrap();
+        symlink(root.path().join("missing"), model.join("broken")).unwrap();
+        assert_eq!(directory_size(&model), Some(23));
+        let alias = root.path().join("alias");
+        symlink(&model, &alias).unwrap();
+        assert_eq!(directory_size(&alias), Some(23));
+        assert_eq!(directory_size(&model.join("scene.gltf")), None);
+        assert_eq!(directory_size(&root.path().join("missing")), None);
+    }
 
     #[test]
     fn removal_uses_parent_permissions_not_file_mode_or_symlink_target() {

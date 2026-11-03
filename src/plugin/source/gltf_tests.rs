@@ -98,6 +98,52 @@ async fn gltf_source_scans_two_levels_and_deduplicates_canonical_paths() {
 }
 
 #[tokio::test]
+async fn gltf_source_counts_the_model_directory_and_preserves_size_after_probe() {
+    let root = tempfile::tempdir().unwrap();
+    let package = root.path().join("model");
+    std::fs::create_dir_all(package.join("textures/nested")).unwrap();
+    std::fs::write(package.join("scene.gltf"), b"model").unwrap();
+    std::fs::write(package.join("variant.glb"), b"variant").unwrap();
+    std::fs::write(package.join("scene.bin"), b"buffer").unwrap();
+    std::fs::write(package.join("textures/nested/image.png"), b"texture").unwrap();
+    std::fs::write(root.path().join("unrelated"), b"outside").unwrap();
+    symlink(&package, package.join("textures/loop")).unwrap();
+    symlink(root.path().join("unrelated"), package.join("external.bin")).unwrap();
+    let (_plugin, manager) = manager();
+    let library = root.path().to_str().unwrap().to_owned();
+    let libraries = HashMap::from([("gltf".into(), vec![library.clone()])]);
+    manager.scan_all(&libraries).await.unwrap();
+    let entries = manager.list();
+    assert_eq!(entries.len(), 2);
+    assert!(entries.iter().all(|entry| entry.size == Some(25)));
+
+    let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
+    crate::model::sync::sync_plugin_entries(
+        &db,
+        crate::model::sync::PluginRef {
+            name: "gltf",
+            version: "0.5.0",
+        },
+        &entries,
+        std::slice::from_ref(&library),
+    )
+    .await
+    .unwrap();
+    let stats = crate::probe::task::run_pending(&db, Arc::new(NoMediaProbe))
+        .await
+        .unwrap();
+    assert_eq!(stats.stat_done, 2);
+    let stored = crate::model::repo::load_entries(&db).await.unwrap();
+    assert!(stored
+        .iter()
+        .all(|entry| entry.size == Some(25) && entry.modified_at.is_some()));
+
+    std::fs::write(package.join("textures/extra.png"), b"extra").unwrap();
+    manager.scan_all(&libraries).await.unwrap();
+    assert!(manager.list().iter().all(|entry| entry.size == Some(30)));
+}
+
+#[tokio::test]
 async fn gltf_source_leaves_deeper_models_unscanned() {
     let root = tempfile::tempdir().unwrap();
     model(&root.path().join("one/two/model.glb"));

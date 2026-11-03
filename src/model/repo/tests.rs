@@ -592,6 +592,77 @@ async fn upsert_item_persists_media_meta() {
 }
 
 #[tokio::test]
+async fn item_stat_preserves_supplied_size_and_fills_missing_size() {
+    let db = mem_db().await;
+    let plugin = upsert_plugin(&db, "stat", "1").await.unwrap();
+    let library = add_library(&db, plugin.id, "/stat").await.unwrap();
+    for (path, ty, supplied_size, expected_size) in [
+        ("package/scene.gltf", "gltf", Some(123_456), 123_456),
+        ("image.png", "image", None, 17),
+    ] {
+        let item = upsert_item(
+            &db,
+            ItemUpsertArgs {
+                plugin_id: plugin.id,
+                library_id: library.id,
+                path,
+                ty,
+                display_name: "item",
+                preview_path: None,
+                description: None,
+                external_id: None,
+                web_url: None,
+                update_available: false,
+                size: supplied_size,
+                width: None,
+                height: None,
+                content_rating: None,
+                can_remove: None,
+            },
+        )
+        .await
+        .unwrap();
+        let stat = FileStat {
+            size: 17,
+            modified_at: 1_000,
+        };
+        assert!(update_item_stat(&db, item.id, &stat).await.unwrap().changed);
+        let current = list_items_by_library(&db, library.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|value| value.id == item.id)
+            .unwrap();
+        assert_eq!(current.size, Some(expected_size));
+        assert_eq!(current.modified_at, Some(1_000));
+        assert!(current.stat_at.is_some());
+        assert!(!update_item_stat(&db, item.id, &stat).await.unwrap().changed);
+        assert!(
+            update_item_stat(
+                &db,
+                item.id,
+                &FileStat {
+                    size: 19,
+                    modified_at: 2_000,
+                },
+            )
+            .await
+            .unwrap()
+            .changed
+        );
+        let current = list_items_by_library(&db, library.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|value| value.id == item.id)
+            .unwrap();
+        assert_eq!(current.size, Some(expected_size));
+        assert_eq!(current.modified_at, Some(2_000));
+        assert!(current.stat_at.is_some());
+    }
+}
+
+#[tokio::test]
 async fn upsert_tags_dedupes_case_insensitively() {
     let db = mem_db().await;
     let tags = upsert_tags(

@@ -403,11 +403,17 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     .await
     .unwrap();
     let installed = publication.commit();
+    let stats = crate::probe::task::run_pending(&db, Arc::new(AvFormatProbe::new()))
+        .await
+        .unwrap();
+    assert_eq!(stats.stat_done, 1);
     let entries = repo::load_entries(&db).await.unwrap();
     assert_eq!(entries.len(), 1);
     let entry = &entries[0];
     assert_eq!(entry.plugin_name, "test");
     assert_eq!(entry.wp_type, "gltf");
+    assert_eq!(entry.size, installed.artifact.metadata.size);
+    assert!(entry.modified_at.is_some());
     assert_eq!(entry.resource, installed.resource().to_str().unwrap());
     assert_eq!(
         entry.preview.as_deref(),
