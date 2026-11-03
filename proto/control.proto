@@ -1115,6 +1115,15 @@ message RemoteSourceInfo {
   PluginMessage display_name_text = 16;
   PluginMessage remote_hint_text = 17;
   RemotePagination pagination = 18;
+  DownloadAction download_action = 19;
+}
+
+message DownloadAction {
+  bool enabled = 1;
+  string label = 2;
+  string tooltip = 3;
+  PluginMessage label_text = 4;
+  PluginMessage tooltip_text = 5;
 }
 
 enum RemotePagination {

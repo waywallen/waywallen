@@ -91,6 +91,7 @@ async fn discover_download_preserves_legacy_flat_file_results() {
         let (_directory, manager) = plugin(&download_script("", None), version);
         let download = manager.call_download("test", "uid").await.unwrap();
         assert_eq!(download.transfer.format, DownloadFormat::File);
+        assert!(!download.transfer.resolve);
         assert_eq!(download.transfer.filename, "model.zip");
         assert_eq!(
             download.transfer.url,
@@ -117,9 +118,11 @@ async fn discover_download_preserves_legacy_flat_file_results() {
             Some("Everyone")
         );
         assert!(download.metadata.attribution.is_none());
+        assert!(download.metadata.provider_data.is_none());
         let serialized = serde_json::to_value(&download.metadata).unwrap();
         assert!(serialized.get("url").is_none());
         assert!(serialized.get("filename").is_none());
+        assert!(serialized.get("provider_data").is_none());
         assert!(!serialized.to_string().contains("temporary-secret"));
     }
 }
@@ -127,7 +130,11 @@ async fn discover_download_preserves_legacy_flat_file_results() {
 #[tokio::test]
 async fn discover_download_archive_and_attribution_require_version_six() {
     for version in [ENTRY_VERSION_V3, ENTRY_VERSION_V4, ENTRY_VERSION_V5] {
-        for fields in ["archive='zip',", "attribution={},"] {
+        for fields in [
+            "archive='zip',",
+            "attribution={},",
+            "provider_data=ctx.json.strict.object{},",
+        ] {
             let (_directory, manager) =
                 plugin(&download_script(fields, Some(RESOLVE_MODEL)), version);
             let error = manager.call_download("test", "uid").await.unwrap_err();
@@ -154,7 +161,7 @@ async fn discover_download_zip_requires_resolve_and_rejects_unknown_formats() {
 }
 
 #[tokio::test]
-async fn discover_download_validates_attribution_types() {
+async fn discover_download_validates_metadata_types() {
     for value in [
         "false",
         "'author'",
@@ -169,6 +176,43 @@ async fn discover_download_validates_attribution_types() {
             "accepted attribution={value}"
         );
     }
+    for value in [
+        "false",
+        "'provider'",
+        "1",
+        "{}",
+        "ctx.json.strict.null",
+        "ctx.json.strict.array{}",
+        "ctx.json.strict.array{1,2,3}",
+        "ctx.json.strict.object{value=0/0}",
+        "ctx.json.strict.object{value=1/0}",
+        "ctx.json.strict.object{value=function() end}",
+        "ctx.json.strict.object{[1]='value'}",
+    ] {
+        let script = download_script(&format!("provider_data={value},"), None);
+        let (_directory, manager) = plugin(&script, ENTRY_VERSION_V6);
+        let error = manager.call_download("test", "uid").await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("provider_data must be a JSON object"),
+            "accepted or misreported provider_data={value}: {error}"
+        );
+    }
+    let script = download_script(
+        "provider_data=ctx.json.strict.object{value=string.rep('x',64*1024)},",
+        None,
+    );
+    let (_directory, manager) = plugin(&script, ENTRY_VERSION_V6);
+    let error = manager.call_download("test", "uid").await.unwrap_err();
+    assert!(error.to_string().contains("provider_data exceeds 64 KiB"));
+
+    let script = download_script("provider_data=ctx.json.strict.object{},", None);
+    let (_directory, manager) = plugin(&script, ENTRY_VERSION_V6);
+    let download = manager.call_download("test", "uid").await.unwrap();
+    assert!(download.metadata.provider_data.as_ref().unwrap().is_empty());
+    let serialized = serde_json::to_value(&download.metadata).unwrap();
+    assert_eq!(serialized["provider_data"], serde_json::json!({}));
 }
 
 #[tokio::test]
@@ -180,6 +224,12 @@ attribution={
     author="Artist", author_url="https://example.invalid/artist",
     license="CC BY", license_url="https://example.invalid/license",
     requirements="Credit the artist",
+},
+provider_data=ctx.json.strict.object{
+    empty_array=ctx.json.strict.array{},
+    empty_object=ctx.json.strict.object{},
+    null=ctx.json.strict.null,
+    position=ctx.json.strict.array{1,2,3},
 },
 "#,
         Some(
@@ -194,8 +244,15 @@ assert(metadata.attribution.author_url == 'https://example.invalid/artist')
 assert(metadata.attribution.license == 'CC BY')
 assert(metadata.attribution.license_url == 'https://example.invalid/license')
 assert(metadata.attribution.requirements == 'Credit the artist')
+local json = ctx.json.strict
+assert(json.kind(metadata.provider_data) == 'object')
+assert(json.kind(metadata.provider_data.empty_array) == 'array')
+assert(json.kind(metadata.provider_data.empty_object) == 'object')
+assert(metadata.provider_data.null == json.null)
+assert(json.kind(metadata.provider_data.position) == 'array')
+assert(metadata.provider_data.position[3] == 3)
 assert(metadata.url == nil and metadata.filename == nil and metadata.archive == nil)
-assert(not ctx.json.encode(metadata):find('temporary-secret', 1, true))
+assert(not json.encode(metadata):find('temporary-secret', 1, true))
 return {name=metadata.title,wp_type=metadata.wp_type,resource='scene.gltf',external_id=params.id}
 "#,
         ),
@@ -203,12 +260,18 @@ return {name=metadata.title,wp_type=metadata.wp_type,resource='scene.gltf',exter
     let (_directory, manager) = plugin(&script, ENTRY_VERSION_V6);
     let download = manager.call_download("test", "uid").await.unwrap();
     assert_eq!(download.transfer.format, DownloadFormat::Zip);
+    assert!(download.transfer.resolve);
     let attribution = download.metadata.attribution.as_ref().unwrap();
     assert_eq!(attribution.author, "Artist");
     assert_eq!(attribution.requirements, "Credit the artist");
     let persisted = serde_json::to_string(&download.metadata).unwrap();
     let restored: DiscoverMetadata = serde_json::from_str(&persisted).unwrap();
     assert_eq!(restored.attribution.unwrap().license, "CC BY");
+    let provider_data = restored.provider_data.unwrap();
+    assert_eq!(provider_data["empty_array"], serde_json::json!([]));
+    assert_eq!(provider_data["empty_object"], serde_json::json!({}));
+    assert_eq!(provider_data["null"], serde_json::Value::Null);
+    assert_eq!(provider_data["position"], serde_json::json!([1, 2, 3]));
     assert!(!persisted.contains("temporary-secret"));
     let resolved = manager
         .call_resolve("test", "uid", "/staging/model", Some(&download.metadata))

@@ -186,6 +186,23 @@ pub struct DiscoverFilterOption {
     pub label: LocalizedText,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiscoverDownloadAction {
+    pub enabled: bool,
+    pub label: LocalizedText,
+    pub tooltip: LocalizedText,
+}
+
+impl Default for DiscoverDownloadAction {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            label: LocalizedText::default(),
+            tooltip: LocalizedText::default(),
+        }
+    }
+}
+
 /// Discover capability of a single source plugin, derived from
 /// `info().capabilities.discover`. Plugins without that table are not listed.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -200,6 +217,7 @@ pub struct DiscoverSourceInfo {
     pub pagination: DiscoverPagination,
     pub remote_capability: Option<RemoteCapability>,
     pub remote_hint: LocalizedText,
+    pub download_action: DiscoverDownloadAction,
     pub sorts: Vec<DiscoverSort>,
     pub filters: Vec<DiscoverFilter>,
     /// Domain id of the owning installable plugin (e.g.
@@ -398,6 +416,7 @@ pub struct DiscoverTransfer {
     pub url: String,
     pub filename: String,
     pub format: DownloadFormat,
+    pub resolve: bool,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -425,6 +444,8 @@ pub struct DiscoverMetadata {
     pub content_rating: Option<String>,
     #[serde(default)]
     pub attribution: Option<DiscoverAttribution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_data: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Default)]

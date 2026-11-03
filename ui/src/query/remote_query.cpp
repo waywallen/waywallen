@@ -100,6 +100,14 @@ void RemoteAvailabilityQuery::reload() {
                     pluginMessageFromPb(src.displayNameText(), src.displayName());
                 m[u"remoteHintText"_s] =
                     pluginMessageFromPb(src.remoteHintText(), src.remoteHint());
+                const auto& download = src.downloadAction();
+                QVariantMap download_action;
+                download_action[u"enabled"_s] = ! src.hasDownloadAction() || download.enabled();
+                download_action[u"labelText"_s] =
+                    pluginMessageFromPb(download.labelText(), download.label());
+                download_action[u"tooltipText"_s] =
+                    pluginMessageFromPb(download.tooltipText(), download.tooltip());
+                m[u"downloadAction"_s] = download_action;
 
                 QVariantList settings;
                 for (const auto& ss : src.settings()) {

@@ -248,6 +248,9 @@ function M.source.scan(ctx)
     assert(type(ctx.file_exists) == "function")
     assert(type(ctx.plugin_config) == "function")
     assert(type(ctx.json_parse) == "function")
+    assert(type(ctx.remote_artifact) == "function")
+    assert(type(ctx.remote_artifact_root) == "function")
+    assert(not pcall(ctx.remote_artifact, '/not-an-installed-artifact'))
     return {}
 end
 return M
@@ -1804,6 +1807,237 @@ return M
             .unwrap()
             .state,
         PluginLifecycleState::SignedOut
+    );
+}
+
+#[test]
+fn discover_download_action_defaults_and_static_configuration() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.lua");
+    for (configuration, enabled, label, tooltip) in [
+        ("", true, "", ""),
+        (
+            "download_action = { enabled = false, label = tr('Log in required'), tooltip = 'Sign in first' },",
+            false,
+            "Log in required",
+            "Sign in first",
+        ),
+    ] {
+        std::fs::write(
+            &path,
+            format!(
+                r#"
+local M = {{}}
+function M.info()
+    return {{ name = 'remote', capabilities = {{ discover = {{ search = true, download = true, {configuration} }} }} }}
+end
+M.discover = {{}}
+function M.discover.search(ctx, params) return {{ items = {{}}, has_more = false }} end
+function M.discover.download(ctx, id) return {{}} end
+return M
+"#,
+            ),
+        )
+        .unwrap();
+        let manager = SourceManager::new().unwrap();
+        manager
+            .load_plugin(&path, "org.test", "1", ENTRY_VERSION_V6)
+            .unwrap();
+        let source = manager.discover_sources().unwrap().remove(0);
+        assert_eq!(source.download_action.enabled, enabled);
+        assert_eq!(source.download_action.label.text(), label);
+        assert_eq!(source.download_action.tooltip.text(), tooltip);
+        if !enabled {
+            assert_eq!(
+                source.download_action.label.message().unwrap().plugin_id,
+                "org.test"
+            );
+        }
+        let source = block_value(async { manager.discover_sources_with_status().await })
+            .unwrap()
+            .remove(0);
+        assert_eq!(source.download_action.enabled, enabled);
+        assert_eq!(source.download_action.label.text(), label);
+        assert_eq!(source.download_action.tooltip.text(), tooltip);
+    }
+}
+
+#[test]
+fn discover_download_action_status_replaces_static_snapshot_after_lifecycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.lua");
+    std::fs::write(
+        &path,
+        r#"
+local M = {}
+local mode, checked = 'guest', false
+function M.info()
+    return {
+        name = 'remote',
+        capabilities = { discover = { search = true, download = true,
+            download_action = { enabled = false, label = 'Static guest', tooltip = 'Static hint' },
+        } },
+    }
+end
+M.discover = {}
+function M.discover.search(ctx, params)
+    mode, checked = params.query, false
+    return { items = {}, has_more = false }
+end
+function M.discover.download(ctx, id) return {} end
+M.lifecycle = {}
+function M.lifecycle.load(blob) end
+function M.lifecycle.save() return '' end
+function M.lifecycle.check(ctx)
+    checked = true
+    return { state = 'signed_out' }
+end
+M.actions = {}
+function M.actions.status(ctx)
+    assert(checked, 'lifecycle must be checked first')
+    if mode == 'guest' then
+        return { download_action = { enabled = false, label = tr('Log in required'), tooltip = tr('Sign in with %1', 'API Token') } }
+    elseif mode == 'signed_in' then
+        return { download_action = { enabled = true } }
+    elseif mode == 'missing' then
+        return {}
+    elseif mode == 'failed' then
+        error('status unavailable')
+    elseif mode == 'invalid_table' then
+        return { download_action = false }
+    elseif mode == 'invalid_enabled' then
+        return { download_action = { enabled = 'true' } }
+    elseif mode == 'invalid_label' then
+        return { download_action = { label = 42 } }
+    elseif mode == 'invalid_tooltip' then
+        return { download_action = { tooltip = {} } }
+    end
+end
+return M
+"#,
+    )
+    .unwrap();
+    let manager = SourceManager::with_probe_and_state_store(
+        Arc::new(AvFormatProbe::new()),
+        crate::plugin::state_store::PluginStateStore::new(
+            dir.path().join("state"),
+            dir.path().join("legacy"),
+        ),
+    )
+    .unwrap();
+    manager
+        .load_plugin(&path, "org.test", "1", ENTRY_VERSION_V6)
+        .unwrap();
+    let source = block_value(async { manager.discover_sources_with_status().await })
+        .unwrap()
+        .remove(0);
+    assert!(source.actions.is_empty() && source.status.is_empty());
+    assert!(!source.download_action.enabled);
+    assert_eq!(source.download_action.label.text(), "Log in required");
+    assert_eq!(
+        source.download_action.tooltip.message().unwrap().arguments,
+        ["API Token"]
+    );
+    block_value(async {
+        manager
+            .call_discover("remote", "signed_in", "", 1, &[])
+            .await
+    })
+    .unwrap();
+    let source = block_value(async { manager.discover_sources_with_status().await })
+        .unwrap()
+        .remove(0);
+    assert!(source.download_action.enabled);
+    assert!(source.download_action.label.text().is_empty());
+    assert!(source.download_action.tooltip.text().is_empty());
+    for mode in [
+        "missing",
+        "failed",
+        "invalid_table",
+        "invalid_enabled",
+        "invalid_label",
+        "invalid_tooltip",
+    ] {
+        block_value(async { manager.call_discover("remote", mode, "", 1, &[]).await }).unwrap();
+        if mode != "missing" {
+            let runtime = manager.test_runtime("remote");
+            assert!(
+                block_value(async { runtime.lock().await.call_action_status("remote").await })
+                    .is_err()
+            );
+        }
+        let source = block_value(async { manager.discover_sources_with_status().await })
+            .unwrap()
+            .remove(0);
+        assert!(!source.download_action.enabled);
+        assert_eq!(source.download_action.label.text(), "Static guest");
+        assert_eq!(source.download_action.tooltip.text(), "Static hint");
+    }
+}
+
+#[test]
+fn discover_download_action_rejects_invalid_types_and_unsupported_capability() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("main.lua");
+    for (capability, configuration) in [
+        ("download = true,", "false"),
+        ("download = true,", "{ enabled = 'false' }"),
+        ("download = true,", "{ label = 42 }"),
+        ("download = true,", "{ tooltip = {} }"),
+        ("", "{ enabled = false }"),
+    ] {
+        let download = if capability.is_empty() {
+            ""
+        } else {
+            "function M.discover.download(ctx, id) return {} end"
+        };
+        std::fs::write(
+            &path,
+            format!(
+                r#"
+local M = {{}}
+function M.info()
+    return {{ name = 'remote', capabilities = {{ discover = {{ search = true, {capability}
+        download_action = {configuration},
+    }} }} }}
+end
+M.discover = {{}}
+function M.discover.search(ctx, params) return {{ items = {{}}, has_more = false }} end
+{download}
+return M
+"#,
+            ),
+        )
+        .unwrap();
+        assert!(SourceManager::new()
+            .unwrap()
+            .load_plugin(&path, "org.test", "1", ENTRY_VERSION_V6)
+            .is_err());
+    }
+    std::fs::write(
+        &path,
+        r#"
+local M = {}
+function M.info()
+    return { name = 'remote', capabilities = { discover = { search = true } },
+        status = { { id = 'account' } },
+    }
+end
+M.discover = {}
+function M.discover.search(ctx, params) return { items = {}, has_more = false } end
+M.actions = {}
+function M.actions.status(ctx) return { download_action = { enabled = false } } end
+return M
+"#,
+    )
+    .unwrap();
+    let manager = SourceManager::new().unwrap();
+    manager
+        .load_plugin(&path, "org.test", "1", ENTRY_VERSION_V6)
+        .unwrap();
+    let runtime = manager.test_runtime("remote");
+    assert!(
+        block_value(async { runtime.lock().await.call_action_status("remote").await }).is_err()
     );
 }
 

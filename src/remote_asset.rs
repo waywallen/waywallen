@@ -321,10 +321,18 @@ fn owned(root: &Path, source_id: &str, resource: &Path) -> Result<InstalledAsset
     Ok(installed)
 }
 
-pub(crate) fn artifact_root(root: &Path, source_id: &str, resource: &Path) -> Result<PathBuf> {
+pub(crate) fn load_resource(
+    root: &Path,
+    source_id: &str,
+    resource: &Path,
+) -> Result<InstalledAsset> {
     let installed = owned(root, source_id, resource)?;
     validate_file(&installed.root, &installed.artifact.resource)?;
-    Ok(installed.root)
+    Ok(installed)
+}
+
+pub(crate) fn artifact_root(root: &Path, source_id: &str, resource: &Path) -> Result<PathBuf> {
+    Ok(load_resource(root, source_id, resource)?.root)
 }
 
 #[derive(Debug)]
@@ -420,6 +428,26 @@ mod tests {
         assert_eq!(original.resource(), reused.resource());
         assert_eq!(fs::read(reused.resource()).unwrap(), b"original");
         assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+        let loaded = load_resource(root.path(), "provider", &reused.resource()).unwrap();
+        assert_eq!(loaded.root, reused.root);
+        assert!(loaded.artifact.metadata.provider_data.is_none());
+        let mut stored = loaded.artifact;
+        stored.metadata.provider_data = Some(
+            serde_json::json!({"camera": {"position": [1, 2, 3]}})
+                .as_object()
+                .unwrap()
+                .clone(),
+        );
+        fs::write(
+            reused.root.join(MANIFEST),
+            serde_json::to_vec(&stored).unwrap(),
+        )
+        .unwrap();
+        let loaded = load_resource(root.path(), "provider", &reused.resource()).unwrap();
+        assert_eq!(
+            loaded.artifact.metadata.provider_data.unwrap()["camera"]["position"],
+            serde_json::json!([1, 2, 3])
+        );
     }
 
     #[tokio::test]
@@ -429,6 +457,9 @@ mod tests {
             .publish(root.path())
             .unwrap()
             .commit();
+        assert!(load_resource(root.path(), "other", &installed.resource()).is_err());
+        assert!(load_resource(root.path(), "provider", root.path()).is_err());
+        assert!(load_resource(root.path(), "provider", &installed.root.join(MANIFEST)).is_err());
         assert!(remove(root.path(), "other", &installed.resource())
             .await
             .is_err());
@@ -467,6 +498,7 @@ mod tests {
         fs::remove_file(installed.resource()).unwrap();
         assert!(load(root.path(), "provider", "missing").is_err());
         assert!(artifact_root(root.path(), "provider", &installed.resource()).is_err());
+        assert!(load_resource(root.path(), "provider", &installed.resource()).is_err());
         assert!(
             remove(root.path(), "provider", &installed.resource())
                 .await

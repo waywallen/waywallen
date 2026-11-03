@@ -3,6 +3,7 @@ use super::*;
 use crate::plugin::i18n::LocalizedText;
 
 const MAX_LOCALIZED_ARGUMENTS: usize = 16;
+const MAX_PROVIDER_DATA_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(transparent)]
@@ -27,6 +28,7 @@ pub(super) struct DiscoverCapability {
     pub(super) pagination: DiscoverPagination,
     pub(super) remote: Option<RemoteCapability>,
     pub(super) remote_hint: LocalizedText,
+    pub(super) download_action: DiscoverDownloadAction,
     pub(super) sorts: Vec<DiscoverSort>,
     pub(super) filters: Vec<DiscoverFilter>,
     /// The plugin exposes `discover.tags(ctx)`; the daemon calls it to refresh
@@ -906,6 +908,27 @@ impl LuaPluginRuntime {
         Ok(())
     }
 
+    fn optional_download_action(
+        tbl: &LuaTable,
+        context: &str,
+        supports_download: bool,
+    ) -> Result<Option<DiscoverDownloadAction>> {
+        let Some(action) = Self::optional_table(tbl, "download_action", context)? else {
+            return Ok(None);
+        };
+        if !supports_download {
+            return Err(Error::Internal(anyhow!(
+                "{context}.download_action requires download capability"
+            )));
+        }
+        let context = format!("{context}.download_action");
+        Ok(Some(DiscoverDownloadAction {
+            enabled: Self::optional_bool(&action, "enabled", &context, true)?,
+            label: Self::optional_localized_text(&action, "label", &context)?,
+            tooltip: Self::optional_localized_text(&action, "tooltip", &context)?,
+        }))
+    }
+
     fn parse_plugin_info(
         &self,
         module: &LuaTable,
@@ -1136,6 +1159,12 @@ impl LuaPluginRuntime {
                         "remote_hint",
                         "info().capabilities.discover",
                     )?,
+                    download_action: Self::optional_download_action(
+                        &discover_tbl,
+                        "info().capabilities.discover",
+                        supports_download,
+                    )?
+                    .unwrap_or_default(),
                     sorts,
                     filters,
                     dynamic_tags,
@@ -1194,17 +1223,17 @@ impl LuaPluginRuntime {
         }
 
         let has_action_surface = !actions.is_empty() || !status.is_empty();
-        if has_action_surface != actions_api.is_some() {
+        let supports_download = discover
+            .as_ref()
+            .is_some_and(|value| value.supports_download);
+        if (has_action_surface && actions_api.is_none())
+            || (!has_action_surface && actions_api.is_some() && !supports_download)
+        {
             return Err(Error::Internal(anyhow!(
                 "module.actions presence must match declared actions/status"
             )));
         }
-        if has_action_surface {
-            let actions_api = actions_api.as_ref().ok_or_else(|| {
-                Error::Internal(anyhow!(
-                    "module.actions table required for declared actions/status"
-                ))
-            })?;
+        if let Some(actions_api) = &actions_api {
             Self::require_table_function(actions_api, "status", "module.actions")?;
             if actions.iter().any(|action| {
                 matches!(
@@ -2064,6 +2093,36 @@ impl LuaPluginRuntime {
             })?,
         )?;
 
+        let artifact_plugin = plugin_name.map(str::to_owned);
+        ctx.set(
+            "remote_artifact",
+            self.lua.create_function(move |lua, resource: String| {
+                let name = artifact_plugin
+                    .as_deref()
+                    .ok_or_else(|| mlua::Error::external("remote artifact has no owning source"))?;
+                let installed = crate::remote_asset::load_resource(
+                    &crate::settings::remote_content_dir(name),
+                    name,
+                    Path::new(&resource),
+                )
+                .map_err(mlua::Error::external)?;
+                let root = installed
+                    .root
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|_| mlua::Error::external("remote artifact root is not UTF-8"))?;
+                let metadata = serde_json::to_vec(&installed.artifact.metadata)
+                    .map_err(mlua::Error::external)?;
+                let artifact = lua.create_table()?;
+                artifact.set("root", root)?;
+                artifact.set(
+                    "metadata",
+                    mlua_extra::json::strict::decode(lua, &metadata)?,
+                )?;
+                Ok(artifact)
+            })?,
+        )?;
+
         let fs = self.lua.create_table()?;
         fs.set("glob", glob_fn)?;
         fs.set("list_dirs", list_dirs_fn)?;
@@ -2571,6 +2630,7 @@ impl LuaPluginRuntime {
                 pagination: disc.pagination,
                 remote_capability: disc.remote,
                 remote_hint: disc.remote_hint.clone(),
+                download_action: disc.download_action.clone(),
                 sorts: disc.sorts.clone(),
                 filters: disc.filters.clone(),
                 owner_plugin_id: info.plugin_id.clone(),
@@ -2894,6 +2954,7 @@ impl LuaPluginRuntime {
 
         let archive = result.get::<LuaValue>("archive")?;
         let attribution = result.get::<LuaValue>("attribution")?;
+        let provider_data = result.get::<LuaValue>("provider_data")?;
         if info.entry_version < ENTRY_VERSION_V6 {
             if !matches!(archive, LuaValue::Nil) {
                 return Err(Error::Internal(anyhow!(
@@ -2903,6 +2964,11 @@ impl LuaPluginRuntime {
             if !matches!(attribution, LuaValue::Nil) {
                 return Err(Error::Internal(anyhow!(
                     "module.discover.download result.attribution requires Lua entry_version 6"
+                )));
+            }
+            if !matches!(provider_data, LuaValue::Nil) {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.provider_data requires Lua entry_version 6"
                 )));
             }
         }
@@ -2940,6 +3006,27 @@ impl LuaPluginRuntime {
                 )))
             }
         };
+        let provider_data = match provider_data {
+            LuaValue::Nil => None,
+            value => {
+                let encoded = mlua_extra::json::strict::encode(&value).map_err(|_| {
+                    Error::Internal(anyhow!(
+                        "module.discover.download result.provider_data must be a JSON object"
+                    ))
+                })?;
+                if encoded.len() > MAX_PROVIDER_DATA_BYTES {
+                    return Err(Error::Internal(anyhow!(
+                        "module.discover.download result.provider_data exceeds 64 KiB"
+                    )));
+                }
+                let value = serde_json::from_slice(&encoded).map_err(|_| {
+                    Error::Internal(anyhow!(
+                        "module.discover.download result.provider_data must be a JSON object"
+                    ))
+                })?;
+                Some(value)
+            }
+        };
         let transfer = DiscoverTransfer {
             url: Self::optional_string(&result, "url", "module.discover.download result")?,
             filename: Self::optional_string(
@@ -2948,6 +3035,7 @@ impl LuaPluginRuntime {
                 "module.discover.download result",
             )?,
             format,
+            resolve: discover.supports_resolve,
         };
         let metadata = DiscoverMetadata {
             wp_type: Self::require_string(&result, "wp_type", "module.discover.download result")?,
@@ -2978,6 +3066,7 @@ impl LuaPluginRuntime {
             height: result.get::<u32>("height").ok(),
             content_rating: result.get::<String>("content_rating").ok(),
             attribution,
+            provider_data,
         };
         self.persist_state(plugin_name)?;
         Ok(DiscoverDownload { transfer, metadata })
@@ -3017,7 +3106,11 @@ impl LuaPluginRuntime {
         params.set("id", id.to_string())?;
         params.set("dir", dir.to_string())?;
         if let Some(metadata) = metadata {
-            params.set("metadata", self.lua.to_value(metadata)?)?;
+            let encoded = serde_json::to_vec(metadata)?;
+            params.set(
+                "metadata",
+                mlua_extra::json::strict::decode(&self.lua, &encoded)?,
+            )?;
         }
         let result: LuaTable = self
             .call_plugin_callback_async(plugin_name, &resolve_fn, (ctx, params))
@@ -3123,7 +3216,12 @@ impl LuaPluginRuntime {
     pub async fn call_action_status(
         &mut self,
         plugin_name: &str,
-    ) -> Result<(Vec<SourceAction>, Vec<SourceStatus>, String)> {
+    ) -> Result<(
+        Vec<SourceAction>,
+        Vec<SourceStatus>,
+        String,
+        DiscoverDownloadAction,
+    )> {
         let avatar_url = self
             .check_lifecycle(plugin_name)
             .await?
@@ -3136,12 +3234,23 @@ impl LuaPluginRuntime {
             .clone();
         let mut actions = info.actions;
         let mut status = info.status;
+        let supports_download = info
+            .capabilities
+            .discover
+            .as_ref()
+            .is_some_and(|value| value.supports_download);
+        let mut download_action = info
+            .capabilities
+            .discover
+            .as_ref()
+            .map(|value| value.download_action.clone())
+            .unwrap_or_default();
         let callbacks = self
             .callbacks
             .get(plugin_name)
             .ok_or_else(|| Error::SourcePluginNotFound(plugin_name.to_string()))?;
         let Some(status_key) = callbacks.actions_status.as_ref() else {
-            return Ok((actions, status, avatar_url));
+            return Ok((actions, status, avatar_url, download_action));
         };
         let status_fn: LuaFunction = self.lua.registry_value(status_key)?;
         let ctx = self.build_remote_ctx(plugin_name)?;
@@ -3184,8 +3293,15 @@ impl LuaPluginRuntime {
                 }
             }
         }
+        if let Some(value) = Self::optional_download_action(
+            &result,
+            "module.actions.status result",
+            supports_download,
+        )? {
+            download_action = value;
+        }
         self.persist_state(plugin_name)?;
-        Ok((actions, status, avatar_url))
+        Ok((actions, status, avatar_url, download_action))
     }
 
     pub async fn invoke_action(

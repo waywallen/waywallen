@@ -16,6 +16,7 @@ MD.Page {
         parent: null
         remoteCapability: root.detailRow ? root.sourceCapability(root.detailRow.sourceId) : 0
         remoteHint: root.detailRow ? root.sourceRemoteHint(root.detailRow.sourceId) : ""
+        downloadAction: root.detailRow ? root.sourceInfo(root.detailRow.sourceId)?.downloadAction ?? null : null
         subscriptionState: Number(root.detailRow?.acquisitionState ?? 0)
         tagOptions: root.detailRow ? root.sourceFilterOptions(root.detailRow.sourceId) : []
 

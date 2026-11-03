@@ -1370,6 +1370,17 @@ pub(super) async fn dispatch_inner(
                             remote_hint_text: crate::control_proto::plugin_message_to_proto(
                                 &s.remote_hint,
                             ),
+                            download_action: Some(pb::DownloadAction {
+                                enabled: s.download_action.enabled,
+                                label: s.download_action.label.text().to_string(),
+                                tooltip: s.download_action.tooltip.text().to_string(),
+                                label_text: crate::control_proto::plugin_message_to_proto(
+                                    &s.download_action.label,
+                                ),
+                                tooltip_text: crate::control_proto::plugin_message_to_proto(
+                                    &s.download_action.tooltip,
+                                ),
+                            }),
                         }
                     })
                     .collect(),

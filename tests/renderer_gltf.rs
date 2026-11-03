@@ -217,6 +217,119 @@ fn configure(
     (pool, buffers, frame, fence)
 }
 
+fn shutdown(stream: &UnixStream, child: &mut common::ChildGuard) {
+    send(stream, ControlMsg::Shutdown);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            assert!(status.success(), "renderer shutdown failed: {status}");
+            break;
+        }
+        assert!(Instant::now() < deadline, "renderer ignored Shutdown");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn camera_transition(
+    stream: &UnixStream,
+    drm: &DrmDevice,
+    timeline: &SyncobjHandle,
+    pool: &BufferPool,
+    buffers: &[OwnedFd],
+    initial: (Frame, OwnedFd),
+    sequence: &mut u64,
+) {
+    send(
+        stream,
+        ControlMsg::Play {
+            transition: ControlTransition { fade_ms: 0 },
+        },
+    );
+    let mut held = vec![initial];
+    for _ in 0..2 {
+        held.push(receive_frame(stream, sequence));
+    }
+    let (frame, fence) = held.last().unwrap();
+    let blocked_hash = pixel_hash(pool, buffers, frame, fence);
+    assert_no_frames(stream, Duration::from_secs(3));
+    send(
+        stream,
+        ControlMsg::Pause {
+            transition: ControlTransition { fade_ms: 0 },
+        },
+    );
+    send(stream, ControlMsg::RequestFrame);
+    assert_no_frames(stream, Duration::from_millis(250));
+    for (frame, fence) in &held {
+        release(drm, timeline, frame, fence);
+    }
+    let (paused, paused_fence) = receive_frame(stream, sequence);
+    assert_eq!(
+        blocked_hash,
+        pixel_hash(pool, buffers, &paused, &paused_fence),
+        "Busy advanced the camera transition"
+    );
+    release(drm, timeline, &paused, &paused_fence);
+    assert_no_frames(stream, Duration::from_millis(250));
+    send(stream, ControlMsg::RequestFrame);
+    let (requested, requested_fence) = receive_frame(stream, sequence);
+    assert_eq!(
+        blocked_hash,
+        pixel_hash(pool, buffers, &requested, &requested_fence),
+        "paused RequestFrame advanced the camera transition"
+    );
+    release(drm, timeline, &requested, &requested_fence);
+    assert_no_frames(stream, Duration::from_millis(250));
+
+    send(
+        stream,
+        ControlMsg::Play {
+            transition: ControlTransition { fade_ms: 0 },
+        },
+    );
+    let deadline = Instant::now() + Duration::from_secs(8);
+    let mut frames = 0;
+    let mut final_hash = blocked_hash;
+    while readable(stream.as_raw_fd(), Duration::from_millis(300)) {
+        assert!(
+            Instant::now() < deadline,
+            "camera transition did not finish"
+        );
+        let (event, mut fds) = receive(stream);
+        match event {
+            EventMsg::FrameReady { frame } => {
+                assert!(frame.sequence > *sequence);
+                assert_eq!(fds.len(), 1);
+                *sequence = frame.sequence;
+                let fence = fds.remove(0);
+                final_hash = pixel_hash(pool, buffers, &frame, &fence);
+                release(drm, timeline, &frame, &fence);
+                frames += 1;
+            }
+            EventMsg::ReportState { .. } => {}
+            _ => panic!("unexpected camera transition event: {event:?}"),
+        }
+    }
+    assert!(
+        frames >= 10,
+        "Busy consumed the remaining camera transition"
+    );
+    assert_ne!(
+        final_hash, blocked_hash,
+        "static camera transition did not move"
+    );
+    assert_no_frames(stream, Duration::from_millis(250));
+    send(stream, ControlMsg::RequestFrame);
+    let (finished, finished_fence) = receive_frame(stream, sequence);
+    assert_eq!(
+        final_hash,
+        pixel_hash(pool, buffers, &finished, &finished_fence),
+        "completed transition did not retain the preset camera"
+    );
+    release(drm, timeline, &finished, &finished_fence);
+    assert_no_frames(stream, Duration::from_millis(250));
+}
+
 #[test]
 fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
     let Ok(binary) = std::env::var("WAYWALLEN_GLTF_RENDERER_BIN") else {
@@ -226,12 +339,32 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
         return;
     };
     let model = std::env::var("WAYWALLEN_GLTF_MODEL_PATH").expect("glTF model path");
+    let preset = std::env::var("WAYWALLEN_GLTF_CAMERA_PRESET")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let transition_only = std::env::var("WAYWALLEN_GLTF_TRANSITION_ONLY").as_deref() == Ok("1");
+    assert!(
+        !transition_only || preset.is_some(),
+        "transition test requires a preset"
+    );
+    if !transition_only {
+        run_renderer(&binary, &model, preset.as_deref(), false);
+    }
+    if preset.is_some() {
+        run_renderer(&binary, &model, preset.as_deref(), true);
+    }
+}
+
+fn run_renderer(binary: &str, model: &str, preset: Option<&str>, transition_case: bool) {
     let drm = DrmDevice::open_first_render_node().expect("DRM render node");
     let socket = common::tmp_sock("gltf-renderer");
     let _cleanup = common::SockCleanup(socket.clone());
     let listener = UnixListener::bind(&socket).expect("listen for renderer");
     let mut command = Command::new(binary);
-    command.args(["--ipc", socket.to_str().unwrap(), "--path", &model]);
+    command.args(["--ipc", socket.to_str().unwrap(), "--path", model]);
+    if let Some(preset) = preset {
+        command.args(["--camera-preset", preset]);
+    }
     if std::env::var("WAYWALLEN_GLTF_VALIDATION").as_deref() == Ok("1") {
         command.arg("--validation");
     }
@@ -253,7 +386,10 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
                     ("fps".into(), "30".into()),
                     ("render_node".into(), drm.path().to_str().unwrap().into()),
                     ("exposure".into(), "1".into()),
-                    ("animation".into(), "0".into()),
+                    (
+                        "animation".into(),
+                        if transition_case { "-1" } else { "0" }.into(),
+                    ),
                     ("loop".into(), "true".into()),
                 ],
                 user_properties: String::new(),
@@ -375,6 +511,19 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
     let mut sequence = 0;
     let (pool, old_buffers, initial, initial_fence) =
         configure(&stream, config.clone(), &mut sequence);
+    if transition_case {
+        camera_transition(
+            &stream,
+            &drm,
+            &timeline,
+            &pool,
+            &old_buffers,
+            (initial, initial_fence),
+            &mut sequence,
+        );
+        shutdown(&stream, &mut child);
+        return;
+    }
     send(
         &stream,
         ControlMsg::Play {
@@ -478,6 +627,24 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
         release(&drm, &timeline, &panned, &panned_fence);
         assert_no_frames(&stream, Duration::from_millis(100));
     }
+    send(
+        &stream,
+        ControlMsg::SettingChanged {
+            settings: vec![
+                ("fps".into(), "24".into()),
+                ("exposure".into(), "0.5".into()),
+                ("loop".into(), "true".into()),
+            ],
+        },
+    );
+    let (configured, configured_fence) = receive_frame(&stream, &mut sequence);
+    assert_eq!(
+        previous_hash,
+        pixel_hash(&pool, &old_buffers, &configured, &configured_fence),
+        "ordinary settings reset the interactive camera"
+    );
+    release(&drm, &timeline, &configured, &configured_fence);
+    assert_no_frames(&stream, Duration::from_millis(100));
     send(
         &stream,
         ControlMsg::Play {
@@ -598,14 +765,5 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
         "overwrote a consumer-owned resized slot"
     );
     assert_no_frames(&stream, Duration::from_millis(250));
-    send(&stream, ControlMsg::Shutdown);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Some(status) = child.0.try_wait().unwrap() {
-            assert!(status.success(), "renderer shutdown failed: {status}");
-            break;
-        }
-        assert!(Instant::now() < deadline, "renderer ignored Shutdown");
-        std::thread::sleep(Duration::from_millis(10));
-    }
+    shutdown(&stream, &mut child);
 }

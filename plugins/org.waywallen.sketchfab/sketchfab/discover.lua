@@ -71,10 +71,18 @@ function M.download(ctx, id)
     if model.downloadable == false then
         error("This Sketchfab model is not downloadable")
     end
-    local metadata = map.download(model, {})
-    local archive = api.download(ctx, id, headers)
-    metadata.url = archive.url
-    if archive.size ~= nil then metadata.size = archive.size end
+    local metadata = map.download(model)
+    local camera_ok, camera = pcall(function()
+        return map.viewer_options(api.viewer_options(ctx, id), ctx.json.strict)
+    end)
+    if camera_ok and camera then
+        metadata.provider_data = camera
+    elseif type(ctx.log) == "function" then
+        ctx.log("sketchfab: camera preset unavailable for " .. id)
+    end
+    local transfer = api.download(ctx, id, headers)
+    metadata.url, metadata.filename, metadata.archive = transfer.url, transfer.filename, transfer.archive
+    metadata.size = transfer.size
     return metadata
 end
 
@@ -86,8 +94,11 @@ function M.resolve(ctx, params)
     end
     root = root:gsub("/+$", "")
     local entry = root .. "/scene.gltf"
+    if not ctx.fs.is_file(entry) and ctx.fs.is_file(root .. "/scene.glb") then
+        entry = root .. "/scene.glb"
+    end
     if not ctx.fs.is_file(entry) or ctx.fs.is_symlink(entry) then
-        local candidates, visited = {}, 0
+        local glb, gltf, visited = {}, {}, 0
         local function walk(directory, depth)
             visited = visited + 1
             if depth > 16 or visited > 4096 then
@@ -95,10 +106,10 @@ function M.resolve(ctx, params)
             end
             for _, path in ipairs(ctx.fs.list_files(directory)) do
                 local extension = ctx.extension(path)
-                if extension and extension:lower() == "gltf" then
+                extension = extension and extension:lower()
+                if extension == "gltf" or extension == "glb" then
                     if ctx.fs.is_symlink(path) then error("Sketchfab archive contains a linked model entry") end
-                    table.insert(candidates, path)
-                    if #candidates > 1 then error("Sketchfab archive contains multiple glTF model entries") end
+                    table.insert(extension == "glb" and glb or gltf, path)
                 end
             end
             for _, directory in ipairs(ctx.list_dirs(directory)) do
@@ -107,7 +118,8 @@ function M.resolve(ctx, params)
             end
         end
         walk(root, 0)
-        if #candidates ~= 1 then error("Sketchfab archive does not contain a glTF model entry") end
+        local candidates = #gltf > 0 and gltf or glb
+        if #candidates ~= 1 then error("Sketchfab download must contain a unique glTF or GLB model entry") end
         entry = candidates[1]
     end
     local prefix = root .. "/"

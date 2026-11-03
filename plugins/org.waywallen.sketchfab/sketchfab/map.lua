@@ -85,9 +85,15 @@ local function names(values, json)
     return out
 end
 
+function M.valid_model_id(value)
+    return type(value) == "string" and (
+        (#value == 32 and value:match("^[a-fA-F0-9]+$") ~= nil)
+        or (#value == 27 and value:match("^[a-zA-Z0-9]+$") ~= nil)
+    )
+end
+
 function M.normalize(item, json)
-    if json.kind(item) ~= "object" or type(item.uid) ~= "string"
-        or #item.uid ~= 32 or not item.uid:match("^[a-fA-F0-9]+$") then
+    if json.kind(item) ~= "object" or not M.valid_model_id(item.uid) then
         error("Sketchfab returned an invalid model id")
     end
     local model = {
@@ -224,7 +230,58 @@ function M.details(model)
     }
 end
 
-function M.download(model, archive)
+local function vector(value, length, json)
+    if json.kind(value) ~= "array" or #value ~= length then return false end
+    for _, number in ipairs(value) do
+        if type(number) ~= "number" or number ~= number or math.abs(number) == math.huge then
+            return false
+        end
+    end
+    return true
+end
+
+local function valid_camera(camera, json)
+    if json.kind(camera) ~= "object" or not vector(camera.position, 3, json)
+        or not vector(camera.target, 3, json) or type(camera.fov) ~= "number"
+        or camera.fov ~= camera.fov or camera.fov <= 0 or camera.fov >= 180 then
+        return false
+    end
+    return true
+end
+
+function M.viewer_options(options, json)
+    local camera = options.camera
+    if not valid_camera(camera, json) then return nil end
+    local view = json.object { version = 1, space = "sketchfab-viewer", camera = camera }
+    if json.kind(options.orientation) == "object" and vector(options.orientation.matrix, 16, json) then
+        view.orientation = options.orientation
+    end
+    local data = json.object { sketchfab = view }
+    if #json.encode(data) > 64 * 1024 then return nil end
+    return data
+end
+
+function M.camera_preset(data, json)
+    local view = json.kind(data) == "object" and data.sketchfab
+    if json.kind(view) ~= "object" or view.version ~= 1 or view.space ~= "sketchfab-viewer"
+        or not valid_camera(view.camera, json) then
+        return nil
+    end
+    local camera = view.camera
+    if camera.position[1] == camera.target[1] and camera.position[2] == camera.target[2] then
+        return nil
+    end
+    -- The export root includes both the axis conversion and model normalization.
+    return json.encode(json.object {
+        space = "scene-root",
+        position = camera.position,
+        target = camera.target,
+        up = json.array { 0, 0, 1 },
+        yfov = camera.fov * math.pi / 180,
+    })
+end
+
+function M.download(model)
     local author, license = model.author or {}, model.license or {}
     local attribution = {
         author = author.name or author.username or "",
@@ -250,19 +307,14 @@ function M.download(model, archive)
     if model.description and model.description ~= "" then
         description = model.description .. "\n\n" .. description
     end
-    local known_archive = (model.archives or {}).gltf or {}
     return {
         wp_type = "gltf",
-        url = archive.url,
-        filename = model.id .. ".zip",
-        archive = "zip",
         title = model.title or ("Sketchfab " .. model.id),
         preview_url = model.preview_url or "",
         description = description,
         tags = model.tags or {},
         external_id = model.id,
         web_url = web_url,
-        size = archive.size or known_archive.size,
         content_rating = model.restricted ~= nil and (model.restricted and "Mature" or "Everyone") or nil,
         attribution = attribution,
     }

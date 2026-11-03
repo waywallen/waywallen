@@ -147,6 +147,15 @@ fn sketchfab_plugin_supports_model_downloads_and_installs_translations() {
         sources[0].remote_capability,
         Some(RemoteCapability::Download)
     ));
+    assert!(sources[0].remote_hint.text().is_empty());
+    assert!(!sources[0].download_action.enabled);
+    assert_eq!(sources[0].download_action.label.text(), "Login required");
+    assert_eq!(
+        sources[0].download_action.tooltip.text(),
+        "Log in with a Sketchfab API Token to download models."
+    );
+    assert!(sources[0].download_action.label.is_translated());
+    assert!(sources[0].download_action.tooltip.is_translated());
     assert!(manager.supports_item_remove("sketchfab"));
     assert_eq!(sources[0].actions.len(), 2);
     let login = sources[0]
@@ -299,6 +308,46 @@ reply({ unexpected = {} }); assert(not pcall(discover.search, ctx, {}))
 }
 
 #[test]
+fn sketchfab_legacy_model_ids_work_across_search_details_camera_and_download() {
+    lua_test(
+        r#"
+local id = '7w7pAfrCfjovwykkEeRFLGw5SXS'
+reply({results={{uid=id,name='bob'},model(1)},cursors={next='next-page'}})
+local result = discover.search(ctx,{})
+assert(#result.items == 2 and result.items[1].id == id and result.items[2].id == uid(1))
+assert(result.has_more and result.next_cursor == 'next-page')
+reply({uid=id,name='bob',description='Legacy model'})
+assert(discover.details(ctx,id).description == 'Legacy model')
+assert(last_request().path == 'https://api.sketchfab.com/v3/models/'..id)
+reply({camera={position={1,2,3},target={0,0,0},fov=45}})
+assert(api.viewer_options(ctx,id).camera.fov == 45)
+assert(last_request().path == 'https://sketchfab.com/i/models/'..id..'/options')
+reply({uid=uid(1),username='artist'})
+session.sign_in(ctx,'test-token')
+reply({uid=id,name='bob',user={username='artist'},license={slug='by'},isDownloadable=true})
+reply({camera={position={1,2,3},target={0,0,0},fov=45}})
+reply({gltf={url='https://cdn.example/model.zip',expires=300,size=42}})
+local download = discover.download(ctx,id)
+assert(download.external_id == id and download.filename == id..'.zip' and download.archive == 'zip')
+assert(download.provider_data.sketchfab.camera.position[2] == 2)
+assert(last_request().path == 'https://api.sketchfab.com/v3/models/'..id..'/download')
+for _, invalid in ipairs({
+    '', 'bad', string.rep('a',26), string.rep('a',28), string.rep('g',32),
+    string.rep('a',26)..'_', string.rep('a',26)..'/', string.rep('a',26)..'?',
+    string.rep('a',26)..'\n', '../'..string.rep('a',24), false, 27, json.strict.null,
+}) do
+    local before = request_count()
+    assert(not pcall(normalize,{uid=invalid}))
+    assert(not pcall(api.model,ctx,invalid))
+    assert(not pcall(api.viewer_options,ctx,invalid))
+    assert(not pcall(api.download,ctx,invalid,session.headers()))
+    assert(request_count() == before)
+end
+"#,
+    );
+}
+
+#[test]
 fn sketchfab_strict_json_rejects_malformed_shapes_and_preserves_null() {
     lua_test(
         r#"
@@ -419,6 +468,8 @@ search({model(1, {
 })})
 reply(model(1, {name='Current title',description='Current description',isDownloadable=true,isAgeRestricted=false,
     thumbnails={images={{url='https://images.example/preview.jpg',width=512,height=512}}}}))
+reply({camera={position={1,2,3},target={0,0,0},fov=45,up=1.5},
+    orientation={matrix={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1}}})
 reply({gltf={url='https://cdn.example/first.zip?signature=temporary',expires=300,size=200}})
 local result = discover.download(ctx,uid(1))
 assert(result.wp_type == 'gltf' and result.archive == 'zip' and result.filename == uid(1)..'.zip')
@@ -429,6 +480,18 @@ assert(result.attribution.author == 'artist' and result.attribution.license == '
 assert(result.attribution.author_url == 'https://sketchfab.com/artist')
 assert(result.attribution.license_url == 'https://creativecommons.org/licenses/by/4.0/')
 assert(result.attribution.requirements == 'Credit the author')
+assert(result.provider_data.sketchfab.camera.up == 1.5)
+assert(result.provider_data.sketchfab.camera.position[2] == 2)
+assert(result.provider_data.sketchfab.orientation.matrix[16] == 1)
+local preset = json.strict.decode('{"camera":{"position":[1,2,3],"target":[0,0,0],"fov":45}}')
+preset.camera.fov = 180
+assert(map.viewer_options(preset,json.strict) == nil)
+preset.camera.fov = 45
+preset.camera.position = json.strict.array{1,2}
+assert(map.viewer_options(preset,json.strict) == nil)
+preset.camera.position = json.strict.array{1,2,3}
+preset.camera.oversized = string.rep('x',65536)
+assert(map.viewer_options(preset,json.strict) == nil)
 assert(result.description:find('Current description',1,true))
 assert(result.description:find('Provided by Sketchfab',1,true))
 assert(result.description:find('Author: artist',1,true) and result.description:find('License: CC Attribution',1,true))
@@ -438,12 +501,22 @@ assert(last_request().headers.Authorization == 'Token test-token')
 local before = request_count()
 advance(301)
 reply(model(1, {name='Retried',user={username='artist'},license={slug='by'},isDownloadable=true}))
+reply({},404)
 reply({gltf={url='https://cdn.example/retry.zip?signature=fresh',expires=60}})
 local retried = discover.download(ctx,uid(1))
-assert(request_count() == before+2 and retried.url ~= result.url)
+assert(request_count() == before+3 and retried.url ~= result.url)
 assert(retried.url == 'https://cdn.example/retry.zip?signature=fresh')
 assert(retried.title == 'Retried' and retried.size == nil)
+assert(retried.provider_data == nil)
 assert(last_request().headers.Authorization == 'Token test-token')
+reply({},429,'60')
+assert(not pcall(api.viewer_options,ctx,uid(1)))
+assert(last_request().path == 'https://sketchfab.com/i/models/'..uid(1)..'/options')
+assert(last_request().headers.Authorization == nil)
+reply({gltf={url='https://cdn.example/model.zip',expires=300,size=42}})
+assert(api.download(ctx,uid(1),session.headers()).filename == uid(1)..'.zip')
+local camera_requests = request_count()
+assert(not pcall(api.viewer_options,ctx,uid(1)) and request_count() == camera_requests)
 "#,
     );
 }
@@ -453,7 +526,15 @@ fn sketchfab_download_rejects_invalid_archive_data_without_reusing_urls() {
     lua_test(
         r#"
 local headers = {Authorization='Token test-token'}
+reply({glb={url='https://cdn.example/model.glb',expires=300,size=1000},
+    gltf={url='https://cdn.example/model.zip',expires=300,size=900}})
+local chosen = api.download(ctx,uid(1),headers)
+assert(chosen.url == 'https://cdn.example/model.zip' and chosen.size == 900)
+assert(chosen.filename == uid(1)..'.zip' and chosen.archive == 'zip')
+reply({glb=false,gltf={url='https://cdn.example/other.zip',expires=300,size=200}})
+assert(api.download(ctx,uid(1),headers).url == 'https://cdn.example/other.zip')
 for _, value in ipairs({
+    {glb={url='https://cdn.example/model.glb',expires=300,size=42}},
     {}, {gltf=json.strict.null}, {gltf=false}, {gltf={}},
     {gltf={url='http://cdn.example/model.zip',expires=300}},
     {gltf={url='file:///model.zip',expires=300}},
@@ -566,10 +647,20 @@ assert(result.resource == 'scene.gltf' and result.name == metadata.title and res
 assert(result.description == metadata.description and result.tags[1] == 'tag')
 assert(result.external_id == uid(1) and result.size == 42 and result.content_rating == 'Mature')
 assert(result.preview == nil and request_count() == 0)
+files['/download/scene.glb']=true
+assert(discover.resolve(ctx,params).resource == 'scene.gltf')
+files['/download/scene.gltf']=nil
+assert(discover.resolve(ctx,params).resource == 'scene.glb')
+files={['/download/model.glb']=true}
+assert(discover.resolve(ctx,params).resource == 'model.glb')
+files['/download/other.glb']=true
+assert(not pcall(discover.resolve,ctx,params))
 files = {['/download/nested/model.gltf']=true}
 dirs = {['/download']={'/download/nested'}}
 result = discover.resolve(ctx,params)
 assert(result.resource == 'nested/model.gltf' and request_count() == 0)
+files['/download/model.glb']=true
+assert(discover.resolve(ctx,params).resource == 'nested/model.gltf')
 files['/download/other.gltf']=true
 assert(not pcall(discover.resolve,ctx,params))
 files={}
@@ -591,14 +682,32 @@ fn sketchfab_local_model_apply_and_remove_use_public_resource_interfaces() {
     lua_test(
         r#"
 local path='/remote/sketchfab/item/scene.gltf'
-ctx.remote_artifact_root=function(resource)
+local metadata = json.strict.decode('{"provider_data":{"sketchfab":{"version":1,"space":"sketchfab-viewer","camera":{"position":[1,2,3],"target":[4,5,6],"fov":45,"up":1.5},"orientation":{"matrix":[0,-1,0,0,1,0,0,0,0,0,1,0,0,0,0,1]}}}}')
+local artifact_reads = 0
+ctx.remote_artifact=function(resource)
     assert(resource == path)
-    return '/storage/opaque-package-root'
+    artifact_reads = artifact_reads + 1
+    return {root='/storage/opaque-package-root',metadata=metadata}
 end
+ctx.remote_artifact_root=function() error('must reuse the parsed artifact') end
 local applied = wallpaper.apply({resource=path},ctx)
+assert(artifact_reads == 1)
 assert(applied.extras.path == path and next(applied.default_user_properties) == nil)
 assert(applied.extras['asset-root'] == '/storage/opaque-package-root')
-ctx.remote_artifact_root=function() error('resource is not an installed artifact') end
+local camera = json.strict.decode(applied.extras['camera-preset'])
+assert(camera.space == 'scene-root')
+assert(camera.position[1] == 1 and camera.position[2] == 2 and camera.position[3] == 3)
+assert(camera.target[1] == 4 and camera.target[2] == 5 and camera.target[3] == 6)
+assert(camera.up[1] == 0 and camera.up[2] == 0 and camera.up[3] == 1)
+assert(math.abs(camera.yfov - math.pi/4) < 1e-12)
+metadata.provider_data.sketchfab.version = 2
+assert(wallpaper.apply({resource=path},ctx).extras['camera-preset'] == nil)
+metadata.provider_data.sketchfab.version = 1
+metadata.provider_data.sketchfab.space = 'unknown'
+assert(wallpaper.apply({resource=path},ctx).extras['camera-preset'] == nil)
+metadata.provider_data = nil
+assert(wallpaper.apply({resource=path},ctx).extras['camera-preset'] == nil)
+ctx.remote_artifact=function() error('resource is not an installed artifact') end
 assert(not pcall(wallpaper.apply,{resource=path},ctx))
 local removed
 ctx.remove_remote_artifact=function(resource) removed=resource end
@@ -801,7 +910,10 @@ api.model = function(ctx, id)
 end
 api.download = function(ctx, id, headers)
     assert(headers.Authorization == 'Token valid-token')
-    return {{url='https://cdn.example/model.zip?signature=ephemeral',size=42}}
+    return {{url='https://cdn.example/model.zip?signature=ephemeral',filename=id..'.zip',archive='zip',size=42}}
+end
+api.viewer_options = function(ctx, id)
+    return ctx.json.strict.decode('{{"camera":{{"position":[1,2,3],"target":[0,0,0],"fov":45}}}}')
 end
 {callbacks}
 "#
@@ -820,6 +932,7 @@ end
     let id = "00000000000000000000000000000001";
     let download = manager.call_download("sketchfab", id).await.unwrap();
     assert_eq!(download.transfer.format, DownloadFormat::Zip);
+    assert!(download.transfer.resolve);
     assert_eq!(download.transfer.filename, format!("{id}.zip"));
     assert!(download.transfer.url.contains("signature=ephemeral"));
     assert_eq!(download.metadata.title, "Downloaded model");
@@ -832,6 +945,7 @@ end
     let persistent = serde_json::to_string(&download.metadata).unwrap();
     assert!(!persistent.contains("signature=ephemeral"));
     assert!(!persistent.contains("valid-token"));
+    assert!(persistent.contains("sketchfab-viewer"));
     let artifact = root.join("artifact");
     std::fs::create_dir(&artifact).unwrap();
     std::fs::write(
@@ -839,6 +953,9 @@ end
         b"model parsing belongs to vecgltf",
     )
     .unwrap();
+    std::fs::write(artifact.join("scene.bin"), b"model buffer").unwrap();
+    std::fs::create_dir(artifact.join("textures")).unwrap();
+    std::fs::write(artifact.join("textures/color.png"), b"model texture").unwrap();
     let resolved = manager
         .call_resolve(
             "sketchfab",
@@ -855,6 +972,8 @@ end
     assert_eq!(resolved.size, Some(42));
     assert_eq!(resolved.external_id, id);
     assert!(resolved.preview.is_none());
+    assert!(artifact.join("scene.bin").is_file());
+    assert!(artifact.join("textures/color.png").is_file());
 }
 
 async fn session_test_mode(manager: &SourceManager, mode: &str, time: i64) {
@@ -873,6 +992,8 @@ async fn sketchfab_session_public_actions_persist_restore_and_remove_credentials
         crate::plugin::state_store::PluginStateStore::new(root.join("state"), root.join("legacy"));
     let manager = manager_with_entry(root, &entry);
     let sources = manager.discover_sources_with_status().await.unwrap();
+    assert!(!sources[0].download_action.enabled);
+    assert_eq!(sources[0].download_action.label.text(), "Login required");
     let login = sources[0]
         .actions
         .iter()
@@ -918,6 +1039,10 @@ async fn sketchfab_session_public_actions_persist_restore_and_remove_credentials
         PluginLifecycleState::SignedIn
     );
     let sources = manager.discover_sources_with_status().await.unwrap();
+    assert!(sources[0].download_action.enabled);
+    assert!(sources[0].download_action.label.text().is_empty());
+    assert!(sources[0].download_action.tooltip.text().is_empty());
+    assert!(sources[0].remote_hint.text().is_empty());
     let login = sources[0]
         .actions
         .iter()
@@ -931,6 +1056,9 @@ async fn sketchfab_session_public_actions_persist_restore_and_remove_credentials
     assert!(!login.visible && logout.visible && logout.enabled);
     session_test_mode(&manager, "offline", 1061).await;
     let sources = manager.discover_sources_with_status().await.unwrap();
+    assert!(sources[0].download_action.enabled);
+    assert!(sources[0].download_action.label.text().is_empty());
+    assert!(sources[0].download_action.tooltip.text().is_empty());
     let logout = sources[0]
         .actions
         .iter()
@@ -957,6 +1085,9 @@ async fn sketchfab_session_public_actions_persist_restore_and_remove_credentials
             .state,
         PluginLifecycleState::SignedOut
     );
+    let sources = manager.discover_sources_with_status().await.unwrap();
+    assert!(!sources[0].download_action.enabled);
+    assert_eq!(sources[0].download_action.label.text(), "Login required");
 }
 
 #[tokio::test]
@@ -997,6 +1128,9 @@ async fn sketchfab_session_lifecycle_persists_revocation_but_not_transient_error
             .state,
         PluginLifecycleState::Expired
     );
+    let sources = manager.discover_sources_with_status().await.unwrap();
+    assert!(!sources[0].download_action.enabled);
+    assert_eq!(sources[0].download_action.label.text(), "Login required");
     assert_eq!(
         store.load("org.waywallen.sketchfab").unwrap(),
         Some(String::new())

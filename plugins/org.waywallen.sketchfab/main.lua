@@ -7,6 +7,14 @@ local wallpaper = import("sketchfab.wallpaper")
 local M = {}
 local account_group = tr("Sketchfab account")
 
+local function download_action(active)
+    return {
+        enabled = active,
+        label = not active and tr("Login required") or nil,
+        tooltip = not active and tr("Log in with a Sketchfab API Token to download models.") or nil,
+    }
+end
+
 function M.info()
     return {
         name = "sketchfab",
@@ -56,7 +64,7 @@ function M.info()
                 details = true,
                 download = true,
                 resolve = true,
-                remote_hint = tr("Log in with a Sketchfab API Token to download models."),
+                download_action = download_action(false),
                 pagination = "cursor",
                 sorts = {
                     { key = "relevance", label = tr("Relevance") },
@@ -84,6 +92,7 @@ function M.actions.status(ctx)
     local active = session.authenticated()
     local verified = checked.state == "signed_in"
     return {
+        download_action = download_action(active),
         status = { sketchfab_account = checked.display_value },
         actions = {
             sketchfab_sign_in = { visible = not verified, enabled = not verified },

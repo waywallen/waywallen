@@ -1,6 +1,7 @@
+local map = import("sketchfab.map")
 local M = {}
 local API = "https://api.sketchfab.com/v3"
-local cooldown_until = 0
+local cooldown_until = {}
 
 M.filters = {
     {
@@ -85,13 +86,14 @@ local function cursor(value, null)
     return value
 end
 
-local function request_json(ctx, path, query, headers, purpose)
+local function request_json(ctx, path, query, headers, purpose, origin)
+    origin = origin or API
     local now = ctx.time.unix()
-    if now < cooldown_until then
-        error("Sketchfab rate limit; retry in " .. tostring(math.ceil(cooldown_until - now)) .. " seconds")
+    if now < (cooldown_until[origin] or 0) then
+        error("Sketchfab rate limit; retry in " .. tostring(math.ceil(cooldown_until[origin] - now)) .. " seconds")
     end
     local sent, response = pcall(function()
-        return ctx.http:get(API .. path)
+        return ctx.http:get(origin .. path)
             :headers(headers or {})
             :query(query)
             :timeout(20)
@@ -111,7 +113,7 @@ local function request_json(ctx, path, query, headers, purpose)
         if not deadline or deadline == math.huge then
             delay, deadline = 30, now + 30
         end
-        cooldown_until = deadline
+        cooldown_until[origin] = deadline
         response:close()
         error("Sketchfab rate limit; retry in " .. tostring(delay) .. " seconds")
     end
@@ -215,11 +217,20 @@ function M.search(ctx, params, headers)
     return request_json(ctx, "/search", query, headers)
 end
 
-function M.model(ctx, id, headers)
-    if type(id) ~= "string" or #id ~= 32 or not id:match("^[a-fA-F0-9]+$") then
+local function validate_id(id)
+    if not map.valid_model_id(id) then
         error("Invalid Sketchfab model id")
     end
+end
+
+function M.model(ctx, id, headers)
+    validate_id(id)
     return request_json(ctx, "/models/" .. id, {}, headers)
+end
+
+function M.viewer_options(ctx, id)
+    validate_id(id)
+    return request_json(ctx, "/i/models/" .. id .. "/options", {}, {}, "camera", "https://sketchfab.com")
 end
 
 function M.me(ctx, token)
@@ -229,19 +240,7 @@ function M.me(ctx, token)
     return request_json(ctx, "/me", {}, { Authorization = "Token " .. token }, "account")
 end
 
-function M.download(ctx, id, headers)
-    if type(id) ~= "string" or #id ~= 32 or not id:match("^[a-fA-F0-9]+$") then
-        error("Invalid Sketchfab model id")
-    end
-    if type(headers) ~= "table" or type(headers.Authorization) ~= "string"
-        or not headers.Authorization:match("^Token .+") then
-        error("Log in to Sketchfab to download models")
-    end
-    local payload = request_json(ctx, "/models/" .. id .. "/download", {}, headers, "download")
-    local value = payload.gltf
-    if ctx.json.strict.kind(value) ~= "object" then
-        error("Sketchfab did not provide a glTF archive")
-    end
+local function download_descriptor(ctx, value)
     if type(value.url) ~= "string" or #value.url == 0 or #value.url > 16384
         or value.url:find("[%c]") then
         error("Sketchfab returned an invalid archive URL")
@@ -265,6 +264,21 @@ function M.download(ctx, id, headers)
         url = value.url,
         size = value.size ~= ctx.json.strict.null and value.size or nil,
     }
+end
+
+function M.download(ctx, id, headers)
+    validate_id(id)
+    if type(headers) ~= "table" or type(headers.Authorization) ~= "string"
+        or not headers.Authorization:match("^Token .+") then
+        error("Log in to Sketchfab to download models")
+    end
+    local payload = request_json(ctx, "/models/" .. id .. "/download", {}, headers, "download")
+    if ctx.json.strict.kind(payload.gltf) ~= "object" then
+        error("Sketchfab did not provide a glTF download")
+    end
+    local chosen = download_descriptor(ctx, payload.gltf)
+    chosen.filename, chosen.archive = id .. ".zip", "zip"
+    return chosen
 end
 
 return M

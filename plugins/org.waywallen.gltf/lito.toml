@@ -15,6 +15,7 @@ waywallen-plugin-common.workspace = true
 rstd-std.workspace = true
 rstd-argparse.workspace = true
 rstd-log.workspace = true
+rstd-json.workspace = true
 vecgltf.workspace = true
 
 [runtime-dependencies.waywallen-bridge]

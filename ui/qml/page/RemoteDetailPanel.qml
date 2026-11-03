@@ -24,6 +24,7 @@ Item {
     readonly property string authorUrl: String(root.details?.authorUrl ?? "")
     property int remoteCapability: 0
     property string remoteHint: ""
+    property var downloadAction: null
     property var tagOptions: []
     property int downloadState: 0
     property int subscriptionState: 0
@@ -255,26 +256,42 @@ Item {
             spacing: 8
             visible: root.remoteCapability === 1 || root.remoteCapability === 2
 
-            MD.Button {
+            Item {
+                id: downloadControl
                 visible: root.remoteCapability === 1
                 Layout.fillWidth: true
-                mdState.type: root.downloadState === 3 ? MD.Enum.BtFilledTonal : MD.Enum.BtFilled
-                enabled: root.downloadState === 0 || root.downloadState === 3
-                text: {
-                    switch (root.downloadState) {
-                    case 1: return qsTr("Pending");
-                    case 2: return qsTr("Downloading");
-                    case 3: return qsTr("Remove");
-                    case 4:
-                    case 5: return qsTr("Retry");
-                    default: return qsTr("Download");
-                    }
+                implicitHeight: downloadButton.implicitHeight
+
+                readonly property string label: W.I18n.tr(root.downloadAction?.labelText ?? "")
+                readonly property string tooltip: root.downloadState === 3 ? "" : W.I18n.tr(root.downloadAction?.tooltipText ?? "")
+
+                HoverHandler {
+                    id: downloadHover
                 }
-                onClicked: {
-                    if (root.downloadState === 3)
-                        root.removeRequested();
-                    else
-                        root.downloadRequested();
+                MD.ToolTip.visible: downloadHover.hovered && downloadControl.tooltip.length > 0
+                MD.ToolTip.text: downloadControl.tooltip
+
+                MD.Button {
+                    id: downloadButton
+                    anchors.fill: parent
+                    mdState.type: root.downloadState === 3 ? MD.Enum.BtFilledTonal : MD.Enum.BtFilled
+                    enabled: root.downloadState === 3 || (root.downloadAction?.enabled ?? true) && root.downloadState !== 1 && root.downloadState !== 2
+                    text: {
+                        switch (root.downloadState) {
+                        case 1: return qsTr("Pending");
+                        case 2: return qsTr("Downloading");
+                        case 3: return qsTr("Remove");
+                        }
+                        if (downloadControl.label.length > 0)
+                            return downloadControl.label;
+                        return root.downloadState === 4 || root.downloadState === 5 ? qsTr("Retry") : qsTr("Download");
+                    }
+                    onClicked: {
+                        if (root.downloadState === 3)
+                            root.removeRequested();
+                        else
+                            root.downloadRequested();
+                    }
                 }
             }
 

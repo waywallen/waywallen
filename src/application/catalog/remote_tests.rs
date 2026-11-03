@@ -259,7 +259,7 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     let root = tempfile::tempdir().unwrap();
     let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
     let info = manager.call_download("test", "model").await.unwrap();
-    let prepared = prepare_archive(&manager, "test", "model", root.path(), info.clone())
+    let prepared = prepare_artifact(&manager, "test", "model", root.path(), info.clone())
         .await
         .unwrap();
     let publication = prepared.publish(root.path()).unwrap();
@@ -355,7 +355,7 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     );
     use std::os::unix::fs::MetadataExt;
     let original_inode = std::fs::metadata(installed.resource()).unwrap().ino();
-    let replacement = prepare_archive(&manager, "test", "model", root.path(), info)
+    let replacement = prepare_artifact(&manager, "test", "model", root.path(), info)
         .await
         .unwrap();
     let reused = replacement.publish(root.path()).unwrap().commit();
@@ -367,6 +367,76 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     );
     assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 1);
     http.assert_requests(4);
+
+    let bytes = b"single-file model";
+    let http = Http::new(routes(bytes.to_vec())).await;
+    let (_plugin, manager) = source(&http.url, "scene.glb");
+    let root = tempfile::tempdir().unwrap();
+    let mut info = manager.call_download("test", "model").await.unwrap();
+    assert!(info.transfer.resolve);
+    info.transfer.format = DownloadFormat::File;
+    info.transfer.filename = "../scene.glb".into();
+    let provider_data = serde_json::json!({
+        "camera": {"position": [1, 2, 3], "target": [0, 0, 0]},
+    })
+    .as_object()
+    .unwrap()
+    .clone();
+    info.metadata.provider_data = Some(provider_data.clone());
+    let publication = prepare_artifact(&manager, "test", "model", root.path(), info.clone())
+        .await
+        .unwrap()
+        .publish(root.path())
+        .unwrap();
+    assert!(publication.installed.resource().is_file());
+    drop(publication);
+    assert_empty(root.path());
+
+    let installed = prepare_artifact(&manager, "test", "model", root.path(), info.clone())
+        .await
+        .unwrap()
+        .publish(root.path())
+        .unwrap()
+        .commit();
+    assert_eq!(installed.artifact.resource, Path::new("scene.glb"));
+    assert_eq!(std::fs::read(installed.resource()).unwrap(), bytes);
+    assert_eq!(installed.artifact.metadata.size, Some(bytes.len() as i64));
+    assert_eq!(installed.artifact.files.len(), 1);
+    assert_eq!(installed.artifact.files[0].path, Path::new("scene.glb"));
+    assert_eq!(installed.artifact.files[0].bytes, bytes.len() as u64);
+    let reloaded = remote_asset::load(root.path(), "test", "model")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        reloaded.artifact.metadata.provider_data,
+        Some(provider_data.clone())
+    );
+    let persisted = std::fs::read_to_string(installed.root.join(".waywallen/asset.json")).unwrap();
+    assert!(!persisted.contains("temporary-signature"));
+    let original_inode = std::fs::metadata(installed.resource()).unwrap().ino();
+    info.metadata.provider_data = Some(
+        serde_json::json!({"camera": {"position": [4, 5, 6]}})
+            .as_object()
+            .unwrap()
+            .clone(),
+    );
+    let reused = prepare_artifact(&manager, "test", "model", root.path(), info)
+        .await
+        .unwrap()
+        .publish(root.path())
+        .unwrap()
+        .commit();
+    assert_eq!(reused.artifact.metadata.provider_data, Some(provider_data));
+    assert_eq!(
+        std::fs::metadata(reused.resource()).unwrap().ino(),
+        original_inode
+    );
+    let removal = remote_asset::remove(root.path(), "test", &reused.resource())
+        .await
+        .unwrap();
+    assert!(removal.removed);
+    assert_empty(root.path());
+    http.assert_requests(6);
 }
 
 #[tokio::test]
@@ -391,7 +461,7 @@ async fn remote_download_rejects_unsafe_archive_and_invalid_resolve_without_resi
         let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
         let info = manager.call_download("test", "model").await.unwrap();
         assert!(
-            prepare_archive(&manager, "test", "model", root.path(), info)
+            prepare_artifact(&manager, "test", "model", root.path(), info)
                 .await
                 .is_err()
         );
@@ -467,7 +537,7 @@ async fn remote_download_database_failure_rolls_back_item_tags_and_publication()
         "CREATE TRIGGER reject_remote_tags BEFORE INSERT ON tag BEGIN SELECT RAISE(FAIL, 'reject remote tags'); END".to_owned()
     )).await.unwrap();
     let info = manager.call_download("test", "model").await.unwrap();
-    let prepared = prepare_archive(&manager, "test", "model", root.path(), info)
+    let prepared = prepare_artifact(&manager, "test", "model", root.path(), info)
         .await
         .unwrap();
     let publication = prepared.publish(root.path()).unwrap();

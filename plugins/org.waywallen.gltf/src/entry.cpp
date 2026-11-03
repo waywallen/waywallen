@@ -11,6 +11,7 @@ module waywallen.gltf.entry;
 import rstd;
 import rstd.argparse;
 import rstd.log;
+import rstd.json;
 import vecgltf.render;
 import waywallen.bridge;
 import waywallen.plugin.run_loop;
@@ -31,12 +32,26 @@ namespace tex   = vrento::texture;
 
 namespace
 {
+enum class CameraSpace
+{
+    World,
+    SceneRoot
+};
+
+struct CameraPreset {
+    gltf::CameraLookAt look_at;
+    gltf::Vec3         up { 0, 1, 0 };
+    float              yfov {};
+    CameraSpace        space { CameraSpace::World };
+};
+
 struct Options {
-    String   path, ipc, render_node, capture, asset_root;
-    unsigned fps { 30 }, custom_extent { 1080 }, frames { 3 };
-    int      resolution { -2 }, animation {};
-    float    exposure { 1 };
-    bool     loop { true }, selftest {}, validation {};
+    String               path, ipc, render_node, capture, asset_root;
+    Option<CameraPreset> camera_preset;
+    unsigned             fps { 30 }, custom_extent { 1080 }, frames { 3 };
+    int                  resolution { -2 }, animation {};
+    float                exposure { 1 };
+    bool                 loop { true }, selftest {}, validation {};
 };
 
 auto text(const char* value) -> ref<str> {
@@ -54,6 +69,53 @@ auto number(ref<str> value) -> Option<T> {
     auto parsed = rstd::from_str<T>(value);
     return parsed.is_ok() ? Some(parsed.unwrap()) : None<T>();
 }
+
+auto camera_preset(ref<str> value) -> Option<CameraPreset> {
+    if (value.len() > usize(4096)) return None();
+    auto parsed = rstd::json::from_str(value, { .max_depth = usize(4) });
+    if (parsed.is_err() || ! parsed->is_object()) return None();
+    auto scalar = [](const rstd::json::Value& member) -> Option<float> {
+        auto number = member.as_f64();
+        if (! number || ! number->is_finite() ||
+            number->to_primitive() > double(f32::MAX.to_primitive()) ||
+            number->to_primitive() < -double(f32::MAX.to_primitive()))
+            return None();
+        float value = float(number->to_primitive());
+        return f32(value).is_finite() ? Some(value) : None<float>();
+    };
+    auto vector = [&](ref<str> key, gltf::Vec3& output) {
+        auto member = parsed->get(key);
+        if (! member) return false;
+        auto values = (**member).as_array();
+        if (! values || (**values).len() != usize(3)) return false;
+        auto x = scalar((**values)[usize(0)]), y = scalar((**values)[usize(1)]),
+             z = scalar((**values)[usize(2)]);
+        if (! x || ! y || ! z) return false;
+        output = { *x, *y, *z };
+        return true;
+    };
+    CameraPreset result;
+    if (auto field = parsed->get("space"_str)) {
+        auto space = (**field).as_str();
+        if (! space) return None();
+        if (*space == "scene-root"_str)
+            result.space = CameraSpace::SceneRoot;
+        else if (*space != "world"_str)
+            return None();
+    }
+    auto field = parsed->get("yfov"_str);
+    auto yfov  = field ? scalar(**field) : None<float>();
+    if (! yfov || ! vector("position"_str, result.look_at.position) ||
+        ! vector("target"_str, result.look_at.target) ||
+        (parsed->get("up"_str) && ! vector("up"_str, result.up)))
+        return None();
+    result.yfov = *yfov;
+    gltf::CameraProjection projection;
+    projection.yfov = result.yfov;
+    if (! gltf::camera_frame(result.look_at, projection, result.up)) return None();
+    return Some(result);
+}
+
 void settings(Options& options, const ww_kv_list_t& values) {
     for (unsigned i = 0; i < values.count; ++i) {
         auto key = text(values.data[i].key), value = text(values.data[i].value);
@@ -97,6 +159,8 @@ auto parse(int argc, char** argv, int& status) -> Option<Options> {
         Arg<String>::value("capture"_str, string_parser()).long_name("capture"_str));
     auto asset_root = command.add_arg(
         Arg<String>::value("asset-root"_str, string_parser()).long_name("asset-root"_str));
+    auto preset = command.add_arg(
+        Arg<String>::value("camera-preset"_str, string_parser()).long_name("camera-preset"_str));
     command.add_arg(Arg<bool>::flag("selftest"_str).long_name("selftest"_str));
     command.add_arg(Arg<bool>::flag("validation"_str).long_name("validation"_str));
     auto built = rstd::move(command).build();
@@ -133,6 +197,17 @@ auto parse(int argc, char** argv, int& status) -> Option<Options> {
     copy(node, options.render_node);
     copy(capture, options.capture);
     copy(asset_root, options.asset_root);
+    String camera;
+    copy(preset, camera);
+    if (matches.contains("camera-preset"_str)) {
+        options.camera_preset = camera_preset(camera.as_str());
+        if (! options.camera_preset) {
+            rstd_error("gltf: invalid --camera-preset; expected glTF position, target, up and yfov "
+                       "in radians");
+            status = 2;
+            return None();
+        }
+    }
     String count;
     copy(frames, count);
     if (! count.is_empty()) {
@@ -180,6 +255,9 @@ struct Gpu {
     gltf::SceneInstance         instance;
     gltf::PreparedAsset         prepared;
     gltf::OrbitCamera           camera;
+    gltf::CameraTransition      camera_transition;
+    Option<gltf::CameraFrame>   camera_target;
+    gltf::Vec3                  camera_up { 0, 1, 0 };
     Option<tex::TextureViewRef> target;
     tex::SubmissionToken        last;
     VkExtent2D                  extent {};
@@ -222,18 +300,47 @@ struct Gpu {
         }
         if (instance.animation() != selected) {
             instance.set_animation(selected);
-            camera.fit(instance.bounds());
+            if (! options.camera_preset) camera.fit(instance.bounds());
         }
         instance.set_looping(options.loop);
     }
     bool animating(const Options& options) const {
         auto animation = instance.animation();
-        return animation != gltf::invalid_index &&
-               (options.loop ||
-                instance.time() < gltf::at(instance.asset().animations, animation).end);
+        return camera_target.is_some() || camera_transition.playing() ||
+               (animation != gltf::invalid_index &&
+                (options.loop ||
+                 instance.time() < gltf::at(instance.asset().animations, animation).end));
+    }
+    void cancel_camera_transition() {
+        camera_target = None();
+        camera_transition.stop();
+    }
+    bool update_camera(float delta) {
+        float aspect = float(extent.width) / float(extent.height);
+        if (camera_target) {
+            auto target = camera_target.take().unwrap();
+            auto from = camera.frame(aspect).look_at(), to = target.look_at();
+            gltf::CameraTransitionOptions options;
+            options.up = camera_up;
+            if (! from || ! to ||
+                ! camera_transition.start(*from, *to, target.projection, options)) {
+                rstd_warn("gltf: camera transition path is invalid; using the preset directly");
+                return camera.restore(target, aspect);
+            }
+        }
+        if (camera_transition.playing()) {
+            (void)camera_transition.update(delta);
+            auto frame = rstd::as<gltf::CameraSource>(camera_transition).Snapshot(aspect);
+            if (! frame || ! camera.restore(*frame, aspect)) {
+                rstd_error("gltf: camera transition frame is invalid");
+                return false;
+            }
+        }
+        return true;
     }
     auto record(float delta, const Options& options) -> Option<tex::Submission> {
         instance.update(delta);
+        if (! update_camera(delta)) return None();
         auto begun = queue.Begin();
         if (begun.is_err()) return None();
         auto work     = begun.unwrap();
@@ -337,6 +444,46 @@ auto create_gpu(const Options& options) -> Option<Box<Gpu>> {
                               prepared.unwrap());
     gpu->configure(options);
     gpu->camera.fit(gpu->instance.bounds());
+    if (options.camera_preset) {
+        const auto& preset     = *options.camera_preset;
+        auto        projection = gpu->camera.frame().projection;
+        projection.yfov        = preset.yfov;
+        projection.aspect      = 0;
+        projection.far         = 0;
+        auto look_at           = preset.look_at;
+        auto up                = preset.up;
+        if (preset.space == CameraSpace::SceneRoot) {
+            const auto& roots = gltf::at(gpu->instance.asset().scenes, gpu->instance.scene()).roots;
+            if (roots.len() != usize(1)) {
+                rstd_error("gltf: scene-root camera preset requires exactly one scene root");
+                return None();
+            }
+            const auto& world   = gpu->instance.pose(roots[usize()]).world;
+            auto        squared = [](gltf::Vec3 value) {
+                return double(value.x) * value.x + double(value.y) * value.y +
+                       double(value.z) * value.z;
+            };
+            double x = squared(world.vector({ 1, 0, 0 })), y = squared(world.vector({ 0, 1, 0 })),
+                   z = squared(world.vector({ 0, 0, 1 }));
+            // A nonuniform scale cannot preserve a perspective camera's FOV.
+            if (! gltf::camera_frame(world, projection) || y < x * 0.9999 || y > x * 1.0001 ||
+                z < x * 0.9999 || z > x * 1.0001) {
+                rstd_error("gltf: camera preset reference must have a positive uniform scale and "
+                           "rotation");
+                return None();
+            }
+            look_at.position = world.point(look_at.position);
+            look_at.target   = world.point(look_at.target);
+            up               = world.vector(up);
+        }
+        auto frame = gltf::camera_frame(look_at, projection, up);
+        if (! frame) {
+            rstd_error("gltf: camera preset frame is invalid");
+            return None();
+        }
+        gpu->camera_target = Some(*frame);
+        gpu->camera_up     = up;
+    }
     if (! gpu->resize(device.extent)) return None();
     return Some(rstd::move(gpu));
 }
@@ -594,6 +741,10 @@ bool configure_target(Host& host, Gpu& gpu, const Options& options,
     int rc = ww_bridge_render_target_directive(&host.capabilities, &config, &directive);
     if (! rc && config.revision > host.target_revision &&
         options.resolution == WW_RESOLUTION_AUTO) {
+        auto previous_camera     = gpu.camera;
+        auto previous_transition = gpu.camera_transition;
+        auto previous_target =
+            gpu.camera_target ? Some(*gpu.camera_target) : None<gltf::CameraFrame>();
         host.target_revision = config.revision;
         result.status        = 2;
         auto drained         = gpu.last.valid() ? gpu.queue.wait(gpu.last) : gpu.queue.Poll();
@@ -635,6 +786,11 @@ bool configure_target(Host& host, Gpu& gpu, const Options& options,
                 host.events->request_stop(ExitCause::Failure);
             ww_bridge_pool_abort_target(host.pool);
         }
+        if (result.status != 0) {
+            gpu.camera            = previous_camera;
+            gpu.camera_transition = previous_transition;
+            gpu.camera_target     = previous_target;
+        }
         message =
             result.status == 0 ? ""_Str : "render target allocation or publication failed"_Str;
     }
@@ -663,13 +819,17 @@ bool control(Host& host, Gpu& gpu, Options& options, ww_bridge_control_t& event)
         VkExtent2D extent {};
         if (host.ready &&
             ww_bridge_pool_get_extent(host.pool, &extent.width, &extent.height) == 0 &&
-            host.pointer.motion(gpu.camera, extent, event.u.pointer_motion.event))
+            host.pointer.motion(gpu.camera, extent, event.u.pointer_motion.event)) {
+            gpu.cancel_camera_transition();
             host.camera_changed = true;
+        }
         break;
     }
     case WW_EVT_IN_POINTER_AXIS:
-        if (host.ready && host.pointer.axis(gpu.camera, event.u.pointer_axis.event))
+        if (host.ready && host.pointer.axis(gpu.camera, event.u.pointer_axis.event)) {
+            gpu.cancel_camera_transition();
             host.camera_changed = true;
+        }
         break;
     case WW_EVT_IN_SET_LOG_LEVEL: ww_renderer_log_set_level(event.u.set_log_level.level); break;
     case WW_EVT_IN_SETTING_CHANGED:

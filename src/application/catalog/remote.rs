@@ -266,7 +266,7 @@ async fn upsert_remote_download(
     Ok(())
 }
 
-async fn prepare_archive(
+async fn prepare_artifact(
     source_manager: &SourceManager,
     source_id: &str,
     id: &str,
@@ -274,19 +274,38 @@ async fn prepare_archive(
     info: DiscoverDownload,
 ) -> Result<PreparedArtifact> {
     let staged = StagedArtifact::create(dir)?;
-    download_remote_file(&info.transfer.url, &staged.download_path(), DOWNLOAD_LIMIT).await?;
-    let (staged, extracted) = tokio::task::spawn_blocking(move || -> Result<_> {
-        let extracted =
-            crate::archive::extract_zip(&staged.download_path(), staged.content(), ZIP_LIMITS)?;
-        log::debug!(
-            "remote archive extracted: {} files, {} bytes",
-            extracted.files,
-            extracted.bytes
-        );
-        Ok((staged, extracted))
-    })
-    .await
-    .context("archive extraction task failed")??;
+    let (staged, bytes, entries) = match info.transfer.format {
+        DownloadFormat::File => {
+            let filename = safe_remote_filename(&info.transfer.filename, id);
+            let path = staged.content().join(&filename);
+            download_remote_file(&info.transfer.url, &path, DOWNLOAD_LIMIT).await?;
+            let bytes = tokio::fs::metadata(&path).await?.len();
+            let entries = vec![crate::archive::ExtractedFile {
+                path: PathBuf::from(filename),
+                bytes,
+            }];
+            (staged, bytes, entries)
+        }
+        DownloadFormat::Zip => {
+            download_remote_file(&info.transfer.url, &staged.download_path(), DOWNLOAD_LIMIT)
+                .await?;
+            tokio::task::spawn_blocking(move || -> Result<_> {
+                let extracted = crate::archive::extract_zip(
+                    &staged.download_path(),
+                    staged.content(),
+                    ZIP_LIMITS,
+                )?;
+                log::debug!(
+                    "remote archive extracted: {} files, {} bytes",
+                    extracted.files,
+                    extracted.bytes
+                );
+                Ok((staged, extracted.bytes, extracted.entries))
+            })
+            .await
+            .context("archive extraction task failed")??
+        }
+    };
     let content = staged
         .content()
         .to_str()
@@ -304,8 +323,7 @@ async fn prepare_archive(
     metadata.description = resolved.description;
     metadata.tags = resolved.tags;
     metadata.external_id = resolved.external_id;
-    metadata.size =
-        Some(i64::try_from(extracted.bytes).context("unpacked artifact size is too large")?);
+    metadata.size = Some(i64::try_from(bytes).context("artifact size is too large")?);
     metadata.content_rating = resolved.content_rating.or(metadata.content_rating);
     let preview = if let Some(preview) = resolved.preview {
         Some(remote_asset::validate_file(
@@ -334,7 +352,7 @@ async fn prepare_archive(
             &resource,
             preview.as_deref(),
             metadata,
-            extracted.entries,
+            entries,
         )
     })
     .await
@@ -366,7 +384,7 @@ pub async fn download_remote(
         return Err(anyhow!("download url is empty"));
     }
     match info.transfer.format {
-        DownloadFormat::File => {
+        DownloadFormat::File if !info.transfer.resolve => {
             let target = dir.join(safe_remote_filename(&info.transfer.filename, &id));
             download_remote_file(&info.transfer.url, &target, DOWNLOAD_LIMIT).await?;
             write_remote_sidecar(&target, &info.metadata).await?;
@@ -381,7 +399,7 @@ pub async fn download_remote(
             )
             .await?;
         }
-        DownloadFormat::Zip => {
+        DownloadFormat::File | DownloadFormat::Zip => {
             let mutation = remote_asset::lock_mutation().await;
             if let Some(installed) = remote_asset::load(&dir, &source_id, &id)? {
                 upsert_remote_download(
@@ -407,7 +425,7 @@ pub async fn download_remote(
             }
             drop(mutation);
             let prepared =
-                prepare_archive(&state.source_manager, &source_id, &id, &dir, info).await?;
+                prepare_artifact(&state.source_manager, &source_id, &id, &dir, info).await?;
             // Once publication starts, its owner completes the DB transaction
             // even when the requesting task is cancelled.
             return tokio::spawn(async move {

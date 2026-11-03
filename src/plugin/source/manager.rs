@@ -460,6 +460,7 @@ impl LuaPluginRegistry {
                 pagination: disc.pagination,
                 remote_capability: disc.remote,
                 remote_hint: disc.remote_hint.clone(),
+                download_action: disc.download_action.clone(),
                 sorts: disc.sorts.clone(),
                 filters: disc.filters.clone(),
                 owner_plugin_id: info.plugin_id.clone(),
@@ -533,10 +534,13 @@ impl LuaPluginRegistry {
             .collect();
         let mut sources = self.discover_sources()?;
         for source in &mut sources {
-            if let Some((actions, status, avatar_url)) = dynamic.get(&source.plugin_id) {
+            if let Some((actions, status, avatar_url, download_action)) =
+                dynamic.get(&source.plugin_id)
+            {
                 source.actions = actions.clone();
                 source.status = status.clone();
                 source.avatar_url = avatar_url.clone();
+                source.download_action = download_action.clone();
             }
         }
         Ok(sources)
