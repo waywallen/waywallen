@@ -23,7 +23,8 @@ impl StatusNotifierItem {
 /// Empty icon data keeps hosts from trying to render a custom pixmap.
 type ToolTip = (String, Vec<(i32, i32, Vec<u8>)>, String, String);
 
-#[interface(name = "org.kde.StatusNotifierItem")]
+// zbus_macros 4.4.0 inverts this flag: true disables per-call task spawning.
+#[interface(name = "org.kde.StatusNotifierItem", spawn = true)]
 impl StatusNotifierItem {
     #[zbus(property)]
     fn category(&self) -> &str {
