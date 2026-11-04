@@ -134,8 +134,38 @@ fn routes(zip: Vec<u8>) -> HashMap<String, Reply> {
     ])
 }
 
+fn presentation_snapshot() -> serde_json::Map<String, serde_json::Value> {
+    serde_json::json!({
+        "sketchfab": {
+            "version": 2,
+            "adapter_version": 1,
+            "model_id": "model",
+            "source": "https://sketchfab.com/i/models/model/options",
+            "captured_at": 123,
+            "profile": {
+                "version": 2,
+                "directional_lights": [],
+                "point_lights": [],
+                "environment": {"ibl_intensity": 0, "background_color": [0.18, 0.18, 0.18]},
+                "display": {"tone_mapping": "linear", "exposure": 0.0},
+            },
+            "sections": {
+                "camera": {"status": "missing"},
+                "lighting": {"status": "mapped"},
+                "background": {"status": "mapped"},
+                "post_process": {"status": "mapped"},
+                "materials": {"status": "unsupported"},
+            },
+        },
+    })
+    .as_object()
+    .unwrap()
+    .clone()
+}
+
 fn source(url: &str, resource: &str) -> (tempfile::TempDir, SourceManager) {
     let directory = tempfile::tempdir().unwrap();
+    let presentation = serde_json::to_string(&presentation_snapshot()).unwrap();
     let script = format!(
         r#"
 local downloads = 0
@@ -155,6 +185,7 @@ function M.discover.download(ctx, id)
         preview_url={url:?} .. '/preview.png',size=1,
         attribution={{author='Artist',author_url='https://example.invalid/artist',license='CC BY',
             license_url='https://example.invalid/license',requirements='Credit Artist'}},
+        provider_data=ctx.json.strict.decode({presentation:?}),
     }}
 end
 function M.discover.resolve(ctx, params)
@@ -163,6 +194,8 @@ function M.discover.resolve(ctx, params)
     assert(m and m.title == 'A model' and m.external_id == params.id)
     assert(m.url == nil and m.filename == nil)
     assert(m.attribution.author == 'Artist')
+    assert(m.provider_data.sketchfab.version == 2 and m.provider_data.sketchfab.adapter_version == 1)
+    assert(m.provider_data.sketchfab.profile.version == 2)
     return {{name=m.title,wp_type=m.wp_type,resource={resource:?},description=m.description,
         tags=m.tags,external_id=m.external_id}}
 end
@@ -377,6 +410,10 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     assert_eq!(installed.artifact.source_id, "test");
     assert_eq!(installed.artifact.remote_id, "model");
     assert_eq!(
+        installed.artifact.metadata.provider_data,
+        Some(presentation_snapshot())
+    );
+    assert_eq!(
         installed.artifact.metadata.size,
         Some((scene.len() + mesh.len() + texture.len()) as i64)
     );
@@ -453,6 +490,10 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
         .unwrap()
         .unwrap();
     assert_eq!(
+        reloaded.artifact.metadata.provider_data,
+        Some(presentation_snapshot())
+    );
+    assert_eq!(
         reloaded.artifact.metadata.attribution.unwrap().requirements,
         "Credit Artist"
     );
@@ -463,6 +504,10 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
         .unwrap();
     let reused = replacement.publish(root.path()).unwrap().commit();
     assert_eq!(reused.resource(), installed.resource());
+    assert_eq!(
+        reused.artifact.metadata.provider_data,
+        Some(presentation_snapshot())
+    );
     assert_eq!(std::fs::read(reused.resource()).unwrap(), scene);
     assert_eq!(
         std::fs::metadata(reused.resource()).unwrap().ino(),
@@ -479,12 +524,7 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     assert!(info.transfer.resolve);
     info.transfer.format = DownloadFormat::File;
     info.transfer.filename = "../scene.glb".into();
-    let provider_data = serde_json::json!({
-        "camera": {"position": [1, 2, 3], "target": [0, 0, 0]},
-    })
-    .as_object()
-    .unwrap()
-    .clone();
+    let provider_data = presentation_snapshot();
     info.metadata.provider_data = Some(provider_data.clone());
     let publication =
         prepare_artifact(&manager, "test", "model", root.path(), info.clone(), |_| {})
@@ -493,6 +533,10 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
             .publish(root.path())
             .unwrap();
     assert!(publication.installed.resource().is_file());
+    assert_eq!(
+        publication.installed.artifact.metadata.provider_data,
+        Some(provider_data.clone())
+    );
     drop(publication);
     assert_empty(root.path());
 
@@ -518,12 +562,10 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     let persisted = std::fs::read_to_string(installed.root.join(".waywallen/asset.json")).unwrap();
     assert!(!persisted.contains("temporary-signature"));
     let original_inode = std::fs::metadata(installed.resource()).unwrap().ino();
-    info.metadata.provider_data = Some(
-        serde_json::json!({"camera": {"position": [4, 5, 6]}})
-            .as_object()
-            .unwrap()
-            .clone(),
-    );
+    let mut newer = serde_json::Value::Object(provider_data.clone());
+    newer["sketchfab"]["captured_at"] = 456.into();
+    newer["sketchfab"]["profile"]["display"]["exposure"] = 2.into();
+    info.metadata.provider_data = Some(newer.as_object().unwrap().clone());
     let reused = prepare_artifact(&manager, "test", "model", root.path(), info, |_| {})
         .await
         .unwrap()
@@ -657,6 +699,15 @@ async fn remote_download_database_failure_rolls_back_item_tags_and_publication()
     let publication = prepared.publish(root.path()).unwrap();
     let installed = &publication.installed;
     assert!(installed.resource().is_file());
+    assert_eq!(
+        remote_asset::load(root.path(), "test", "model")
+            .unwrap()
+            .unwrap()
+            .artifact
+            .metadata
+            .provider_data,
+        Some(presentation_snapshot())
+    );
     let result = upsert_remote_download(
         &db,
         "test",

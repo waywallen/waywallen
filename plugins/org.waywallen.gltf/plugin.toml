@@ -11,7 +11,7 @@ directory = "i18n"
 [renderers.waywallen-gltf]
 bin = "../../../../bin/waywallen-gltf-renderer"
 types = ["gltf"]
-extras = ["asset-root", "camera-preset"]
+extras = ["asset-root", "render-profile"]
 type_labels = { gltf = { msgid = "glTF" } }
 priority = 100
 activity = "continuous"

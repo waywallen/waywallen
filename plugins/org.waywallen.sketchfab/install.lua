@@ -11,6 +11,7 @@ lito.install({
         { source = "sketchfab/api.lua", destination = plugin_path("sketchfab/api.lua") },
         { source = "sketchfab/discover.lua", destination = plugin_path("sketchfab/discover.lua") },
         { source = "sketchfab/map.lua", destination = plugin_path("sketchfab/map.lua") },
+        { source = "sketchfab/presentation.lua", destination = plugin_path("sketchfab/presentation.lua") },
         { source = "sketchfab/session.lua", destination = plugin_path("sketchfab/session.lua") },
         { source = "sketchfab/source.lua", destination = plugin_path("sketchfab/source.lua") },
         { source = "sketchfab/wallpaper.lua", destination = plugin_path("sketchfab/wallpaper.lua") },

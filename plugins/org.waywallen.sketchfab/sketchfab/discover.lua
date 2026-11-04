@@ -1,6 +1,7 @@
 local api = import("sketchfab.api")
 local map = import("sketchfab.map")
 local session = import("sketchfab.session")
+local presentation = import("sketchfab.presentation")
 local M = {}
 local models = {}
 local sequence = 0
@@ -72,14 +73,7 @@ function M.download(ctx, id)
         error("This Sketchfab model is not downloadable")
     end
     local metadata = map.download(model)
-    local camera_ok, camera = pcall(function()
-        return map.viewer_options(api.viewer_options(ctx, id), ctx.json.strict)
-    end)
-    if camera_ok and camera then
-        metadata.provider_data = camera
-    elseif type(ctx.log) == "function" then
-        ctx.log("sketchfab: camera preset unavailable for " .. id)
-    end
+    metadata.provider_data = presentation.capture(ctx, id)
     local transfer = api.download(ctx, id, headers)
     metadata.url, metadata.filename, metadata.archive = transfer.url, transfer.filename, transfer.archive
     metadata.size = transfer.size

@@ -230,57 +230,6 @@ function M.details(model)
     }
 end
 
-local function vector(value, length, json)
-    if json.kind(value) ~= "array" or #value ~= length then return false end
-    for _, number in ipairs(value) do
-        if type(number) ~= "number" or number ~= number or math.abs(number) == math.huge then
-            return false
-        end
-    end
-    return true
-end
-
-local function valid_camera(camera, json)
-    if json.kind(camera) ~= "object" or not vector(camera.position, 3, json)
-        or not vector(camera.target, 3, json) or type(camera.fov) ~= "number"
-        or camera.fov ~= camera.fov or camera.fov <= 0 or camera.fov >= 180 then
-        return false
-    end
-    return true
-end
-
-function M.viewer_options(options, json)
-    local camera = options.camera
-    if not valid_camera(camera, json) then return nil end
-    local view = json.object { version = 1, space = "sketchfab-viewer", camera = camera }
-    if json.kind(options.orientation) == "object" and vector(options.orientation.matrix, 16, json) then
-        view.orientation = options.orientation
-    end
-    local data = json.object { sketchfab = view }
-    if #json.encode(data) > 64 * 1024 then return nil end
-    return data
-end
-
-function M.camera_preset(data, json)
-    local view = json.kind(data) == "object" and data.sketchfab
-    if json.kind(view) ~= "object" or view.version ~= 1 or view.space ~= "sketchfab-viewer"
-        or not valid_camera(view.camera, json) then
-        return nil
-    end
-    local camera = view.camera
-    if camera.position[1] == camera.target[1] and camera.position[2] == camera.target[2] then
-        return nil
-    end
-    -- The export root includes both the axis conversion and model normalization.
-    return json.encode(json.object {
-        space = "scene-root",
-        position = camera.position,
-        target = camera.target,
-        up = json.array { 0, 0, 1 },
-        yfov = camera.fov * math.pi / 180,
-    })
-end
-
 function M.download(model)
     local author, license = model.author or {}, model.license or {}
     local attribution = {

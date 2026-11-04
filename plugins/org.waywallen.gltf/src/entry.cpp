@@ -11,8 +11,7 @@ module waywallen.gltf.entry;
 import rstd;
 import rstd.argparse;
 import rstd.log;
-import rstd.json;
-import vecgltf.render;
+import vecgltf.presentation;
 import waywallen.bridge;
 import waywallen.plugin.run_loop;
 
@@ -32,26 +31,14 @@ namespace tex   = vrento::texture;
 
 namespace
 {
-enum class CameraSpace
-{
-    World,
-    SceneRoot
-};
-
-struct CameraPreset {
-    gltf::CameraLookAt look_at;
-    gltf::Vec3         up { 0, 1, 0 };
-    float              yfov {};
-    CameraSpace        space { CameraSpace::World };
-};
-
 struct Options {
-    String               path, ipc, render_node, capture, asset_root;
-    Option<CameraPreset> camera_preset;
-    unsigned             fps { 30 }, custom_extent { 1080 }, frames { 3 };
-    int                  resolution { -2 }, animation {};
-    float                exposure { 1 };
-    bool                 loop { true }, selftest {}, validation {};
+    String                         path, ipc, render_node, capture, asset_root;
+    Option<gltf::PresentationSpec> presentation;
+    unsigned                       fps { 30 }, custom_extent { 1080 }, frames { 3 };
+    int                            resolution { -2 }, animation {};
+    float                          exposure { 1 };
+    bool                           loop { true }, selftest {}, validation {}, snapshot {};
+    VkExtent2D                     snapshot_extent { 128, 128 };
 };
 
 auto text(const char* value) -> ref<str> {
@@ -68,52 +55,6 @@ template<class T>
 auto number(ref<str> value) -> Option<T> {
     auto parsed = rstd::from_str<T>(value);
     return parsed.is_ok() ? Some(parsed.unwrap()) : None<T>();
-}
-
-auto camera_preset(ref<str> value) -> Option<CameraPreset> {
-    if (value.len() > usize(4096)) return None();
-    auto parsed = rstd::json::from_str(value, { .max_depth = usize(4) });
-    if (parsed.is_err() || ! parsed->is_object()) return None();
-    auto scalar = [](const rstd::json::Value& member) -> Option<float> {
-        auto number = member.as_f64();
-        if (! number || ! number->is_finite() ||
-            number->to_primitive() > double(f32::MAX.to_primitive()) ||
-            number->to_primitive() < -double(f32::MAX.to_primitive()))
-            return None();
-        float value = float(number->to_primitive());
-        return f32(value).is_finite() ? Some(value) : None<float>();
-    };
-    auto vector = [&](ref<str> key, gltf::Vec3& output) {
-        auto member = parsed->get(key);
-        if (! member) return false;
-        auto values = (**member).as_array();
-        if (! values || (**values).len() != usize(3)) return false;
-        auto x = scalar((**values)[usize(0)]), y = scalar((**values)[usize(1)]),
-             z = scalar((**values)[usize(2)]);
-        if (! x || ! y || ! z) return false;
-        output = { *x, *y, *z };
-        return true;
-    };
-    CameraPreset result;
-    if (auto field = parsed->get("space"_str)) {
-        auto space = (**field).as_str();
-        if (! space) return None();
-        if (*space == "scene-root"_str)
-            result.space = CameraSpace::SceneRoot;
-        else if (*space != "world"_str)
-            return None();
-    }
-    auto field = parsed->get("yfov"_str);
-    auto yfov  = field ? scalar(**field) : None<float>();
-    if (! yfov || ! vector("position"_str, result.look_at.position) ||
-        ! vector("target"_str, result.look_at.target) ||
-        (parsed->get("up"_str) && ! vector("up"_str, result.up)))
-        return None();
-    result.yfov = *yfov;
-    gltf::CameraProjection projection;
-    projection.yfov = result.yfov;
-    if (! gltf::camera_frame(result.look_at, projection, result.up)) return None();
-    return Some(result);
 }
 
 void settings(Options& options, const ww_kv_list_t& values) {
@@ -159,9 +100,14 @@ auto parse(int argc, char** argv, int& status) -> Option<Options> {
         Arg<String>::value("capture"_str, string_parser()).long_name("capture"_str));
     auto asset_root = command.add_arg(
         Arg<String>::value("asset-root"_str, string_parser()).long_name("asset-root"_str));
-    auto preset = command.add_arg(
-        Arg<String>::value("camera-preset"_str, string_parser()).long_name("camera-preset"_str));
+    auto profile = command.add_arg(
+        Arg<String>::value("render-profile"_str, string_parser()).long_name("render-profile"_str));
+    auto width =
+        command.add_arg(Arg<String>::value("width"_str, string_parser()).long_name("width"_str));
+    auto height =
+        command.add_arg(Arg<String>::value("height"_str, string_parser()).long_name("height"_str));
     command.add_arg(Arg<bool>::flag("selftest"_str).long_name("selftest"_str));
+    command.add_arg(Arg<bool>::flag("snapshot"_str).long_name("snapshot"_str));
     command.add_arg(Arg<bool>::flag("validation"_str).long_name("validation"_str));
     auto built = rstd::move(command).build();
     if (built.is_err()) {
@@ -197,16 +143,17 @@ auto parse(int argc, char** argv, int& status) -> Option<Options> {
     copy(node, options.render_node);
     copy(capture, options.capture);
     copy(asset_root, options.asset_root);
-    String camera;
-    copy(preset, camera);
-    if (matches.contains("camera-preset"_str)) {
-        options.camera_preset = camera_preset(camera.as_str());
-        if (! options.camera_preset) {
-            rstd_error("gltf: invalid --camera-preset; expected glTF position, target, up and yfov "
-                       "in radians");
+    String presentation;
+    copy(profile, presentation);
+    if (matches.contains("render-profile"_str)) {
+        auto parsed =
+            gltf::ParsePresentation(presentation.as_str().as_bytes(), "--render-profile"_str);
+        if (parsed.is_err()) {
+            report(parsed.unwrap_err());
             status = 2;
             return None();
         }
+        options.presentation = Some(parsed.unwrap());
     }
     String count;
     copy(frames, count);
@@ -220,6 +167,23 @@ auto parse(int argc, char** argv, int& status) -> Option<Options> {
     }
     options.selftest   = matches.contains("selftest"_str);
     options.validation = matches.contains("validation"_str);
+    options.snapshot   = matches.contains("snapshot"_str);
+    String w, h;
+    copy(width, w);
+    copy(height, h);
+    if (! w.is_empty() || ! h.is_empty()) {
+        auto x = number<u32>(w.as_str()), y = number<u32>(h.as_str());
+        if (! x || ! y || *x < u32(1) || *x > u32(7680) || *y < u32(1) || *y > u32(4320)) {
+            status = 2;
+            return None();
+        }
+        options.snapshot_extent = { x->to_primitive(), y->to_primitive() };
+    }
+    if (! options.selftest && (options.snapshot || ! w.is_empty() || ! h.is_empty())) {
+        rstd_error("gltf: --snapshot, --width and --height require --selftest");
+        status = 2;
+        return None();
+    }
     if (options.path.is_empty() || (! options.selftest && options.ipc.is_empty())) {
         rstd_error("--path MODEL and either --ipc SOCKET or --selftest are required");
         status = 2;
@@ -244,7 +208,7 @@ VkExtent2D initial_extent(const Options& options) {
             extent.height = 4320;
         }
     }
-    if (options.selftest) extent = { 128, 128 };
+    if (options.selftest) extent = options.snapshot_extent;
     return extent;
 }
 
@@ -252,40 +216,80 @@ struct Gpu {
     vk::DeviceSession           session;
     vk::TextureContext          queue;
     gltf::Renderer              renderer;
+    gltf::DisplayRenderer       display;
     gltf::SceneInstance         instance;
     gltf::PreparedAsset         prepared;
+    gltf::BoundPresentation     presentation;
     gltf::OrbitCamera           camera;
     gltf::CameraTransition      camera_transition;
     Option<gltf::CameraFrame>   camera_target;
     gltf::Vec3                  camera_up { 0, 1, 0 };
     Option<tex::TextureViewRef> target;
+    Option<tex::TextureViewRef> hdr, coverage;
     tex::SubmissionToken        last;
     VkExtent2D                  extent {};
     Gpu(vk::DeviceSession device, vk::TextureContext context, gltf::Renderer graphics,
-        gltf::SceneInstance scene, gltf::PreparedAsset model)
+        gltf::DisplayRenderer output, gltf::SceneInstance scene, gltf::PreparedAsset model,
+        gltf::BoundPresentation profile)
         : session(rstd::move(device)),
           queue(rstd::move(context)),
           renderer(rstd::move(graphics)),
+          display(rstd::move(output)),
           instance(rstd::move(scene)),
-          prepared(rstd::move(model)) {
+          prepared(rstd::move(model)),
+          presentation(rstd::move(profile)) {
         camera.fit(instance.bounds());
     }
     bool resize(VkExtent2D size) {
         if (target && size.width == extent.width && size.height == extent.height) return true;
-        tex::TextureDesc desc;
-        desc.extent = { size.width, size.height };
-        desc.usage = tex::Usage::ColorAttachment | tex::Usage::Sampled | tex::Usage::TransferSource;
-        auto image = queue.CreateTexture(desc);
-        if (image.is_err()) return false;
-        auto view = queue.CreateView(image.unwrap(), {});
-        if (view.is_err()) return false;
+        auto resolved = gltf::ResolvePresentation(
+            presentation,
+            instance,
+            { .camera = Some(camera.frame(float(size.width) / float(size.height))) });
+        if (resolved.is_err()) {
+            report(resolved.unwrap_err());
+            return false;
+        }
+        auto texture = [&](vrento::TextureFormat format) -> Option<tex::TextureViewRef> {
+            tex::TextureDesc desc;
+            desc.extent = { size.width, size.height };
+            desc.format = format;
+            desc.usage =
+                tex::Usage::ColorAttachment | tex::Usage::Sampled | tex::Usage::TransferSource;
+            auto image = queue.CreateTexture(desc);
+            if (image.is_err()) return None();
+            auto view = queue.CreateView(image.unwrap(), {});
+            return view.is_ok() ? Some(view.unwrap()) : None<tex::TextureViewRef>();
+        };
+        auto output   = texture(vrento::TextureFormat::RGBA8);
+        auto radiance = texture(vrento::TextureFormat::RGBA16F);
+        if (! output || ! radiance) return false;
+        Option<tex::TextureViewRef> mask;
+        const auto&                 effects = resolved->display;
+        if ((effects.bloom && effects.bloom->intensity > 0) || effects.sharpen > 0) {
+            mask = texture(vrento::TextureFormat::RGBA16F);
+            if (! mask) return false;
+        }
         auto resized = renderer.resize(size);
         if (resized.is_err()) {
             report(resized.unwrap_err());
             return false;
         }
-        target = Some(view.unwrap());
-        extent = size;
+        gltf::RenderTarget scene { *radiance };
+        if (mask) scene.coverage = Some(tex::TextureViewRef(*mask));
+        auto scene_ready   = renderer.prepare_scene_target(scene, resolved->scene);
+        auto display_ready = display.prepare_target(
+            { *output, vk::AttachmentLoad::Clear, gltf::DisplayEncoding::Srgb }, effects);
+        if (scene_ready.is_err() || display_ready.is_err()) {
+            if (scene_ready.is_err()) report(scene_ready.unwrap_err());
+            if (display_ready.is_err()) report(display_ready.unwrap_err());
+            if (target) (void)renderer.resize(extent);
+            return false;
+        }
+        target   = rstd::move(output);
+        hdr      = rstd::move(radiance);
+        coverage = rstd::move(mask);
+        extent   = size;
         return true;
     }
     void configure(const Options& options) {
@@ -300,7 +304,7 @@ struct Gpu {
         }
         if (instance.animation() != selected) {
             instance.set_animation(selected);
-            if (! options.camera_preset) camera.fit(instance.bounds());
+            if (! presentation.spec().camera) camera.fit(instance.bounds());
         }
         instance.set_looping(options.loop);
     }
@@ -341,24 +345,45 @@ struct Gpu {
     auto record(float delta, const Options& options) -> Option<tex::Submission> {
         instance.update(delta);
         if (! update_camera(delta)) return None();
+        auto resolved = gltf::ResolvePresentation(
+            presentation,
+            instance,
+            { .exposure_multiplier = options.exposure,
+              .camera = Some(camera.frame(float(extent.width) / float(extent.height))) });
+        if (resolved.is_err()) {
+            report(resolved.unwrap_err());
+            return None();
+        }
+        auto values = resolved.unwrap();
+        auto view   = values.camera->view(float(extent.width) / float(extent.height));
+        if (! view) return None();
         auto begun = queue.Begin();
         if (begun.is_err()) return None();
-        auto work     = begun.unwrap();
-        auto recorded = renderer.record(work,
-                                        *target,
-                                        prepared,
-                                        instance,
-                                        camera.view(float(extent.width) / float(extent.height)),
-                                        { options.exposure });
+        auto               work = begun.unwrap();
+        gltf::RenderTarget scene { *hdr };
+        if (coverage) scene.coverage = Some(tex::TextureViewRef(*coverage));
+        auto recorded =
+            renderer.record_scene(work, rstd::move(scene), prepared, instance, *view, values.scene);
         if (recorded.is_err()) {
             report(recorded.unwrap_err());
+            return None();
+        }
+        gltf::DisplayInput input { *hdr };
+        if (coverage) input.coverage = Some(tex::TextureViewRef(*coverage));
+        auto displayed =
+            display.record(work,
+                           rstd::move(input),
+                           { *target, vk::AttachmentLoad::Clear, gltf::DisplayEncoding::Srgb },
+                           values.display);
+        if (displayed.is_err()) {
+            report(displayed.unwrap_err());
             return None();
         }
         return Some(rstd::move(work));
     }
 };
 
-auto create_gpu(const Options& options) -> Option<Box<Gpu>> {
+auto create_gpu(Options& options) -> Option<Box<Gpu>> {
     auto path      = rstd::path::PathBuf::from(options.path.as_str());
     auto canonical = rstd::fs::canonicalize(path.as_path());
     if (canonical.is_err()) {
@@ -382,6 +407,27 @@ auto create_gpu(const Options& options) -> Option<Box<Gpu>> {
     auto asset = loaded.unwrap();
     for (const auto& diagnostic : asset->diagnostics)
         rstd_warn("gltf: {}: {}", diagnostic.location, diagnostic.message);
+    gltf::PresentationResources resources;
+    auto                        parent = canonical_path.as_path().parent();
+    if (parent) resources.base_directory = rstd::path::PathBuf::from(*parent);
+    resources.root =
+        Some(options.asset_root.is_empty() ? resources.base_directory.clone() : rstd::move(root));
+    auto bound =
+        gltf::BindPresentation(options.presentation.take().unwrap_or(gltf::PresentationSpec {}),
+                               asset.clone(),
+                               rstd::move(resources));
+    if (bound.is_err()) {
+        report(bound.unwrap_err());
+        return None();
+    }
+    auto                presentation = bound.unwrap();
+    gltf::SceneInstance scene(asset.clone());
+    auto                initial =
+        gltf::ResolvePresentation(presentation, scene, { .exposure_multiplier = options.exposure });
+    if (initial.is_err()) {
+        report(initial.unwrap_err());
+        return None();
+    }
     vk::DeviceSessionOptions device;
     device.extent     = initial_extent(options);
     device.validation = options.validation;
@@ -420,7 +466,22 @@ auto create_gpu(const Options& options) -> Option<Box<Gpu>> {
         rstd_error("Vulkan session: {}", created.unwrap_err());
         return None();
     }
-    auto session = created.unwrap();
+    auto        session    = created.unwrap();
+    const auto& limits     = session.device().limits();
+    auto        max_extent = limits.maxImageDimension2D;
+    if (limits.maxFramebufferWidth < max_extent) max_extent = limits.maxFramebufferWidth;
+    if (limits.maxFramebufferHeight < max_extent) max_extent = limits.maxFramebufferHeight;
+    auto view = initial->camera->view(float(device.extent.width) / float(device.extent.height));
+    if (! view) return None();
+    auto scene_valid = gltf::ValidateSceneOptions(initial->scene, *view, max_extent);
+    if (scene_valid.is_err() || device.extent.width > max_extent ||
+        device.extent.height > max_extent) {
+        if (scene_valid.is_err())
+            report(scene_valid.unwrap_err());
+        else
+            rstd_error("gltf: render target exceeds device dimensions");
+        return None();
+    }
     auto context = vk::TextureContext::create(session);
     if (context.is_err()) {
         rstd_error("Vulkan texture context failed");
@@ -432,7 +493,19 @@ auto create_gpu(const Options& options) -> Option<Box<Gpu>> {
         return None();
     }
     auto renderer = graphics.unwrap();
-    auto prepared = renderer.prepare(asset.clone());
+    if (auto environment = presentation.take_environment()) {
+        auto uploaded = renderer.set_environment(environment.take().unwrap());
+        if (uploaded.is_err()) {
+            report(uploaded.unwrap_err());
+            return None();
+        }
+    }
+    auto output = gltf::DisplayRenderer::create(session);
+    if (output.is_err()) {
+        report(output.unwrap_err());
+        return None();
+    }
+    auto prepared = renderer.prepare(asset.clone(), presentation.prepare_options());
     if (prepared.is_err()) {
         report(prepared.unwrap_err());
         return None();
@@ -440,49 +513,21 @@ auto create_gpu(const Options& options) -> Option<Box<Gpu>> {
     auto gpu = Box<Gpu>::make(session,
                               context.unwrap(),
                               rstd::move(renderer),
-                              gltf::SceneInstance(asset.clone()),
-                              prepared.unwrap());
+                              output.unwrap(),
+                              rstd::move(scene),
+                              prepared.unwrap(),
+                              rstd::move(presentation));
     gpu->configure(options);
     gpu->camera.fit(gpu->instance.bounds());
-    if (options.camera_preset) {
-        const auto& preset     = *options.camera_preset;
-        auto        projection = gpu->camera.frame().projection;
-        projection.yfov        = preset.yfov;
-        projection.aspect      = 0;
-        projection.far         = 0;
-        auto look_at           = preset.look_at;
-        auto up                = preset.up;
-        if (preset.space == CameraSpace::SceneRoot) {
-            const auto& roots = gltf::at(gpu->instance.asset().scenes, gpu->instance.scene()).roots;
-            if (roots.len() != usize(1)) {
-                rstd_error("gltf: scene-root camera preset requires exactly one scene root");
-                return None();
-            }
-            const auto& world   = gpu->instance.pose(roots[usize()]).world;
-            auto        squared = [](gltf::Vec3 value) {
-                return double(value.x) * value.x + double(value.y) * value.y +
-                       double(value.z) * value.z;
-            };
-            double x = squared(world.vector({ 1, 0, 0 })), y = squared(world.vector({ 0, 1, 0 })),
-                   z = squared(world.vector({ 0, 0, 1 }));
-            // A nonuniform scale cannot preserve a perspective camera's FOV.
-            if (! gltf::camera_frame(world, projection) || y < x * 0.9999 || y > x * 1.0001 ||
-                z < x * 0.9999 || z > x * 1.0001) {
-                rstd_error("gltf: camera preset reference must have a positive uniform scale and "
-                           "rotation");
-                return None();
-            }
-            look_at.position = world.point(look_at.position);
-            look_at.target   = world.point(look_at.target);
-            up               = world.vector(up);
-        }
-        auto frame = gltf::camera_frame(look_at, projection, up);
-        if (! frame) {
-            rstd_error("gltf: camera preset frame is invalid");
+    if (gpu->presentation.spec().camera) {
+        auto resolved = gltf::ResolvePresentation(gpu->presentation, gpu->instance);
+        if (resolved.is_err()) {
+            report(resolved.unwrap_err());
             return None();
         }
-        gpu->camera_target = Some(*frame);
-        gpu->camera_up     = up;
+        auto frame         = resolved->camera.unwrap();
+        gpu->camera_target = Some(frame);
+        gpu->camera_up     = gltf::compose({}, frame.orientation, { 1, 1, 1 }).vector({ 0, 1, 0 });
     }
     if (! gpu->resize(device.extent)) return None();
     return Some(rstd::move(gpu));
@@ -745,6 +790,13 @@ bool configure_target(Host& host, Gpu& gpu, const Options& options,
         auto previous_transition = gpu.camera_transition;
         auto previous_target =
             gpu.camera_target ? Some(*gpu.camera_target) : None<gltf::CameraFrame>();
+        auto previous_output =
+            gpu.target ? Some(tex::TextureViewRef(*gpu.target)) : None<tex::TextureViewRef>();
+        auto previous_hdr =
+            gpu.hdr ? Some(tex::TextureViewRef(*gpu.hdr)) : None<tex::TextureViewRef>();
+        auto previous_coverage =
+            gpu.coverage ? Some(tex::TextureViewRef(*gpu.coverage)) : None<tex::TextureViewRef>();
+        auto previous_extent = gpu.extent;
         host.target_revision = config.revision;
         result.status        = 2;
         auto drained         = gpu.last.valid() ? gpu.queue.wait(gpu.last) : gpu.queue.Poll();
@@ -790,6 +842,12 @@ bool configure_target(Host& host, Gpu& gpu, const Options& options,
             gpu.camera            = previous_camera;
             gpu.camera_transition = previous_transition;
             gpu.camera_target     = previous_target;
+            gpu.target            = rstd::move(previous_output);
+            gpu.hdr               = rstd::move(previous_hdr);
+            gpu.coverage          = rstd::move(previous_coverage);
+            gpu.extent            = previous_extent;
+            if (gpu.renderer.resize(previous_extent).is_err())
+                host.events->request_stop(ExitCause::Failure);
         }
         message =
             result.status == 0 ? ""_Str : "render target allocation or publication failed"_Str;
@@ -928,8 +986,14 @@ bool readback(Gpu& gpu, const Options& options) {
 }
 
 int selftest(Gpu& gpu, const Options& options) {
+    if (options.snapshot && gpu.camera_target) {
+        auto target = gpu.camera_target.take().unwrap();
+        if (! gpu.camera.restore(target, float(gpu.extent.width) / float(gpu.extent.height)))
+            return 1;
+        gpu.camera_transition.stop();
+    }
     for (unsigned i = 0; i < options.frames; ++i) {
-        auto work = gpu.record(i ? 1.0f / float(options.fps) : 0, options);
+        auto work = gpu.record(i && ! options.snapshot ? 1.0f / float(options.fps) : 0, options);
         if (! work) return 1;
         auto submitted = gpu.queue.Submit(work.take().unwrap());
         if (submitted.is_err()) return 1;

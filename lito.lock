@@ -222,9 +222,11 @@ dependencies = [
 [[packages]]
 name = "vecgltf"
 version = "0.1.0"
-source = "git+https://github.com/vecren/vecgltf.git#89b7072b18658a4a497fbfbeaa346a99cf64a48c"
+source = "git+https://github.com/vecren/vecgltf.git#c0174d46295a72b90364de5121b497e252f49044"
 dependencies = [
+  "licrypto",
   "lito-spirv",
+  "rstd-json",
   "rstd-std",
   "vrento",
 ]
@@ -232,7 +234,7 @@ dependencies = [
 [[packages]]
 name = "vrento"
 version = "0.1.0"
-source = "git+https://github.com/vecren/vrento.git#b5030da3b31a53e50eea3d69e034d0550c016e35"
+source = "git+https://github.com/vecren/vrento.git#00878a007e8009e4981e50eeb3b301c6fbc7d384"
 dependencies = [
   "lito-spirv",
   "rstd-log",

@@ -34,7 +34,15 @@ fn lua_test(body: &str) {
         .plugin_lua_env(entry().parent().unwrap(), "org.waywallen.sketchfab")
         .unwrap();
     let import: LuaFunction = environment.get("import").unwrap();
-    for name in ["api", "discover", "map", "session", "source", "wallpaper"] {
+    for name in [
+        "api",
+        "discover",
+        "map",
+        "presentation",
+        "session",
+        "source",
+        "wallpaper",
+    ] {
         runtime
             .lua
             .globals()
@@ -199,6 +207,7 @@ fn sketchfab_plugin_supports_model_downloads_and_installs_translations() {
         "main.lua",
         "sketchfab/api.lua",
         "sketchfab/map.lua",
+        "sketchfab/presentation.lua",
         "sketchfab/session.lua",
         "sketchfab/discover.lua",
         "sketchfab/source.lua",
@@ -413,7 +422,7 @@ reply({camera={position={1,2,3},target={0,0,0},fov=45}})
 reply({gltf={url='https://cdn.example/model.zip',expires=300,size=42}})
 local download = discover.download(ctx,id)
 assert(download.external_id == id and download.filename == id..'.zip' and download.archive == 'zip')
-assert(download.provider_data.sketchfab.camera.position[2] == 2)
+assert(download.provider_data.sketchfab.profile.camera.position[2] == 2)
 assert(last_request().path == 'https://api.sketchfab.com/v3/models/'..id..'/download')
 for _, invalid in ipairs({
     '', 'bad', string.rep('a',26), string.rep('a',28), string.rep('g',32),
@@ -564,18 +573,21 @@ assert(result.attribution.author == 'artist' and result.attribution.license == '
 assert(result.attribution.author_url == 'https://sketchfab.com/artist')
 assert(result.attribution.license_url == 'https://creativecommons.org/licenses/by/4.0/')
 assert(result.attribution.requirements == 'Credit the author')
-assert(result.provider_data.sketchfab.camera.up == 1.5)
-assert(result.provider_data.sketchfab.camera.position[2] == 2)
-assert(result.provider_data.sketchfab.orientation.matrix[16] == 1)
+assert(result.provider_data.sketchfab.version == 2)
+assert(result.provider_data.sketchfab.profile.camera.up[3] == 1)
+assert(result.provider_data.sketchfab.profile.camera.position[2] == 2)
+assert(result.provider_data.sketchfab.sections.orientation.status == 'mapped')
 local preset = json.strict.decode('{"camera":{"position":[1,2,3],"target":[0,0,0],"fov":45}}')
 preset.camera.fov = 180
-assert(map.viewer_options(preset,json.strict) == nil)
+assert(presentation.from_options(ctx,uid(1),preset).sketchfab.sections.camera.status == 'invalid')
 preset.camera.fov = 45
 preset.camera.position = json.strict.array{1,2}
-assert(map.viewer_options(preset,json.strict) == nil)
+assert(presentation.from_options(ctx,uid(1),preset).sketchfab.sections.camera.status == 'invalid')
 preset.camera.position = json.strict.array{1,2,3}
 preset.camera.oversized = string.rep('x',65536)
-assert(map.viewer_options(preset,json.strict) == nil)
+local normalized = presentation.from_options(ctx,uid(1),preset)
+assert(normalized.sketchfab.profile.camera.position[1] == 1)
+assert(not json.strict.encode(normalized):find('oversized',1,true))
 assert(result.description:find('Current description',1,true))
 assert(result.description:find('Provided by Sketchfab',1,true))
 assert(result.description:find('Author: artist',1,true) and result.description:find('License: CC Attribution',1,true))
@@ -591,7 +603,8 @@ local retried = discover.download(ctx,uid(1))
 assert(request_count() == before+3 and retried.url ~= result.url)
 assert(retried.url == 'https://cdn.example/retry.zip?signature=fresh')
 assert(retried.title == 'Retried' and retried.size == nil)
-assert(retried.provider_data == nil)
+assert(retried.provider_data.sketchfab.profile == json.strict.null)
+assert(retried.provider_data.sketchfab.sections.options.status == 'unavailable')
 assert(last_request().headers.Authorization == 'Token test-token')
 reply({},429,'60')
 assert(not pcall(api.viewer_options,ctx,uid(1)))
@@ -601,6 +614,135 @@ reply({gltf={url='https://cdn.example/model.zip',expires=300,size=42}})
 assert(api.download(ctx,uid(1),session.headers()).filename == uid(1)..'.zip')
 local camera_requests = request_count()
 assert(not pcall(api.viewer_options,ctx,uid(1)) and request_count() == camera_requests)
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_presentation_converts_sections_without_requiring_a_camera() {
+    lua_test(
+        r#"
+local J = json.strict
+local options = J.decode([[{
+  "lighting":{"enable":true,"lights":[
+    {"enable":true,"type":"DIRECTION","attachedToCamera":false,"matrix":[1,0,0,0,0,1,0,0,0,0,1,0,4,5,6,1],"color":[0.2,0.4,0.6],"intensity":2,"castShadows":true,"shadowBias":0.005},
+    {"enable":true,"type":"POINT","attachedToCamera":false,"matrix":[1,0,0,0,0,1,0,0,0,0,1,0,4,5,6,1],"color":[1,0,0],"intensity":0,"falloff":86.89857508671155},
+    {"enable":false,"type":"INVALID","matrix":false}
+  ]},
+  "environment":{"enable":false,"exposure":99,"shadowEnable":true},
+  "background":{"enable":"color","color":[0.26754385964912286,0.26754385964912286,0.26754385964912286]},
+  "scene":{"postProcess":{"enable":true,
+    "toneMapping":{"enable":true,"method":"default","exposure":0,"brightness":-1,"saturation":0,"contrast":-1},
+    "bloom":{"enable":true,"factor":0.2,"threshold":0.7,"radius":0.1},
+    "colorBalance":{"enable":true,"low":[0,0,0],"mid":[0,0,-0.06666666666666665],"high":[-0.01,0,0]},
+    "vignette":{"enable":true,"amount":0.32222222222222224,"hardness":0.725},
+    "sharpen":{"enable":true,"factor":0},
+    "grain":{"enable":true,"factor":0.025,"animated":false},
+    "taa":{"enable":true},"ssao":{"enable":false,"intensity":"ignored"}
+  }},
+  "ground":{"enable":true,"shadowMode":"ShadowCatcher","position":[0,0,-0.0255],"scale":3.3744694771942068,"opacity":0.8177777777777777,"fade":0.23209876543209876},
+  "materials":{"unknown-id":{"Opacity":{"type":"dithering"},"token":"must-not-persist"}}
+}]])
+local data = presentation.from_options(ctx,uid(1),options)
+local value, profile = data.sketchfab, data.sketchfab.profile
+assert(value.version == 2 and value.adapter_version == 1 and value.model_id == uid(1))
+assert(value.source == 'https://sketchfab.com/i/models/'..uid(1)..'/options' and value.captured_at == 1000)
+assert(profile.version == 2 and profile.camera == nil and value.sections.camera.status == 'missing')
+assert(value.sections.lighting.status == 'mapped' and value.sections.lighting.reason == nil)
+assert(value.sections.lighting.items[1].reason == nil)
+assert(#profile.directional_lights == 1 and #profile.point_lights == 1)
+local directional, point = profile.directional_lights[1], profile.point_lights[1]
+assert(directional.reference == 'scene-root' and directional.direction[3] == 1)
+assert(math.abs(directional.intensity - 2*math.pi) < 1e-12 and directional.color[1] == 0.2)
+assert(directional.shadow.resolution == 1024 and directional.shadow.filter == 'bilinear')
+assert(directional.shadow.normal_bias == 0 and directional.shadow.max_bias == 0.01)
+assert(point.position[1] == 4 and point.position[2] == 5 and point.position[3] == 6)
+assert(point.intensity == 0 and point.attenuation[3] == 86.89857508671155)
+assert(point.attenuation_units == 'reference')
+assert(profile.environment.ibl_intensity == 0 and profile.environment.background == false)
+assert(value.sections.environment.status == 'disabled')
+assert(math.abs(profile.environment.background_color[1] - 0.05818448107355388) < 1e-12)
+assert(profile.display.exposure == 0 and profile.display.brightness == 0)
+assert(profile.display.saturation == 0 and profile.display.contrast == -1 and profile.display.sharpen == 0)
+assert(profile.display.tone_mapping == 'linear' and profile.display.grain.phase == 0)
+assert(profile.display.color_balance.midtones[3] == -0.06666666666666665)
+assert(profile.display.bloom.intensity == 0.2 and profile.display.bloom.radius == 0.1)
+assert(math.abs(profile.display.vignette.inner_radius - 0.40277777777777773) < 1e-12)
+assert(math.abs(profile.shadow_catcher.opacity - 0.6687604938271604) < 1e-12)
+assert(math.abs(profile.shadow_catcher.fade - 0.7064704232352543) < 1e-12)
+assert(value.sections.post_process.items.taa.status == 'unsupported')
+assert(value.sections.post_process.items.ssao.status == 'disabled')
+assert(value.sections.post_process.items.ssao.reason == nil)
+assert(value.sections.post_process.items.bloom.reason == nil)
+assert(value.sections.materials.status == 'unsupported' and profile.material_overrides == nil)
+local encoded = J.encode(data)
+assert(#encoded < 64*1024 and not encoded:find('must-not-persist',1,true))
+options.camera = J.null
+assert(presentation.from_options(ctx,uid(1),options).sketchfab.sections.camera.status == 'null')
+options.camera = J.object {position=J.array{1,2,3},target=J.array{0,0,0},fov=45}
+for _, value in ipairs({false,'45',J.null,0/0,math.huge,1e40}) do
+    options.camera.fov = value
+    local data = presentation.from_options(ctx,uid(1),options).sketchfab
+    assert(data.sections.camera.status == 'invalid' and data.profile.camera == nil)
+    assert(data.profile.display.bloom.intensity == 0.2)
+end
+options.camera.fov = 45
+options.orientation = J.object{matrix=J.array{0,-1,0,0,1,0,0,0,0,0,1,0,0,0,0,1}}
+options.lighting.lights[1].attachedToCamera = true
+data = presentation.from_options(ctx,uid(1),options).sketchfab
+assert(data.sections.orientation.status == 'unsupported' and data.sections.camera.status == 'unsupported')
+assert(data.profile.directional_lights[1].reference == 'view' and #data.profile.point_lights == 0)
+assert(data.sections.ground.status == 'unsupported' and data.profile.shadow_catcher == nil)
+options.environment.enable = true
+options.background.enable = 'environment'
+data = presentation.from_options(ctx,uid(1),options).sketchfab
+assert(data.sections.environment.status == 'unsupported' and data.sections.background.status == 'unsupported')
+assert(data.profile.environment.ibl_intensity == 0 and data.profile.environment.background == false)
+options.lighting.enable, options.scene.postProcess.enable, options.ground.enable = false, false, false
+data = presentation.from_options(ctx,uid(1),options).sketchfab
+assert(#data.profile.directional_lights == 0 and #data.profile.point_lights == 0)
+assert(data.sections.lighting.status == 'disabled' and data.sections.ground.status == 'disabled')
+assert(data.sections.post_process.status == 'disabled' and data.profile.display.bloom == nil)
+assert(J.kind(data.profile.directional_lights) == 'array' and J.kind(data.sections) == 'object')
+assert(presentation.from_options(ctx,uid(1),J.null).sketchfab.profile == J.null)
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_render_profiles_are_stable_current_snapshots() {
+    lua_test(
+        r#"
+local J = json.strict
+local a = J.decode('{"camera":{"position":[1,2,3],"target":[0,0,0],"fov":45},"environment":{"enable":false}}')
+local b = J.decode('{"environment":{"enable":false,"unused":"ignored"},"camera":{"fov":45.0,"target":[-0.0,0.0,0.0],"position":[1.0,2.0,3.0]}}')
+local metadata = {external_id=uid(1),provider_data=presentation.from_options(ctx,uid(1),a)}
+local first = presentation.render_profile(metadata,J)
+advance(100)
+metadata.provider_data = presentation.from_options(ctx,uid(1),b)
+local second = presentation.render_profile(metadata,J)
+assert(first == second and not first:find('captured_at',1,true) and not first:find(uid(1),1,true))
+metadata = J.decode(J.encode(metadata))
+assert(first == presentation.render_profile(metadata,J))
+metadata.external_id = uid(2)
+assert(not pcall(presentation.render_profile,metadata,J))
+metadata.external_id = uid(1)
+metadata.provider_data.sketchfab.adapter_version = 2
+assert(not pcall(presentation.render_profile,metadata,J))
+metadata.provider_data.sketchfab.adapter_version = 1
+metadata.provider_data.sketchfab.profile.oversized = string.rep('x',65536)
+assert(not pcall(presentation.render_profile,metadata,J))
+metadata.provider_data.sketchfab.profile = J.null
+assert(presentation.render_profile(metadata,J) == nil)
+local logs = {}
+ctx.log = function(message) logs[#logs+1] = message end
+reply({},404)
+local before = request_count()
+local unavailable = presentation.capture(ctx,uid(1)).sketchfab
+assert(request_count() == before+1 and #logs == 1)
+assert(unavailable.profile == J.null and unavailable.sections.options.status == 'unavailable')
+assert(last_request().headers.Authorization == nil)
+assert(not J.encode(unavailable):find('test-token',1,true))
 "#,
     );
 }
@@ -766,7 +908,10 @@ fn sketchfab_local_model_apply_and_remove_use_public_resource_interfaces() {
     lua_test(
         r#"
 local path='/remote/sketchfab/item/scene.gltf'
-local metadata = json.strict.decode('{"provider_data":{"sketchfab":{"version":1,"space":"sketchfab-viewer","camera":{"position":[1,2,3],"target":[4,5,6],"fov":45,"up":1.5},"orientation":{"matrix":[0,-1,0,0,1,0,0,0,0,0,1,0,0,0,0,1]}}}}')
+local metadata = json.strict.object {
+    external_id = uid(1),
+    provider_data = presentation.from_options(ctx,uid(1),json.strict.decode('{"camera":{"position":[1,2,3],"target":[4,5,6],"fov":45,"up":1.5}}')),
+}
 local artifact_reads = 0
 ctx.remote_artifact=function(resource)
     assert(resource == path)
@@ -778,19 +923,23 @@ local applied = wallpaper.apply({resource=path},ctx)
 assert(artifact_reads == 1)
 assert(applied.extras.path == path and next(applied.default_user_properties) == nil)
 assert(applied.extras['asset-root'] == '/storage/opaque-package-root')
-local camera = json.strict.decode(applied.extras['camera-preset'])
-assert(camera.space == 'scene-root')
+assert(applied.extras['camera-preset'] == nil)
+local profile = json.strict.decode(applied.extras['render-profile'])
+local camera = profile.camera
+assert(profile.version == 2 and camera.reference == 'scene-root')
 assert(camera.position[1] == 1 and camera.position[2] == 2 and camera.position[3] == 3)
 assert(camera.target[1] == 4 and camera.target[2] == 5 and camera.target[3] == 6)
 assert(camera.up[1] == 0 and camera.up[2] == 0 and camera.up[3] == 1)
 assert(math.abs(camera.yfov - math.pi/4) < 1e-12)
-metadata.provider_data.sketchfab.version = 2
-assert(wallpaper.apply({resource=path},ctx).extras['camera-preset'] == nil)
 metadata.provider_data.sketchfab.version = 1
-metadata.provider_data.sketchfab.space = 'unknown'
-assert(wallpaper.apply({resource=path},ctx).extras['camera-preset'] == nil)
+assert(not pcall(wallpaper.apply,{resource=path},ctx))
+metadata.provider_data.sketchfab.version = 2
+metadata.provider_data.sketchfab.profile = json.strict.null
+assert(wallpaper.apply({resource=path},ctx).extras['render-profile'] == nil)
+metadata.provider_data.sketchfab.profile = json.strict.object{version=1}
+assert(not pcall(wallpaper.apply,{resource=path},ctx))
 metadata.provider_data = nil
-assert(wallpaper.apply({resource=path},ctx).extras['camera-preset'] == nil)
+assert(not pcall(wallpaper.apply,{resource=path},ctx))
 ctx.remote_artifact=function() error('resource is not an installed artifact') end
 assert(not pcall(wallpaper.apply,{resource=path},ctx))
 local removed
@@ -943,7 +1092,15 @@ assert(last_request().headers.Authorization == nil)
 fn session_action_entry(root: &Path) -> PathBuf {
     let source = entry().parent().unwrap().to_owned();
     std::fs::create_dir_all(root.join("sketchfab")).unwrap();
-    for module in ["api", "discover", "map", "session", "source", "wallpaper"] {
+    for module in [
+        "api",
+        "discover",
+        "map",
+        "presentation",
+        "session",
+        "source",
+        "wallpaper",
+    ] {
         let path = format!("sketchfab/{module}.lua");
         std::fs::copy(source.join(&path), root.join(&path)).unwrap();
     }
@@ -1029,7 +1186,10 @@ end
     let persistent = serde_json::to_string(&download.metadata).unwrap();
     assert!(!persistent.contains("signature=ephemeral"));
     assert!(!persistent.contains("valid-token"));
-    assert!(persistent.contains("sketchfab-viewer"));
+    let snapshot = &download.metadata.provider_data.as_ref().unwrap()["sketchfab"];
+    assert_eq!(snapshot["version"], 2);
+    assert_eq!(snapshot["profile"]["version"], 2);
+    assert_eq!(snapshot["profile"]["camera"]["reference"], "scene-root");
     let artifact = root.join("artifact");
     std::fs::create_dir(&artifact).unwrap();
     std::fs::write(
@@ -1230,6 +1390,163 @@ async fn sketchfab_session_lifecycle_persists_revocation_but_not_transient_error
             .state,
         PluginLifecycleState::SignedOut
     );
+}
+
+#[tokio::test]
+#[ignore = "copies an explicitly selected installed model into an isolated output directory"]
+async fn sketchfab_saved_presentation_artifact_exports_render_profile() {
+    let configured = |key| PathBuf::from(std::env::var_os(key).expect(key));
+    let output = configured("WAYWALLEN_SKETCHFAB_OUTPUT_DIR")
+        .canonicalize()
+        .unwrap();
+    assert!(output.is_dir());
+    assert_eq!(
+        configured("XDG_DATA_HOME"),
+        output.join("data"),
+        "run this test in its own process with an isolated XDG_DATA_HOME"
+    );
+    let id = std::env::var("WAYWALLEN_SKETCHFAB_MODEL_ID").unwrap();
+    let source_root = configured("WAYWALLEN_SKETCHFAB_SOURCE_ROOT")
+        .canonicalize()
+        .unwrap();
+    let original = crate::remote_asset::load(&source_root, "sketchfab", &id)
+        .unwrap()
+        .expect("the selected model must already be an installed artifact");
+    assert!(!output.starts_with(&original.root));
+    let options_path = configured("WAYWALLEN_SKETCHFAB_OPTIONS_PATH");
+    assert!(std::fs::metadata(&options_path).unwrap().len() <= 4 * 1024 * 1024);
+    let raw = std::fs::read(options_path).unwrap();
+    let manager = manager_at(&output.join("plugin-state"));
+    let provider_data = {
+        let runtime = manager.test_runtime("sketchfab");
+        let runtime = runtime.lock().await;
+        let environment = runtime
+            .plugin_lua_env(entry().parent().unwrap(), "org.waywallen.sketchfab")
+            .unwrap();
+        let import: LuaFunction = environment.get("import").unwrap();
+        let presentation: LuaTable = import.call("sketchfab.presentation").unwrap();
+        let normalize: LuaFunction = presentation.get("from_options").unwrap();
+        let json = mlua_extra::json::create_nullable_module(&runtime.lua).unwrap();
+        json.set(
+            "strict",
+            mlua_extra::json::strict::create_module(&runtime.lua).unwrap(),
+        )
+        .unwrap();
+        let context = runtime.lua.create_table().unwrap();
+        context.set("json", json).unwrap();
+        let time = runtime.lua.create_table().unwrap();
+        time.set(
+            "unix",
+            runtime
+                .lua
+                .create_function(|_, ()| {
+                    Ok(std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs())
+                })
+                .unwrap(),
+        )
+        .unwrap();
+        context.set("time", time).unwrap();
+        let options = mlua_extra::json::strict::decode(&runtime.lua, &raw).unwrap();
+        let value: LuaValue = normalize.call((context, id.as_str(), options)).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_slice(&mlua_extra::json::strict::encode(&value).unwrap()).unwrap();
+        value.as_object().unwrap().clone()
+    };
+    let target_root = crate::settings::remote_content_dir("sketchfab");
+    assert!(!target_root.join(&id).exists());
+    let staged = crate::remote_asset::StagedArtifact::create(&target_root).unwrap();
+    for file in &original.artifact.files {
+        let source = crate::remote_asset::validate_file(&original.root, &file.path).unwrap();
+        let destination = staged.content().join(&file.path);
+        std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+        assert_eq!(std::fs::copy(source, destination).unwrap(), file.bytes);
+    }
+    let mut metadata = original.artifact.metadata.clone();
+    metadata.provider_data = Some(provider_data);
+    let installed = staged
+        .prepare(
+            "sketchfab",
+            &id,
+            &original.artifact.resource,
+            original.preview().as_deref(),
+            metadata,
+            original.artifact.files.clone(),
+        )
+        .unwrap()
+        .publish(&target_root)
+        .unwrap()
+        .commit();
+    let restored = crate::remote_asset::load(&target_root, "sketchfab", &id)
+        .unwrap()
+        .unwrap();
+    let metadata = &restored.artifact.metadata;
+    let entry = WallpaperEntry {
+        item_id: 1,
+        name: metadata.title.clone(),
+        wp_type: metadata.wp_type.clone(),
+        resource: installed.resource().to_str().unwrap().into(),
+        preview: installed
+            .preview()
+            .map(|path| path.to_str().unwrap().into()),
+        description: Some(metadata.description.clone()),
+        tags: metadata.tags.clone(),
+        external_id: Some(metadata.external_id.clone()),
+        web_url: Some(metadata.web_url.clone()),
+        update_available: false,
+        size: metadata.size,
+        width: None,
+        height: None,
+        content_rating: metadata.content_rating.clone(),
+        can_remove: Some(true),
+        modified_at: None,
+        create_at: 0,
+        plugin_name: "sketchfab".into(),
+        library_root: target_root.to_str().unwrap().into(),
+        hidden: false,
+    };
+    let applied = manager.call_apply("sketchfab", &entry).await.unwrap();
+    assert_eq!(applied.extras["path"], entry.resource);
+    assert_eq!(
+        applied.extras["asset-root"],
+        installed.root.to_str().unwrap()
+    );
+    assert!(!applied.extras.contains_key("camera-preset"));
+    let profile = applied.extras.get("render-profile").unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(profile).unwrap();
+    assert_eq!(parsed["version"], 2);
+    assert_eq!(
+        manager
+            .call_apply("sketchfab", &entry)
+            .await
+            .unwrap()
+            .extras,
+        applied.extras
+    );
+    let write = |name: &str, bytes: &[u8]| {
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(output.join(name))
+            .unwrap();
+        std::io::Write::write_all(&mut file, bytes).unwrap();
+    };
+    write("render-profile.json", profile.as_bytes());
+    write(
+        "snapshot.json",
+        &serde_json::to_vec_pretty(metadata).unwrap(),
+    );
+    write(
+        "extras.json",
+        &serde_json::to_vec_pretty(&applied.extras).unwrap(),
+    );
+    write("entry.json", &serde_json::to_vec_pretty(&entry).unwrap());
+    assert!(crate::remote_asset::load(&source_root, "sketchfab", &id)
+        .unwrap()
+        .is_some());
+    println!("presentation output: {}", output.display());
 }
 
 #[tokio::test]

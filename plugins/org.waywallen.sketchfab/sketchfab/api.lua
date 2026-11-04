@@ -239,7 +239,7 @@ end
 
 function M.viewer_options(ctx, id)
     validate_id(id)
-    return request_json(ctx, "/i/models/" .. id .. "/options", {}, {}, "camera", "https://sketchfab.com")
+    return request_json(ctx, "/i/models/" .. id .. "/options", {}, {}, "presentation", "https://sketchfab.com")
 end
 
 function M.me(ctx, token)

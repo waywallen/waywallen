@@ -1,4 +1,4 @@
-local map = import("sketchfab.map")
+local presentation = import("sketchfab.presentation")
 local M = {}
 
 function M.apply(entry, ctx)
@@ -7,7 +7,7 @@ function M.apply(entry, ctx)
         extras = {
             path = entry.resource,
             ["asset-root"] = artifact.root,
-            ["camera-preset"] = map.camera_preset(artifact.metadata.provider_data, ctx.json.strict),
+            ["render-profile"] = presentation.render_profile(artifact.metadata, ctx.json.strict),
         },
         default_user_properties = {},
     }

@@ -14,7 +14,7 @@ use waywallen::wallframe::sync::{DrmDevice, SyncobjHandle};
 
 nix::ioctl_write_ptr!(dma_buf_sync, b'b', 0, u64);
 
-fn pixel_hash(pool: &BufferPool, buffers: &[OwnedFd], frame: &Frame, fence: &OwnedFd) -> u64 {
+fn pixels(pool: &BufferPool, buffers: &[OwnedFd], frame: &Frame, fence: &OwnedFd) -> Vec<u8> {
     assert!(
         readable(fence.as_raw_fd(), Duration::from_secs(10)),
         "renderer GPU work did not complete"
@@ -40,16 +40,54 @@ fn pixel_hash(pool: &BufferPool, buffers: &[OwnedFd], frame: &Frame, fence: &Own
         assert_ne!(ptr, libc::MAP_FAILED);
         dma_buf_sync(fd.as_raw_fd(), &1).unwrap();
         let data = std::slice::from_raw_parts(ptr.cast::<u8>(), size);
-        let mut hash = 0xcbf29ce484222325_u64;
+        let mut pixels = Vec::with_capacity(row_bytes * pool.extent.height as usize);
         for row in 0..pool.extent.height as usize {
-            for byte in &data[offset + row * stride..offset + row * stride + row_bytes] {
-                hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
-            }
+            pixels
+                .extend_from_slice(&data[offset + row * stride..offset + row * stride + row_bytes]);
         }
         dma_buf_sync(fd.as_raw_fd(), &5).unwrap();
         assert_eq!(libc::munmap(ptr, size), 0);
-        hash
+        pixels
     }
+}
+
+fn pixel_hash(pool: &BufferPool, buffers: &[OwnedFd], frame: &Frame, fence: &OwnedFd) -> u64 {
+    pixels(pool, buffers, frame, fence)
+        .into_iter()
+        .fold(0xcbf29ce484222325, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+        })
+}
+
+fn assert_color(pixels: &[u8], linear: [f64; 3], exposure: f64) {
+    let expected = linear.map(|component| {
+        let value = component * exposure;
+        let encoded = if value <= 0.0031308 {
+            12.92 * value
+        } else {
+            1.055 * value.powf(1.0 / 2.4) - 0.055
+        };
+        (encoded.clamp(0.0, 1.0) * 255.0).round() as u8
+    });
+    assert!(!pixels.is_empty());
+    for pixel in pixels.chunks_exact(4) {
+        assert!(
+            pixel[..3]
+                .iter()
+                .zip(expected)
+                .all(|(actual, expected)| actual.abs_diff(expected) <= 2),
+            "published RGBA {pixel:?}, expected encoded RGB {expected:?}"
+        );
+        assert_eq!(pixel[3], 255, "opaque background lost alpha");
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RenderCase {
+    Lifecycle,
+    CameraTransition,
+    Color([f64; 3]),
+    Transparent,
 }
 
 fn motion(stream: &UnixStream, x: f32, y: f32) {
@@ -324,7 +362,7 @@ fn camera_transition(
     assert_eq!(
         final_hash,
         pixel_hash(pool, buffers, &finished, &finished_fence),
-        "completed transition did not retain the preset camera"
+        "completed transition did not retain the profile camera"
     );
     release(drm, timeline, &finished, &finished_fence);
     assert_no_frames(stream, Duration::from_millis(250));
@@ -339,31 +377,158 @@ fn gltf_renderer_handles_busy_pause_settings_resize_and_shutdown() {
         return;
     };
     let model = std::env::var("WAYWALLEN_GLTF_MODEL_PATH").expect("glTF model path");
-    let preset = std::env::var("WAYWALLEN_GLTF_CAMERA_PRESET")
+    let profile = std::env::var("WAYWALLEN_GLTF_RENDER_PROFILE")
         .ok()
         .filter(|value| !value.is_empty());
+    let has_camera = profile.as_deref().is_some_and(|profile| {
+        serde_json::from_str::<serde_json::Value>(profile)
+            .expect("valid render profile JSON")
+            .get("camera")
+            .is_some_and(serde_json::Value::is_object)
+    });
     let transition_only = std::env::var("WAYWALLEN_GLTF_TRANSITION_ONLY").as_deref() == Ok("1");
     assert!(
-        !transition_only || preset.is_some(),
-        "transition test requires a preset"
+        !transition_only || has_camera,
+        "transition test requires a render profile with a camera"
     );
     if !transition_only {
-        run_renderer(&binary, &model, preset.as_deref(), false);
+        run_renderer(&binary, &model, None, RenderCase::Lifecycle);
+        let complete = serde_json::json!({
+            "version": 2,
+            "directional_lights": [{"direction": [0.3, 0.7, 1], "color": [1, 0.95, 0.9],
+                "intensity": 2, "reference": "world", "shadow": {"resolution": 128}}],
+            "point_lights": [{"position": [2, 3, 4], "color": [0.8, 0.9, 1], "intensity": 1,
+                "attenuation": [1, 0, 0.01], "reference": "world", "attenuation_units": "world"}],
+            "environment": {"ibl_intensity": 0, "background_color": [0.18, 0.08, 0.02]},
+            "display": {"exposure": 0.75, "tone_mapping": "linear", "brightness": 1,
+                "saturation": 1, "contrast": 0, "fxaa": true, "sharpen": 0.1,
+                "grain": {"strength": 0, "phase": 0},
+                "bloom": {"intensity": 0.05, "threshold": 1, "radius": 0.5},
+                "color_balance": {"shadows": [0, 0, 0], "midtones": [0, 0, 0], "highlights": [0, 0, 0]}},
+            "material_overrides": [],
+            "shadow_catcher": {"position": [0, -1, 0], "scale": 3, "opacity": 0.3, "fade": 0.5},
+            "alpha_dither_seed": 0,
+        })
+        .to_string();
+        run_renderer(
+            &binary,
+            &model,
+            profile.as_deref().or(Some(&complete)),
+            RenderCase::Lifecycle,
+        );
     }
-    if preset.is_some() {
-        run_renderer(&binary, &model, preset.as_deref(), true);
+    if has_camera {
+        run_renderer(
+            &binary,
+            &model,
+            profile.as_deref(),
+            RenderCase::CameraTransition,
+        );
     }
 }
 
-fn run_renderer(binary: &str, model: &str, preset: Option<&str>, transition_case: bool) {
+#[test]
+fn gltf_renderer_exports_encoded_profile_background_and_single_exposure() {
+    let Ok(binary) = std::env::var("WAYWALLEN_GLTF_RENDERER_BIN") else {
+        eprintln!("skip: set WAYWALLEN_GLTF_RENDERER_BIN for the GPU export test");
+        return;
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("scene.gltf");
+    std::fs::write(
+        &path,
+        br#"{"asset":{"version":"2.0"},"scenes":[{}],"scene":0}"#,
+    )
+    .unwrap();
+    for background in [[0.18, 0.18, 0.18], [0.18, 0.08, 0.02]] {
+        let profile = serde_json::json!({
+            "version": 2,
+            "directional_lights": [],
+            "point_lights": [],
+            "environment": {"ibl_intensity": 0, "background_color": background},
+            "display": {"tone_mapping": "linear", "exposure": 0.5},
+        })
+        .to_string();
+        run_renderer(
+            &binary,
+            path.to_str().unwrap(),
+            Some(&profile),
+            RenderCase::Color(background),
+        );
+    }
+    let profile = serde_json::json!({
+        "version": 2,
+        "directional_lights": [],
+        "point_lights": [],
+        "environment": {"ibl_intensity": 0, "background": false},
+        "display": {"tone_mapping": "linear", "exposure": 0.5},
+    })
+    .to_string();
+    run_renderer(
+        &binary,
+        path.to_str().unwrap(),
+        Some(&profile),
+        RenderCase::Transparent,
+    );
+    std::fs::write(
+        &path,
+        br#"{"asset":{"version":"2.0"},"nodes":[{"scale":[1000000,1000000,1000000]}],"scenes":[{"nodes":[0]}],"scene":0}"#,
+    )
+    .unwrap();
+    let profile = serde_json::json!({
+        "version": 2,
+        "directional_lights": [],
+        "point_lights": [],
+        "environment": {"ibl_intensity": 0, "background_color": [0.18, 0.08, 0.02]},
+        "display": {"tone_mapping": "linear", "exposure": 0.5},
+        "shadow_catcher": {"reference": "scene-root", "scale": 0.00001},
+    })
+    .to_string();
+    run_renderer(
+        &binary,
+        path.to_str().unwrap(),
+        Some(&profile),
+        RenderCase::Color([0.18, 0.08, 0.02]),
+    );
+}
+
+#[test]
+fn gltf_renderer_rejects_invalid_profiles_before_loading_the_model() {
+    let Ok(binary) = std::env::var("WAYWALLEN_GLTF_RENDERER_BIN") else {
+        eprintln!("skip: set WAYWALLEN_GLTF_RENDERER_BIN for the profile CLI test");
+        return;
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let absent = directory.path().join("not-a-model.gltf");
+    for profile in [
+        "{",
+        r#"{"version":1}"#,
+        r#"{"version":2,"display":{"exposure":-1}}"#,
+    ] {
+        let output = Command::new(&binary)
+            .args(["--selftest", "--path"])
+            .arg(&absent)
+            .args(["--render-profile", profile])
+            .output()
+            .expect("run glTF profile CLI validation");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{stderr}");
+        assert!(stderr.contains("--render-profile"), "{stderr}");
+        assert!(!stderr.contains("not-a-model.gltf"), "{stderr}");
+        assert!(!stderr.contains("DeviceSession"), "{stderr}");
+    }
+}
+
+fn run_renderer(binary: &str, model: &str, profile: Option<&str>, case: RenderCase) {
+    let transition_case = matches!(case, RenderCase::CameraTransition);
     let drm = DrmDevice::open_first_render_node().expect("DRM render node");
     let socket = common::tmp_sock("gltf-renderer");
     let _cleanup = common::SockCleanup(socket.clone());
     let listener = UnixListener::bind(&socket).expect("listen for renderer");
     let mut command = Command::new(binary);
     command.args(["--ipc", socket.to_str().unwrap(), "--path", model]);
-    if let Some(preset) = preset {
-        command.args(["--camera-preset", preset]);
+    if let Some(profile) = profile {
+        command.args(["--render-profile", profile]);
     }
     if std::env::var("WAYWALLEN_GLTF_VALIDATION").as_deref() == Ok("1") {
         command.arg("--validation");
@@ -388,7 +553,12 @@ fn run_renderer(binary: &str, model: &str, preset: Option<&str>, transition_case
                     ("exposure".into(), "1".into()),
                     (
                         "animation".into(),
-                        if transition_case { "-1" } else { "0" }.into(),
+                        if matches!(case, RenderCase::Lifecycle) {
+                            "0"
+                        } else {
+                            "-1"
+                        }
+                        .into(),
                     ),
                     ("loop".into(), "true".into()),
                 ],
@@ -511,6 +681,27 @@ fn run_renderer(binary: &str, model: &str, preset: Option<&str>, transition_case
     let mut sequence = 0;
     let (pool, old_buffers, initial, initial_fence) =
         configure(&stream, config.clone(), &mut sequence);
+    if matches!(case, RenderCase::Color(_) | RenderCase::Transparent) {
+        let assert_export = |bytes: &[u8], exposure| match case {
+            RenderCase::Color(background) => assert_color(bytes, background, exposure),
+            RenderCase::Transparent => assert!(bytes.iter().all(|byte| *byte == 0)),
+            _ => unreachable!(),
+        };
+        assert_export(&pixels(&pool, &old_buffers, &initial, &initial_fence), 0.5);
+        release(&drm, &timeline, &initial, &initial_fence);
+        send(
+            &stream,
+            ControlMsg::SettingChanged {
+                settings: vec![("exposure".into(), "2".into())],
+            },
+        );
+        let (changed, changed_fence) = receive_frame(&stream, &mut sequence);
+        assert_export(&pixels(&pool, &old_buffers, &changed, &changed_fence), 1.0);
+        release(&drm, &timeline, &changed, &changed_fence);
+        assert_no_frames(&stream, Duration::from_millis(100));
+        shutdown(&stream, &mut child);
+        return;
+    }
     if transition_case {
         camera_transition(
             &stream,

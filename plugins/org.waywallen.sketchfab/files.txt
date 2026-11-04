@@ -4,6 +4,7 @@ plugin.toml
 sketchfab/api.lua
 sketchfab/discover.lua
 sketchfab/map.lua
+sketchfab/presentation.lua
 sketchfab/session.lua
 sketchfab/source.lua
 sketchfab/wallpaper.lua

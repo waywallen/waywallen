@@ -1798,14 +1798,16 @@ dependencies = [
 [[package]]
 name = "mlua-extra"
 version = "0.1.0"
-source = "git+https://github.com/hypengw/mlua-extra?rev=7b50183a900f8bea8c5cf239b0be64d04205a388#7b50183a900f8bea8c5cf239b0be64d04205a388"
+source = "git+https://github.com/hypengw/mlua-extra?rev=00dab6caf0cce4bce9610e99c85d9017fae4e452#00dab6caf0cce4bce9610e99c85d9017fae4e452"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "cookie_store",
  "getrandom 0.3.4",
+ "http",
  "log",
  "mlua",
+ "percent-encoding",
  "reqwest",
  "roxmltree",
  "scraper",
