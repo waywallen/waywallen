@@ -64,6 +64,12 @@ auto describe(const ncrequest::WebSocketError& error) -> QString {
     return result;
 }
 
+auto describe(const ncrequest::WebSocketStatus& error) -> QString {
+    auto result = describe(ncrequest::WebSocketError(error));
+    if (error.diagnostic.is_some()) result += QStringLiteral(": ") + describe(*error.diagnostic);
+    return result;
+}
+
 auto describe(const ncrequest::WebSocketConnectFailure& error) -> QString {
     if (error.transport.is_some()) return describe(*error.transport);
     if (error.admission.is_some()) return describe(*error.admission);
@@ -177,7 +183,7 @@ auto run_connection(Arc<ConnectionState> state, rstd::async::RuntimeHandle runti
                     QByteArray(reinterpret_cast<const char*>(bytes.as_raw_ptr()),
                                static_cast<qsizetype>(bytes.len().to_primitive())));
         };
-        callbacks.error = [state = state.clone(), generation](ncrequest::WebSocketError error) {
+        callbacks.error = [state = state.clone(), generation](ncrequest::WebSocketStatus error) {
             state->fail(generation, describe(error));
         };
         callbacks.disconnected = [state = state.clone(), generation] {

@@ -464,10 +464,30 @@ int main(int argc, char** argv) {
                 },
                 "non-binary input was accepted");
             close();
+
+            create(limits);
+            errors = probe.inspect([&] {
+                return probe.errors.size();
+            });
+            on_peer([&] {
+                QByteArray oversized(3 * 1024 * 1024, 'x');
+                peer->setOutgoingFrameSize(oversized.size());
+                peer->sendBinaryMessage(oversized);
+            });
+            probe.wait(
+                [&] {
+                    return probe.errors.size() > errors;
+                },
+                "native frame limit failure was hidden");
+            probe.inspect([&] {
+                require(probe.errors.back().contains(QStringLiteral("qt websocket")),
+                        "native WebSocket diagnostic was discarded");
+            });
+            close();
             probe.inspect([&] {
                 require(! probe.wrong_thread, "callback used wrong thread");
             });
-            std::puts("capacity and non-binary failures were reported on the Qt owner");
+            std::puts("capacity, non-binary and native failures were reported on the Qt owner");
         } catch (const std::exception& error) {
             std::fprintf(stderr, "backend connection: %s\n", error.what());
             result = 1;

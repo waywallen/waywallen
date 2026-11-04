@@ -38,9 +38,9 @@ rstd-log = { version = "0.1.7" }
 rstd-toml = { version = "0.1.7" }
 lito-qt = { version = "0.1.1" }
 vvk = { version = "0.1.0" }
+ncrequest = { version = "0.2.1" }
 luato = { git = "https://github.com/litocpp/luato.git" }
 wavsen = { git = "https://github.com/hypengw/wavsen.git" }
-ncrequest = { git = "https://github.com/hypengw/ncrequest.git" }
 qextra = { git = "https://github.com/hypengw/QExtra.git" }
 vecgltf = { git = "https://github.com/vecren/vecgltf.git" }
 
