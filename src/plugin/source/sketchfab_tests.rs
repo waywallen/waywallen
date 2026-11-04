@@ -173,9 +173,22 @@ fn sketchfab_plugin_supports_model_downloads_and_installs_translations() {
     assert_eq!(sources[0].filters.len(), 5);
     assert_eq!(sources[0].filters[0].ty, DiscoverFilterType::Select);
     assert_eq!(sources[0].filters[1].ty, DiscoverFilterType::Select);
+    let restricted = sources[0]
+        .filters
+        .iter()
+        .find(|filter| filter.id == "restricted")
+        .unwrap();
+    assert_eq!(restricted.ty, DiscoverFilterType::Toggle);
+    assert_eq!(restricted.title.text(), "Show restricted content");
+    assert!(restricted.title.is_translated());
+    assert_eq!(restricted.options.len(), 1);
+    assert_eq!(restricted.options[0].value, "feature:restricted");
+    assert!(restricted.options[0].label.is_translated());
     let mut values = HashSet::new();
     for filter in &sources[0].filters {
+        assert_ne!(filter.id, "downloadable");
         for option in &filter.options {
+            assert_ne!(option.value, "feature:downloadable");
             assert!(values.insert(&option.value));
         }
     }
@@ -208,12 +221,12 @@ local first = discover.search(ctx, { query = '风景 & trees', sort = 'relevance
 assert(first.has_more and first.next_cursor == 'opaque+/=')
 local q = last_request().query
 assert(q.q == '风景 & trees' and q.type == 'models' and q.count == '24')
-assert(q.sort_by == nil and q.downloadable == nil and q.page == nil)
+assert(q.sort_by == nil and q.downloadable == 'true' and q.page == nil)
 assert(last_request().path == 'https://api.sketchfab.com/v3/search')
 assert(last_request().headers.Authorization == nil)
 reply({ results = {} })
 discover.search(ctx, { page = 2, cursor = first.next_cursor, sort = 'recent', tags = {
-    'category:nature-plants', 'license:by', 'feature:downloadable', 'feature:animated', 'feature:staffpicked'
+    'category:nature-plants', 'license:by', 'feature:animated', 'feature:staffpicked'
 } })
 q = last_request().query
 assert(q.cursor == 'opaque+/=' and q.sort_by == '-publishedAt')
@@ -222,6 +235,7 @@ assert(q.downloadable == 'true' and q.animated == 'true' and q.staffpicked == 't
 for _, sort in ipairs({ {'likes', '-likeCount'}, {'views', '-viewCount'} }) do
     reply({ results = {} }); api.search(ctx, { sort = sort[1] })
     assert(last_request().query.sort_by == sort[2])
+    assert(last_request().query.downloadable == 'true')
 end
 for _, params in ipairs({
     { page = 2 }, { cursor = '' }, { sort = 'unknown' },
@@ -232,6 +246,76 @@ for _, params in ipairs({
     assert(not pcall(api.search, ctx, params))
     assert(request_count() == before)
 end
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_relevance_uses_likes_only_without_search_text() {
+    lua_test(
+        r#"
+reply({results={}})
+api.search(ctx,{})
+assert(last_request().query.sort_by == '-likeCount')
+for _, text in ipairs({'', ' \t\r\n'}) do
+    for _, sort in ipairs({'', 'relevance'}) do
+        reply({results={}})
+        api.search(ctx,{query=text,sort=sort})
+        local query = last_request().query
+        assert(query.q == text and query.sort_by == '-likeCount' and query.downloadable == 'true')
+        reply({results={}})
+        api.search(ctx,{query=text,sort=sort,page=2,cursor='next-page'})
+        query = last_request().query
+        assert(query.cursor == 'next-page' and query.sort_by == '-likeCount')
+    end
+end
+for _, text in ipairs({'ship', '风景', ' ship '}) do
+    for _, sort in ipairs({'', 'relevance'}) do
+        reply({results={}})
+        api.search(ctx,{query=text,sort=sort})
+        local query = last_request().query
+        assert(query.q == text and query.sort_by == nil and query.downloadable == 'true')
+    end
+end
+for _, sort in ipairs({{'recent','-publishedAt'}, {'views','-viewCount'}, {'likes','-likeCount'}}) do
+    reply({results={}})
+    api.search(ctx,{query='',sort=sort[1]})
+    assert(last_request().query.sort_by == sort[2])
+end
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_restricted_content_is_excluded_unless_selected() {
+    lua_test(
+        r#"
+for _, params in ipairs({{}, {tags={}}, {page=2,cursor='next-page'}}) do
+    reply({results={}})
+    discover.search(ctx,params)
+    local query = last_request().query
+    assert(query.restricted == 'false' and query.downloadable == 'true')
+    assert(last_request().headers.Authorization == nil)
+end
+for _, sort in ipairs({'relevance', 'recent', 'likes', 'views'}) do
+    for page = 1, 2 do
+        reply({results={}})
+        discover.search(ctx,{query='ship',sort=sort,page=page,cursor=page == 2 and 'next-page' or nil,tags={
+            'feature:restricted', 'category:places-travel', 'license:by', 'feature:animated', 'feature:staffpicked'
+        }})
+        local query = last_request().query
+        assert(query.restricted == 'true' and query.downloadable == 'true')
+        assert(query.categories == 'places-travel' and query.license == 'by')
+        assert(query.animated == 'true' and query.staffpicked == 'true')
+        assert(query.cursor == (page == 2 and 'next-page' or nil))
+    end
+end
+reply({results={}})
+discover.search(ctx,{tags={}})
+assert(last_request().query.restricted == 'false')
+local before = request_count()
+assert(not pcall(api.search,ctx,{tags={'feature:restricted','feature:restricted'}}))
+assert(request_count() == before)
 "#,
     );
 }

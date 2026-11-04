@@ -100,14 +100,14 @@ msgstr "CC 署名-非商业性使用-禁止演绎"
 msgid "CC0 Public Domain"
 msgstr "CC0 公共领域"
 
-msgid "Downloadable only"
-msgstr "仅可下载"
-
 msgid "Animated only"
 msgstr "仅含动画"
 
 msgid "Staff picks only"
 msgstr "仅精选"
+
+msgid "Show restricted content"
+msgstr "显示受限内容"
 
 msgid "License requirements"
 msgstr "许可要求"

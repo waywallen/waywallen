@@ -44,12 +44,6 @@ M.filters = {
         },
     },
     {
-        id = "downloadable",
-        title = tr("Downloadable only"),
-        type = "toggle",
-        options = { { value = "feature:downloadable", label = tr("Downloadable only") } },
-    },
-    {
         id = "animated",
         title = tr("Animated only"),
         type = "toggle",
@@ -60,6 +54,12 @@ M.filters = {
         title = tr("Staff picks only"),
         type = "toggle",
         options = { { value = "feature:staffpicked", label = tr("Staff picks only") } },
+    },
+    {
+        id = "restricted",
+        title = tr("Show restricted content"),
+        type = "toggle",
+        options = { { value = "feature:restricted", label = tr("Show restricted content") } },
     },
 }
 
@@ -192,12 +192,21 @@ function M.search(ctx, params, headers)
     if (params.page or 1) > 1 and not next_value then
         error("Sketchfab requires a cursor for the next page")
     end
-    local query = { type = "models", count = "24", q = params.query or "", cursor = next_value }
+    local query = {
+        type = "models",
+        count = "24",
+        q = params.query or "",
+        cursor = next_value,
+        downloadable = "true",
+        restricted = "false",
+    }
     if params.sort and params.sort ~= "" and params.sort ~= "relevance" then
         query.sort_by = sorts[params.sort]
         if not query.sort_by then
             error("Unsupported Sketchfab sort")
         end
+    elseif not query.q:find("%S") then
+        query.sort_by = sorts.likes
     end
     local selected = {}
     for _, value in ipairs(params.tags or {}) do
