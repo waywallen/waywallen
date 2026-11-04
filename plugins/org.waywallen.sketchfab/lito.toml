@@ -1,3 +1,13 @@
 [package]
 name = "waywallen-sketchfab-plugin"
 version.workspace = true
+
+[[bin]]
+name = "waywallen-sketchfab-prepare"
+module = "waywallen.sketchfab.prepare"
+sources = ["src/main.cpp", "src/prepare.cppm", "src/prepare.cpp"]
+
+[dependencies]
+rstd-std.workspace = true
+rstd-json.workspace = true
+licompto = "0.1.0"

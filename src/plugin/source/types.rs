@@ -17,13 +17,15 @@ pub const ENTRY_VERSION_V3: u32 = 3;
 pub const ENTRY_VERSION_V4: u32 = 4;
 pub const ENTRY_VERSION_V5: u32 = 5;
 pub const ENTRY_VERSION_V6: u32 = 6;
-pub const ENTRY_VERSION: u32 = ENTRY_VERSION_V6;
-pub const LATEST_ENTRY_VERSION: u32 = ENTRY_VERSION_V6;
+pub const ENTRY_VERSION_V7: u32 = 7;
+pub const ENTRY_VERSION: u32 = ENTRY_VERSION_V7;
+pub const LATEST_ENTRY_VERSION: u32 = ENTRY_VERSION_V7;
 pub const SUPPORTED_ENTRY_VERSIONS: &[u32] = &[
     ENTRY_VERSION_V3,
     ENTRY_VERSION_V4,
     ENTRY_VERSION_V5,
     ENTRY_VERSION_V6,
+    ENTRY_VERSION_V7,
 ];
 
 pub(super) const MAX_DISCOVER_CURSOR_BYTES: usize = 4096;
@@ -417,6 +419,16 @@ pub struct DiscoverTransfer {
     pub filename: String,
     pub format: DownloadFormat,
     pub resolve: bool,
+    pub resources: Vec<DiscoverResource>,
+    pub prepare: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DiscoverResource {
+    pub id: String,
+    pub url: String,
+    pub size: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
@@ -473,4 +485,5 @@ pub struct DiscoverResolve {
     pub external_id: String,
     pub size: Option<i64>,
     pub content_rating: Option<String>,
+    pub provider_data: Option<serde_json::Map<String, serde_json::Value>>,
 }

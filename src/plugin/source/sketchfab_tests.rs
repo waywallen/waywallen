@@ -15,7 +15,7 @@ fn manager_with_entry(root: &Path, entry: &Path) -> SourceManager {
     )
     .unwrap();
     manager
-        .load_plugin(entry, "org.waywallen.sketchfab", "0.1.0", ENTRY_VERSION_V6)
+        .load_plugin(entry, "org.waywallen.sketchfab", "0.1.0", ENTRY_VERSION_V7)
         .unwrap();
     manager
 }
@@ -37,6 +37,7 @@ fn lua_test(body: &str) {
     for name in [
         "api",
         "discover",
+        "environment",
         "map",
         "presentation",
         "session",
@@ -74,6 +75,7 @@ local queue, requests = {}, {}
 local clock = 1000
 local J = json.strict
 ctx = { json = json, url = url, time = { unix = function() return clock end }, http = {} }
+ctx.artifact_resource_path = function(path) return 'prepared/' .. path end
 function advance(seconds) clock = clock + seconds end
 local function json_value(value)
     if type(value) == 'table' then
@@ -143,6 +145,171 @@ end
     runtime.lua.load(body).exec().unwrap();
 }
 
+fn environment_test(body: &str) {
+    lua_test(&[
+        r#"
+local J = json.strict
+local options = J.decode([[{
+  "environment":{"uid":"0000000000000000000000000000002a","enable":true,
+    "exposure":2,"rotation":0,"blur":0.25,"backgroundExposure":0.5,"shadowEnable":true},
+  "background":{"enable":"environment"}
+}]])
+local serial = 100
+local function image(size, blur)
+    serial = serial + 1
+    return J.object { uid=uid(serial), width=size, height=size, blur=blur, sizeCompressed=100,
+        file='https://media.sketchfab.com/environments/'..uid(42)..'/'..serial..'.bin.gz' }
+end
+local descriptor = J.object { uid=uid(42), name='Shared', processing='Succeeded',
+    diffuseSPH=J.array{}, textures=J.array{
+        J.object { type='background', format='cubemap', encoding='luv',
+            images=J.array{image(128,0.5),image(512,0),image(256,0.5)} },
+        J.object { type='specular_ue4', format='cubemap', encoding='luv', limitSize=8,
+            images=J.array{image(64),image(2048),image(256),image(1024)} },
+        J.object { type='brdf_ue4', format='lut', encoding='rg16', images=J.array{image(128)} }
+    } }
+for i=1,27 do descriptor.diffuseSPH[i] = 0.1*i end
+local payload = J.object { results=J.array{J.object{uid=uid(43),isDefault=true},descriptor} }
+local function prepared()
+    local output = J.object { background='environment/background.hdr',diffuse='environment/diffuse.hdr',
+        brdf='environment/brdf.hdr',specular=J.array{},specular_lod_scale=7,
+        specular_lod_exponent=0.5,brdf_filter='nearest' }
+    for i=0,10 do output.specular[#output.specular+1] = 'environment/specular-'..i..'.hdr' end
+    return J.object {preprocessed=output}
+end
+"#,
+        body,
+    ]
+    .concat());
+}
+
+#[test]
+fn sketchfab_environment_resources_preserve_shared_identity_and_model_parameters() {
+    environment_test(
+        r#"
+local data, intent = presentation.from_options(ctx,uid(7),options)
+assert(intent and data.sketchfab.profile.environment.ibl_intensity == 0)
+local resources, parameters = environment.attach(ctx,data,intent,payload)
+local value = data.sketchfab
+assert(#resources == 3 and value.environment.uid == uid(42))
+assert(value.environment.background.width == 256 and value.environment.background.blur == 0.5)
+assert(value.environment.specular.width == 1024 and value.environment.brdf.width == 128)
+assert(parameters.specular.limit_size == 8 and intent.mip_count == 11 and intent.lod_scale == 7)
+assert(parameters.exposure == nil and parameters.rotation == nil and parameters.token == nil)
+assert(value.environment.background.file == nil and value.environment.specular.file == nil)
+assert(value.sections.environment.status == 'pending' and value.sections.background.status == 'pending')
+local metadata = {external_id=uid(7),provider_data=data}
+assert(not pcall(presentation.render_profile,metadata,J))
+assert(not J.encode(data):find('media.sketchfab.com',1,true))
+local resolved = presentation.finalize(ctx,metadata,prepared())
+assert(resolved == data and value.pending_environment == nil)
+assert(value.sections.environment.status == 'partial'
+    and value.sections.environment.reason == 'environment-probe-shadow-unsupported')
+assert(value.sections.background.status == 'mapped')
+local profile = value.profile.environment
+assert(profile.ibl_intensity == 2 and profile.background_intensity == 1)
+assert(profile.reference == 'scene-root' and profile.basis[7] == 1 and profile.basis[10] == -1)
+assert(profile.preprocessed.background == 'prepared/environment/background.hdr')
+assert(#profile.preprocessed.specular == 11 and profile.preprocessed.brdf_filter == 'nearest')
+local encoded = presentation.render_profile(metadata,J)
+assert(encoded == presentation.render_profile(metadata,J))
+options.environment.exposure, options.environment.rotation = 4, 1
+local other, other_intent = presentation.from_options(ctx,uid(8),options)
+local other_resources, other_parameters = environment.attach(ctx,other,other_intent,payload)
+assert(other.sketchfab.environment.uid == value.environment.uid)
+assert(J.encode_canonical(other_parameters) == J.encode_canonical(parameters))
+for i, resource in ipairs(resources) do assert(resource.url == other_resources[i].url) end
+presentation.finalize(ctx,{provider_data=other},prepared())
+assert(other.sketchfab.profile.environment.ibl_intensity == 4)
+assert(other.sketchfab.profile.environment.basis[1] ~= profile.basis[1])
+assert(other.sketchfab.profile.environment.preprocessed.background == profile.preprocessed.background)
+assert(request_count() == 0)
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_environment_capture_and_resolve_reuse_the_normalized_snapshot() {
+    environment_test(
+        r#"
+reply(options)
+reply(payload)
+local data, resources, parameters = presentation.capture(ctx,uid(7))
+assert(request_count() == 2 and #resources == 3 and parameters.version == 1)
+assert(last_request().path == 'https://sketchfab.com/i/models/'..uid(7)..'/environments')
+assert(last_request().query.optimized == '1' and last_request().headers.Authorization == nil)
+ctx.fs = {is_file=function(path) return path == '/artifact/scene.gltf' end,
+    is_symlink=function() return false end}
+local params = {dir='/artifact',id=uid(7),metadata={title='Model',wp_type='gltf',
+    external_id=uid(7),provider_data=data},prepared=prepared()}
+local result = discover.resolve(ctx,params)
+assert(result.resource == 'scene.gltf' and result.provider_data == data and request_count() == 2)
+local profile = presentation.render_profile({external_id=uid(7),provider_data=result.provider_data},J)
+assert(profile:find('prepared/environment/',1,true))
+options.environment.enable = false
+options.background = J.object {enable='color',color=J.array{0.2,0.2,0.2}}
+reply(options)
+data, resources, parameters = presentation.capture(ctx,uid(8))
+assert(request_count() == 3 and resources == nil and parameters == nil)
+assert(data.sketchfab.sections.environment.status == 'disabled')
+assert(data.sketchfab.sections.background.status == 'mapped')
+assert(data.sketchfab.profile.environment.background_color[1] > 0)
+options.background.enable = 'environment'
+reply(options)
+reply(payload)
+data, resources = presentation.capture(ctx,uid(9))
+assert(#resources == 3 and request_count() == 5)
+presentation.finalize(ctx,{provider_data=data},prepared())
+assert(data.sketchfab.profile.environment.ibl_intensity == 0)
+assert(data.sketchfab.profile.environment.background == true)
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_environment_rejects_incompatible_descriptors_and_prepared_paths() {
+    environment_test(
+        r#"
+local data, intent = presentation.from_options(ctx,uid(7),options)
+local empty = J.object {results=J.array{J.object{uid=uid(43),isDefault=true}}}
+assert(environment.attach(ctx,data,intent,empty) == nil)
+assert(data.sketchfab.sections.environment.reason == 'environment-id-not-found')
+assert(data.sketchfab.pending_environment == nil)
+descriptor.textures[2].limitSize = 3
+assert(environment.attach(ctx,data,intent,payload) == nil)
+assert(data.sketchfab.sections.environment.reason == 'environment-specular-limit-invalid')
+descriptor.textures[2].limitSize = 8
+local images = descriptor.textures[1].images
+images[1].width,images[1].height,images[3].width,images[3].height = 2048,2048,1024,1024
+assert(environment.attach(ctx,data,intent,payload) == nil)
+assert(data.sketchfab.sections.environment.reason == 'environment-texture-size-unsupported')
+images[1].width,images[1].height,images[3].width,images[3].height = 128,128,256,256
+local file = images[1].file
+images[1].file = 'https://media.sketchfab.com/environments/'..uid(43)..'/resource.bin.gz'
+images[3].file = images[1].file
+assert(environment.attach(ctx,data,intent,payload) == nil)
+assert(data.sketchfab.sections.environment.reason == 'environment-resource-url-invalid')
+images[1].file,images[3].file = file,file
+local resources = environment.attach(ctx,data,intent,payload)
+assert(resources and #resources == 3)
+for _, path in ipairs({'../escape.hdr','/tmp/absolute.hdr','a//b.hdr','a/./b.hdr','a\\b.hdr','a:b.hdr'}) do
+    local output = prepared()
+    output.preprocessed.background = path
+    assert(not pcall(presentation.finalize,ctx,{provider_data=data},output))
+end
+local output = prepared()
+output.preprocessed.specular_lod_scale = 10
+assert(not pcall(presentation.finalize,ctx,{provider_data=data},output))
+output = prepared()
+table.remove(output.preprocessed.specular)
+assert(not pcall(presentation.finalize,ctx,{provider_data=data},output))
+assert(not pcall(presentation.finalize,ctx,{provider_data=data},nil))
+presentation.finalize(ctx,{provider_data=data},prepared())
+assert(not pcall(presentation.finalize,ctx,{provider_data=data},prepared()))
+"#,
+    );
+}
+
 #[test]
 fn sketchfab_plugin_supports_model_downloads_and_installs_translations() {
     let (_directory, manager) = manager();
@@ -206,6 +373,7 @@ fn sketchfab_plugin_supports_model_downloads_and_installs_translations() {
         "plugin.toml",
         "main.lua",
         "sketchfab/api.lua",
+        "sketchfab/environment.lua",
         "sketchfab/map.lua",
         "sketchfab/presentation.lua",
         "sketchfab/session.lua",
@@ -1095,6 +1263,7 @@ fn session_action_entry(root: &Path) -> PathBuf {
     for module in [
         "api",
         "discover",
+        "environment",
         "map",
         "presentation",
         "session",
@@ -1450,7 +1619,12 @@ async fn sketchfab_saved_presentation_artifact_exports_render_profile() {
         .unwrap();
         context.set("time", time).unwrap();
         let options = mlua_extra::json::strict::decode(&runtime.lua, &raw).unwrap();
-        let value: LuaValue = normalize.call((context, id.as_str(), options)).unwrap();
+        let (value, environment): (LuaValue, LuaValue) =
+            normalize.call((context, id.as_str(), options)).unwrap();
+        assert!(
+            environment.is_nil(),
+            "models using environment resources must use the managed preparation integration test"
+        );
         let value: serde_json::Value =
             serde_json::from_slice(&mlua_extra::json::strict::encode(&value).unwrap()).unwrap();
         value.as_object().unwrap().clone()

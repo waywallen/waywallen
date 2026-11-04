@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -12,7 +13,7 @@ use crate::error::Error;
 use crate::events::{GlobalEvent, RemoteDownloadState, RemoteDownloadTransfer};
 use crate::model::repo;
 use crate::plugin::source::{
-    DiscoverDownload, DiscoverMetadata, DownloadFormat, RemoteCapability, SourceManager,
+    DiscoverDownload, DiscoverMetadata, DownloadFormat, DownloadSession, RemoteCapability,
 };
 use crate::remote_asset::{self, PreparedArtifact, StagedArtifact};
 use crate::settings::{remote_content_dir, sanitize_path_segment};
@@ -23,6 +24,9 @@ use super::notify_wallpaper_db_changed;
 #[cfg(test)]
 #[path = "remote_tests.rs"]
 mod tests;
+mod transfer;
+
+static HTTP_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
 
 const DOWNLOAD_LIMIT: u64 = 2 * 1024 * 1024 * 1024;
 const PREVIEW_LIMIT: u64 = 8 * 1024 * 1024;
@@ -167,15 +171,27 @@ async fn download_remote_file(
     limit: u64,
     mut progress: impl FnMut(RemoteDownloadTransfer),
 ) -> Result<()> {
-    let url = reqwest::Url::parse(url).context("invalid download URL")?;
-    if !matches!(url.scheme(), "http" | "https")
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.fragment().is_some()
-        || url.host_str().is_none()
-    {
-        return Err(anyhow!("download URL is not an HTTP resource"));
-    }
+    download_remote_file_checked(url, path, limit, None, false, None, |value| {
+        progress(value);
+        Ok(())
+    })
+    .await
+}
+
+async fn download_remote_file_checked(
+    url: &str,
+    path: &Path,
+    limit: u64,
+    expected: Option<u64>,
+    raw: bool,
+    input_budget: Option<&AtomicU64>,
+    mut progress: impl FnMut(RemoteDownloadTransfer) -> Result<()>,
+) -> Result<()> {
+    let url = crate::remote_asset::prepare::validate_url(url)?;
+    let _permit = HTTP_SLOTS
+        .acquire()
+        .await
+        .context("download limiter closed")?;
     let parent = path
         .parent()
         .ok_or_else(|| anyhow!("download path has no parent"))?;
@@ -187,8 +203,13 @@ async fn download_remote_file(
         .user_agent("Mozilla/5.0 (X11; Linux x86_64) waywallen")
         .connect_timeout(Duration::from_secs(20))
         .read_timeout(Duration::from_secs(30))
-        .timeout(Duration::from_secs(30 * 60))
-        .build()?;
+        .timeout(Duration::from_secs(30 * 60));
+    let client = if raw {
+        client.no_gzip().no_brotli().no_deflate().no_zstd()
+    } else {
+        client
+    }
+    .build()?;
     let response = client
         .get(url)
         .send()
@@ -199,6 +220,11 @@ async fn download_remote_file(
         .map_err(reqwest::Error::without_url)
         .context("download response failed")?;
     let total_bytes = response.content_length();
+    if let (Some(expected), Some(total)) = (expected, total_bytes) {
+        if total != expected {
+            return Err(anyhow!("auxiliary resource size does not match descriptor"));
+        }
+    }
     if total_bytes.is_some_and(|length| length > limit) {
         return Err(anyhow!("download exceeds the size limit"));
     }
@@ -213,7 +239,7 @@ async fn download_remote_file(
         progress(RemoteDownloadTransfer {
             received_bytes: 0,
             total_bytes,
-        });
+        })?;
     }
     while let Some(chunk) = stream.next().await {
         let chunk = chunk
@@ -223,13 +249,25 @@ async fn download_remote_file(
             .checked_add(chunk.len() as u64)
             .filter(|value| *value <= limit)
             .ok_or_else(|| anyhow!("download exceeds the size limit"))?;
+        if let Some(budget) = input_budget {
+            let used = budget.fetch_add(chunk.len() as u64, Ordering::Relaxed);
+            if used
+                .checked_add(chunk.len() as u64)
+                .is_none_or(|total| total > crate::remote_asset::prepare::INPUT_LIMIT)
+            {
+                return Err(anyhow!("auxiliary resources exceed total size limit"));
+            }
+        }
         file.write_all(&chunk).await?;
         if throttle.should_report(Instant::now(), false) {
             progress(RemoteDownloadTransfer {
                 received_bytes: received,
                 total_bytes,
-            });
+            })?;
         }
+    }
+    if expected.is_some_and(|expected| expected != received) {
+        return Err(anyhow!("auxiliary resource size does not match descriptor"));
     }
     file.flush().await?;
     drop(file);
@@ -238,7 +276,7 @@ async fn download_remote_file(
         progress(RemoteDownloadTransfer {
             received_bytes: received,
             total_bytes,
-        });
+        })?;
     }
     Ok(())
 }
@@ -311,23 +349,24 @@ async fn upsert_remote_download(
 }
 
 async fn prepare_artifact(
-    source_manager: &SourceManager,
+    session: &DownloadSession,
     source_id: &str,
     id: &str,
     dir: &Path,
     info: DiscoverDownload,
-    mut progress: impl FnMut(Option<RemoteDownloadTransfer>),
+    mut progress: impl FnMut(Option<RemoteDownloadTransfer>) + Send,
 ) -> Result<PreparedArtifact> {
+    session.ensure_active()?;
+    if session.source_id() != source_id {
+        return Err(anyhow!("artifact download session source does not match"));
+    }
     let staged = StagedArtifact::create(dir)?;
-    let (staged, bytes, entries) = match info.transfer.format {
+    let (input, resources) = transfer::download(&info.transfer, &staged, &mut progress).await?;
+    let (mut staged, bytes, entries) = match info.transfer.format {
         DownloadFormat::File => {
             let filename = safe_remote_filename(&info.transfer.filename, id);
             let path = staged.content().join(&filename);
-            download_remote_file(&info.transfer.url, &path, DOWNLOAD_LIMIT, |transfer| {
-                progress(Some(transfer));
-            })
-            .await?;
-            progress(None);
+            tokio::fs::copy(&input, &path).await?;
             let bytes = tokio::fs::metadata(&path).await?.len();
             let entries = vec![crate::archive::ExtractedFile {
                 path: PathBuf::from(filename),
@@ -335,38 +374,38 @@ async fn prepare_artifact(
             }];
             (staged, bytes, entries)
         }
-        DownloadFormat::Zip => {
-            download_remote_file(
-                &info.transfer.url,
-                &staged.download_path(),
-                DOWNLOAD_LIMIT,
-                |transfer| progress(Some(transfer)),
-            )
-            .await?;
-            progress(None);
-            tokio::task::spawn_blocking(move || -> Result<_> {
-                let extracted = crate::archive::extract_zip(
-                    &staged.download_path(),
-                    staged.content(),
-                    ZIP_LIMITS,
-                )?;
-                log::debug!(
-                    "remote archive extracted: {} files, {} bytes",
-                    extracted.files,
-                    extracted.bytes
-                );
-                Ok((staged, extracted.bytes, extracted.entries))
-            })
-            .await
-            .context("archive extraction task failed")??
-        }
+        DownloadFormat::Zip => tokio::task::spawn_blocking(move || -> Result<_> {
+            let extracted = crate::archive::extract_zip(&input, staged.content(), ZIP_LIMITS)?;
+            log::debug!(
+                "remote archive extracted: {} files, {} bytes",
+                extracted.files,
+                extracted.bytes
+            );
+            Ok((staged, extracted.bytes, extracted.entries))
+        })
+        .await
+        .context("archive extraction task failed")??,
     };
+    let prepared = if let Some(parameters) = &info.transfer.prepare {
+        let helper = session
+            .prepare_helper()?
+            .ok_or_else(|| anyhow!("source has no declared artifact prepare helper"))?;
+        Some(remote_asset::prepare::run(&helper, &mut staged, parameters, &resources).await?)
+    } else {
+        if !resources.is_empty() {
+            return Err(anyhow!("auxiliary resources require prepare parameters"));
+        }
+        None
+    };
+    let bytes = bytes
+        .checked_add(staged.prepared_bytes())
+        .context("artifact size overflow")?;
     let content = staged
         .content()
         .to_str()
         .ok_or_else(|| anyhow!("artifact directory is not UTF-8"))?;
-    let resolved = source_manager
-        .call_resolve(source_id, id, content, Some(&info.metadata))
+    let resolved = session
+        .resolve(id, content, Some(&info.metadata), prepared.as_ref())
         .await?;
     remote_asset::validate_file(staged.content(), Path::new(&resolved.resource))?;
     if resolved.external_id != id || resolved.wp_type.trim().is_empty() {
@@ -380,6 +419,9 @@ async fn prepare_artifact(
     metadata.external_id = resolved.external_id;
     metadata.size = Some(i64::try_from(bytes).context("artifact size is too large")?);
     metadata.content_rating = resolved.content_rating.or(metadata.content_rating);
+    if let Some(provider_data) = resolved.provider_data {
+        metadata.provider_data = Some(provider_data);
+    }
     let preview = if let Some(preview) = resolved.preview {
         Some(remote_asset::validate_file(
             staged.content(),
@@ -400,7 +442,7 @@ async fn prepare_artifact(
     let resource = PathBuf::from(resolved.resource);
     let source_id = source_id.to_owned();
     let id = id.to_owned();
-    tokio::task::spawn_blocking(move || {
+    let prepared = tokio::task::spawn_blocking(move || {
         staged.prepare(
             &source_id,
             &id,
@@ -411,7 +453,9 @@ async fn prepare_artifact(
         )
     })
     .await
-    .context("artifact metadata task failed")?
+    .context("artifact metadata task failed")??;
+    session.ensure_active()?;
+    Ok(prepared)
 }
 
 pub async fn download_remote(
@@ -421,11 +465,9 @@ pub async fn download_remote(
 ) -> Result<()> {
     publish_remote_download_progress(&state, &source_id, &id, RemoteDownloadState::Pending, "");
     let dir = remote_content_dir(&source_id);
-    let version = state
-        .source_manager
-        .plugin_version(&source_id)
-        .unwrap_or_else(|| "0.0.0".to_owned());
-    let info = state.source_manager.call_download(&source_id, &id).await?;
+    let session = state.source_manager.download_session(&source_id)?;
+    let version = session.plugin_version();
+    let info = session.download(&id).await?;
     tokio::fs::create_dir_all(&dir).await?;
     publish_remote_download_progress(
         &state,
@@ -493,7 +535,7 @@ pub async fn download_remote(
             }
             drop(mutation);
             let prepared = prepare_artifact(
-                &state.source_manager,
+                &session,
                 &source_id,
                 &id,
                 &dir,
@@ -505,6 +547,7 @@ pub async fn download_remote(
             // even when the requesting task is cancelled.
             return tokio::spawn(async move {
                 let mutation = remote_asset::lock_mutation().await;
+                session.ensure_active()?;
                 let publication = prepared.publish(&dir)?;
                 let installed = &publication.installed;
                 upsert_remote_download(

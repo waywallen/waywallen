@@ -19,6 +19,7 @@ mod runtime;
 mod types;
 
 pub use manager::*;
+pub(crate) use parsing::redact_secrets;
 pub use runtime::{LuaPluginRuntime, WallpaperApply};
 pub use types::*;
 
@@ -28,6 +29,8 @@ mod discover_tests;
 mod gltf_tests;
 #[cfg(test)]
 mod image_tests;
+#[cfg(test)]
+mod prepare_tests;
 #[cfg(test)]
 mod sketchfab_tests;
 #[cfg(test)]

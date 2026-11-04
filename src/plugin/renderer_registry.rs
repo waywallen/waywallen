@@ -38,6 +38,8 @@ pub struct PluginMeta {
     #[serde(default)]
     pub entry_version: Option<u32>,
     #[serde(default)]
+    pub prepare: Option<PluginPrepare>,
+    #[serde(default)]
     pub i18n: Option<PluginTranslationMeta>,
     /// Declarative file manifest with paths relative to the plugin dir.
     /// Loaded during scanning from the required `files.txt`.
@@ -63,6 +65,62 @@ pub struct EntryRef {
     pub plugin_system: bool,
     pub entry: PathBuf,
     pub entry_version: u32,
+    pub prepare: Option<PluginPrepare>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PluginPrepare {
+    pub bin: PathBuf,
+    pub version: u32,
+}
+
+fn resolve_prepare(
+    root: &Path,
+    definition: &PluginPrepare,
+    files: &[String],
+    entry_version: Option<u32>,
+) -> Result<PluginPrepare, String> {
+    if entry_version.is_none_or(|version| version < crate::plugin::source::ENTRY_VERSION_V7) {
+        return Err("plugin.prepare requires Lua entry_version 7".into());
+    }
+    if definition.version != 1 {
+        return Err("plugin.prepare.version must be 1".into());
+    }
+    crate::remote_asset::relative_path(&definition.bin).map_err(|error| error.to_string())?;
+    let relative = definition
+        .bin
+        .to_str()
+        .ok_or("plugin.prepare.bin is not UTF-8")?;
+    if !files.iter().any(|file| file == relative) {
+        return Err("plugin.prepare.bin must be listed in files.txt".into());
+    }
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    let mut target = root.clone();
+    for component in definition.bin.components() {
+        target.push(component);
+        if std::fs::symlink_metadata(&target)
+            .map_err(|error| error.to_string())?
+            .file_type()
+            .is_symlink()
+        {
+            return Err("plugin.prepare.bin must not contain symlinks".into());
+        }
+    }
+    if !std::fs::symlink_metadata(&target)
+        .map_err(|error| error.to_string())?
+        .file_type()
+        .is_file()
+        || !target
+            .canonicalize()
+            .map_err(|error| error.to_string())?
+            .starts_with(&root)
+    {
+        return Err("plugin.prepare.bin must be a regular file inside the plugin".into());
+    }
+    Ok(PluginPrepare {
+        bin: target,
+        version: definition.version,
+    })
 }
 
 /// Components collected from scanning one or more `plugins/` directories.
@@ -742,6 +800,23 @@ pub fn scan_plugins(dir: &Path, system: bool) -> PluginScan {
             ),
         }
 
+        let prepare = match &meta.prepare {
+            Some(definition) => {
+                match resolve_prepare(&plugin_dir, definition, &meta.files, meta.entry_version) {
+                    Ok(definition) => Some(definition),
+                    Err(reason) => {
+                        log::warn!("skip plugin {}: {reason}", meta.id);
+                        out.incompatible.push(PluginIncompat {
+                            plugin_id: meta.id.clone(),
+                            reason,
+                        });
+                        continue;
+                    }
+                }
+            }
+            None => None,
+        };
+
         if let Some(i18n) = &meta.i18n {
             match crate::plugin::i18n::load_plugin_translation_documents(
                 &plugin_dir,
@@ -773,6 +848,7 @@ pub fn scan_plugins(dir: &Path, system: bool) -> PluginScan {
                         plugin_system: meta.system,
                         entry: resolve_rel(&plugin_dir, entry),
                         entry_version,
+                        prepare: prepare.clone(),
                     });
                 }
                 Some(entry_version) => {
@@ -1091,6 +1167,7 @@ types = ["image"]
             update: None,
             entry: None,
             entry_version: None,
+            prepare: None,
             i18n: None,
             files: Vec::new(),
             system,

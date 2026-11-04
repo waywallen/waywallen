@@ -2136,6 +2136,7 @@ impl LuaPluginRuntime {
         fs.set("remove_dir", remove_dir_fn)?;
         super::filesystem::install(&self.lua, &fs)?;
         ctx.set("fs", fs)?;
+        self.install_artifact_resource_context(&ctx, plugin_name)?;
 
         // ctx.probe(path) -> table|nil
         // Returns present file/media fields, or nil if nothing was found.
@@ -2270,6 +2271,7 @@ impl LuaPluginRuntime {
         ctx.set("config", config)?;
 
         self.install_remote_utility_context(&ctx)?;
+        self.install_artifact_resource_context(&ctx, Some(plugin_name))?;
         let log_plugin = plugin_name.to_owned();
         ctx.set(
             "log",
@@ -2282,6 +2284,44 @@ impl LuaPluginRuntime {
         ctx.set("html", mlua_extra::html::create_module(&self.lua)?)?;
         ctx.set("url", mlua_extra::url::create_module(&self.lua)?)?;
         Ok(ctx)
+    }
+
+    fn install_artifact_resource_context(
+        &self,
+        ctx: &LuaTable,
+        plugin_name: Option<&str>,
+    ) -> Result<()> {
+        if plugin_name
+            .and_then(|name| self.plugin_infos.get(name))
+            .is_some_and(|info| info.entry_version >= ENTRY_VERSION_V7)
+        {
+            ctx.set(
+                "artifact_resource_path",
+                self.lua.create_function(|_, relative: String| {
+                    crate::remote_asset::resource_path(Path::new(&relative))
+                        .map(|path| path.to_string_lossy().into_owned())
+                        .map_err(mlua::Error::external)
+                })?,
+            )?;
+        }
+        Ok(())
+    }
+
+    fn bounded_json_object(
+        value: LuaValue,
+        context: &str,
+    ) -> Result<Option<serde_json::Map<String, serde_json::Value>>> {
+        if matches!(value, LuaValue::Nil) {
+            return Ok(None);
+        }
+        let encoded = mlua_extra::json::strict::encode(&value)
+            .map_err(|_| Error::Internal(anyhow!("{context} must be a JSON object")))?;
+        if encoded.len() > MAX_PROVIDER_DATA_BYTES {
+            return Err(Error::Internal(anyhow!("{context} exceeds 64 KiB")));
+        }
+        serde_json::from_slice(&encoded)
+            .map(Some)
+            .map_err(|_| Error::Internal(anyhow!("{context} must be a JSON object")))
     }
 
     fn wallpaper_entry_table(&self, entry: &WallpaperEntry) -> Result<LuaTable> {
@@ -2955,6 +2995,15 @@ impl LuaPluginRuntime {
         let archive = result.get::<LuaValue>("archive")?;
         let attribution = result.get::<LuaValue>("attribution")?;
         let provider_data = result.get::<LuaValue>("provider_data")?;
+        let resources = result.get::<LuaValue>("resources")?;
+        let prepare = result.get::<LuaValue>("prepare")?;
+        if info.entry_version < ENTRY_VERSION_V7
+            && (!matches!(resources, LuaValue::Nil) || !matches!(prepare, LuaValue::Nil))
+        {
+            return Err(Error::Internal(anyhow!(
+                "module.discover.download result.resources and prepare require Lua entry_version 7"
+            )));
+        }
         if info.entry_version < ENTRY_VERSION_V6 {
             if !matches!(archive, LuaValue::Nil) {
                 return Err(Error::Internal(anyhow!(
@@ -3006,27 +3055,36 @@ impl LuaPluginRuntime {
                 )))
             }
         };
-        let provider_data = match provider_data {
-            LuaValue::Nil => None,
-            value => {
-                let encoded = mlua_extra::json::strict::encode(&value).map_err(|_| {
-                    Error::Internal(anyhow!(
-                        "module.discover.download result.provider_data must be a JSON object"
-                    ))
-                })?;
-                if encoded.len() > MAX_PROVIDER_DATA_BYTES {
-                    return Err(Error::Internal(anyhow!(
-                        "module.discover.download result.provider_data exceeds 64 KiB"
-                    )));
-                }
-                let value = serde_json::from_slice(&encoded).map_err(|_| {
-                    Error::Internal(anyhow!(
-                        "module.discover.download result.provider_data must be a JSON object"
-                    ))
-                })?;
-                Some(value)
+        let provider_data = Self::bounded_json_object(
+            provider_data,
+            "module.discover.download result.provider_data",
+        )?;
+        let prepare =
+            Self::bounded_json_object(prepare, "module.discover.download result.prepare")?;
+        let resources: Vec<DiscoverResource> = if matches!(resources, LuaValue::Nil) {
+            Vec::new()
+        } else {
+            let encoded = mlua_extra::json::strict::encode(&resources).map_err(|_| {
+                Error::Internal(anyhow!(
+                    "module.discover.download result.resources must be an array"
+                ))
+            })?;
+            if encoded.len() > 512 * 1024 {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.resources is too large"
+                )));
             }
+            serde_json::from_slice(&encoded)
+                .map_err(|_| Error::Internal(anyhow!("module.discover.download result.resources must contain id, url and optional size")))?
         };
+        crate::remote_asset::prepare::validate_resources(&resources).map_err(Error::Internal)?;
+        if (!resources.is_empty() && prepare.is_none())
+            || (prepare.is_some() && !discover.supports_resolve)
+        {
+            return Err(Error::Internal(anyhow!(
+                "resource preparation requires prepare parameters and discover.resolve"
+            )));
+        }
         let transfer = DiscoverTransfer {
             url: Self::optional_string(&result, "url", "module.discover.download result")?,
             filename: Self::optional_string(
@@ -3036,6 +3094,8 @@ impl LuaPluginRuntime {
             )?,
             format,
             resolve: discover.supports_resolve,
+            resources,
+            prepare,
         };
         let metadata = DiscoverMetadata {
             wp_type: Self::require_string(&result, "wp_type", "module.discover.download result")?,
@@ -3080,6 +3140,7 @@ impl LuaPluginRuntime {
         id: &str,
         dir: &str,
         metadata: Option<&DiscoverMetadata>,
+        prepared: Option<&serde_json::Map<String, serde_json::Value>>,
     ) -> Result<DiscoverResolve> {
         let callbacks = self
             .callbacks
@@ -3105,6 +3166,18 @@ impl LuaPluginRuntime {
         let params = self.lua.create_table()?;
         params.set("id", id.to_string())?;
         params.set("dir", dir.to_string())?;
+        if let Some(prepared) = prepared {
+            if info.entry_version < ENTRY_VERSION_V7 {
+                return Err(Error::Internal(anyhow!(
+                    "prepared resources require Lua entry_version 7"
+                )));
+            }
+            let encoded = serde_json::to_vec(prepared)?;
+            params.set(
+                "prepared",
+                mlua_extra::json::strict::decode(&self.lua, &encoded)?,
+            )?;
+        }
         if let Some(metadata) = metadata {
             let encoded = serde_json::to_vec(metadata)?;
             params.set(
@@ -3120,6 +3193,16 @@ impl LuaPluginRuntime {
                 message: redact_secrets(&e.to_string()),
             })?;
 
+        let provider_data = result.get::<LuaValue>("provider_data")?;
+        if info.entry_version < ENTRY_VERSION_V7 && !matches!(provider_data, LuaValue::Nil) {
+            return Err(Error::Internal(anyhow!(
+                "module.discover.resolve result.provider_data requires Lua entry_version 7"
+            )));
+        }
+        let provider_data = Self::bounded_json_object(
+            provider_data,
+            "module.discover.resolve result.provider_data",
+        )?;
         let resolved = DiscoverResolve {
             name: Self::require_string(&result, "name", "module.discover.resolve result")?,
             wp_type: Self::require_string(&result, "wp_type", "module.discover.resolve result")?,
@@ -3145,6 +3228,7 @@ impl LuaPluginRuntime {
             )?,
             size: result.get::<i64>("size").ok(),
             content_rating: result.get::<String>("content_rating").ok(),
+            provider_data,
         };
         self.persist_state(plugin_name)?;
         Ok(resolved)

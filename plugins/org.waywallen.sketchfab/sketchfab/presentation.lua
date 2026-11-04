@@ -1,5 +1,6 @@
 local api = import("sketchfab.api")
 local map = import("sketchfab.map")
+local environment = import("sketchfab.environment")
 local M = {}
 local LIMIT = 64 * 1024
 local sections = { "orientation", "camera", "lighting", "environment", "background", "post_process", "ground", "materials" }
@@ -156,32 +157,9 @@ function M.from_options(ctx, id, options)
         end
         return "mapped", nil, details
     end)
-    section("environment", options.environment, function(value)
-        local enabled = boolean(value.enable)
-        profile.environment = json.object { ibl_intensity = 0.0, background = false }
-        if enabled then return "unsupported", "environment-resources-not-managed" end
-        return "disabled"
-    end)
-    section("background", options.background, function(value)
-        local environment = profile.environment or json.object {}
-        if value.enable == "color" then
-            local color = vector(value.color, 3, json, 0, 1)
-            for i, component in ipairs(color) do
-                color[i] = component <= 0.04045 and component / 12.92 or ((component + 0.055) / 1.055) ^ 2.4
-            end
-            environment.background, environment.background_color = false, color
-        elseif value.enable == false then
-            environment.background = false
-        elseif value.enable == "environment" or value.enable == "fixed" then
-            environment.background = false
-            profile.environment = environment
-            return "unsupported", "background-resource-not-managed"
-        else
-            return "unsupported", "background-mode-unsupported"
-        end
-        profile.environment = environment
-        return value.enable == false and "disabled" or "mapped"
-    end)
+    local fallback, environment_states, environment_intent = environment.describe(options, json, references)
+    if options.environment ~= nil or options.background ~= nil then profile.environment = fallback end
+    result.sections.environment, result.sections.background = environment_states.environment, environment_states.background
     local post
     if json.kind(options.scene) == "object" then
         post = options.scene.postProcess
@@ -288,19 +266,37 @@ function M.from_options(ctx, id, options)
         result.profile = json.null
         result.sections = json.object { options = status(json, "unsupported",
             encoded and "presentation-budget-exceeded" or "presentation-values-not-encodable") }
+        environment_intent = nil
     end
-    return data
+    return data, environment_intent
 end
 
 function M.capture(ctx, id)
     local ok, options = pcall(api.viewer_options, ctx, id)
-    local data
+    local data, intent, resources, prepare
     if ok then
-        data = M.from_options(ctx, id, options)
+        data, intent = M.from_options(ctx, id, options)
+        if intent then
+            local available, payload = pcall(api.environments, ctx, id)
+            if available then
+                resources, prepare = environment.attach(ctx, data, intent, payload)
+            else
+                environment.unavailable(data, intent, ctx.json.strict)
+            end
+        end
     else
         local value = snapshot(ctx, id)
         value.sections.options = status(ctx.json.strict, "unavailable", "options-request-failed")
         data = ctx.json.strict.object { sketchfab = value }
+    end
+    local json = ctx.json.strict
+    local encoded, bytes = pcall(json.encode, data)
+    if not encoded or #bytes > LIMIT then
+        local value = data.sketchfab
+        value.profile, value.pending_environment, value.environment = json.null, nil, nil
+        value.sections = json.object { options = status(json, "unsupported",
+            encoded and "presentation-budget-exceeded" or "presentation-values-not-encodable") }
+        resources, prepare = nil, nil
     end
     if type(ctx.log) == "function" then
         local states = data.sketchfab.sections
@@ -309,6 +305,12 @@ function M.capture(ctx, id)
             if states[name] then ctx.log("sketchfab: presentation " .. name .. " " .. states[name].status) end
         end
     end
+    return data, resources, prepare
+end
+
+function M.finalize(ctx, metadata, prepared)
+    local data = environment.finalize(ctx, metadata.provider_data, prepared)
+    if data and #ctx.json.strict.encode(data) > LIMIT then error("Sketchfab presentation snapshot exceeds 64 KiB") end
     return data
 end
 
@@ -320,6 +322,7 @@ function M.render_profile(metadata, json)
         error("Sketchfab presentation snapshot is incompatible; remove and download the model again")
     end
     if value.profile == json.null then return nil end
+    if value.pending_environment ~= nil then error("Sketchfab environment preparation is incomplete") end
     if json.kind(value.profile) ~= "object" or value.profile.version ~= 2 then
         error("Sketchfab presentation profile is invalid")
     end

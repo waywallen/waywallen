@@ -409,9 +409,11 @@ auto create_gpu(Options& options) -> Option<Box<Gpu>> {
         rstd_warn("gltf: {}: {}", diagnostic.location, diagnostic.message);
     gltf::PresentationResources resources;
     auto                        parent = canonical_path.as_path().parent();
-    if (parent) resources.base_directory = rstd::path::PathBuf::from(*parent);
-    resources.root =
-        Some(options.asset_root.is_empty() ? resources.base_directory.clone() : rstd::move(root));
+    if (! options.asset_root.is_empty())
+        resources.base_directory = rstd::move(root);
+    else if (parent)
+        resources.base_directory = rstd::path::PathBuf::from(*parent);
+    resources.root = Some(resources.base_directory.clone());
     auto bound =
         gltf::BindPresentation(options.presentation.take().unwrap_or(gltf::PresentationSpec {}),
                                asset.clone(),

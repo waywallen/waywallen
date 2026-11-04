@@ -73,7 +73,7 @@ function M.download(ctx, id)
         error("This Sketchfab model is not downloadable")
     end
     local metadata = map.download(model)
-    metadata.provider_data = presentation.capture(ctx, id)
+    metadata.provider_data, metadata.resources, metadata.prepare = presentation.capture(ctx, id)
     local transfer = api.download(ctx, id, headers)
     metadata.url, metadata.filename, metadata.archive = transfer.url, transfer.filename, transfer.archive
     metadata.size = transfer.size
@@ -129,6 +129,7 @@ function M.resolve(ctx, params)
         external_id = metadata.external_id,
         size = metadata.size,
         content_rating = metadata.content_rating,
+        provider_data = presentation.finalize(ctx, metadata, params.prepared),
     }
 end
 

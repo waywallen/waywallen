@@ -432,12 +432,7 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
                 // the owning plugin domain id and entry ABI version.
                 tokio::task::spawn_blocking(move || {
                     for r in &entry_refs {
-                        if let Err(e) = source_mgr.load_plugin(
-                            &r.entry,
-                            &r.plugin_id,
-                            &r.plugin_version,
-                            r.entry_version,
-                        ) {
+                        if let Err(e) = source_mgr.load_entry(r) {
                             log::warn!("load entry {}: {e:#}", r.entry.display());
                         }
                     }

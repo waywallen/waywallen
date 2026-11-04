@@ -1,8 +1,10 @@
+helpers/waywallen-sketchfab-prepare
 i18n/zh-CN.po
 main.lua
 plugin.toml
 sketchfab/api.lua
 sketchfab/discover.lua
+sketchfab/environment.lua
 sketchfab/map.lua
 sketchfab/presentation.lua
 sketchfab/session.lua

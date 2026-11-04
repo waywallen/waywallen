@@ -3,7 +3,11 @@ id = "org.waywallen.sketchfab"
 name = "Sketchfab"
 version = "0.1.0"
 entry = "main.lua"
-entry_version = 6
+entry_version = 7
+
+[plugin.prepare]
+bin = "helpers/waywallen-sketchfab-prepare"
+version = 1
 
 [plugin.i18n]
 directory = "i18n"

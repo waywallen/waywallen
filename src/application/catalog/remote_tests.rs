@@ -4,6 +4,7 @@ use std::io::{Cursor, Write};
 use std::sync::Mutex;
 use tokio::io::AsyncReadExt;
 
+use crate::plugin::source::SourceManager;
 use crate::plugin::source::ENTRY_VERSION_V6;
 use crate::plugin::state_store::PluginStateStore;
 use crate::probe::media::AvFormatProbe;
@@ -23,6 +24,10 @@ struct Http {
 
 impl Http {
     async fn new(routes: HashMap<String, Reply>) -> Self {
+        Self::with_headers(routes, "").await
+    }
+
+    async fn with_headers(routes: HashMap<String, Reply>, headers: &'static str) -> Self {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
@@ -56,6 +61,7 @@ impl Http {
                 received.lock().unwrap().push(request);
                 let mut response =
                     format!("HTTP/1.1 {} Test\r\nConnection: close\r\n", reply.status);
+                response.push_str(headers);
                 if reply.chunked {
                     response.push_str("Transfer-Encoding: chunked\r\n\r\n");
                     if !reply.bytes.is_empty() {
@@ -369,7 +375,7 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     let info = manager.call_download("test", "model").await.unwrap();
     let mut progress = Vec::new();
     let prepared = prepare_artifact(
-        &manager,
+        &manager.download_session("test").unwrap(),
         "test",
         "model",
         root.path(),
@@ -499,9 +505,16 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     );
     use std::os::unix::fs::MetadataExt;
     let original_inode = std::fs::metadata(installed.resource()).unwrap().ino();
-    let replacement = prepare_artifact(&manager, "test", "model", root.path(), info, |_| {})
-        .await
-        .unwrap();
+    let replacement = prepare_artifact(
+        &manager.download_session("test").unwrap(),
+        "test",
+        "model",
+        root.path(),
+        info,
+        |_| {},
+    )
+    .await
+    .unwrap();
     let reused = replacement.publish(root.path()).unwrap().commit();
     assert_eq!(reused.resource(), installed.resource());
     assert_eq!(
@@ -526,12 +539,18 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     info.transfer.filename = "../scene.glb".into();
     let provider_data = presentation_snapshot();
     info.metadata.provider_data = Some(provider_data.clone());
-    let publication =
-        prepare_artifact(&manager, "test", "model", root.path(), info.clone(), |_| {})
-            .await
-            .unwrap()
-            .publish(root.path())
-            .unwrap();
+    let publication = prepare_artifact(
+        &manager.download_session("test").unwrap(),
+        "test",
+        "model",
+        root.path(),
+        info.clone(),
+        |_| {},
+    )
+    .await
+    .unwrap()
+    .publish(root.path())
+    .unwrap();
     assert!(publication.installed.resource().is_file());
     assert_eq!(
         publication.installed.artifact.metadata.provider_data,
@@ -540,12 +559,19 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     drop(publication);
     assert_empty(root.path());
 
-    let installed = prepare_artifact(&manager, "test", "model", root.path(), info.clone(), |_| {})
-        .await
-        .unwrap()
-        .publish(root.path())
-        .unwrap()
-        .commit();
+    let installed = prepare_artifact(
+        &manager.download_session("test").unwrap(),
+        "test",
+        "model",
+        root.path(),
+        info.clone(),
+        |_| {},
+    )
+    .await
+    .unwrap()
+    .publish(root.path())
+    .unwrap()
+    .commit();
     assert_eq!(installed.artifact.resource, Path::new("scene.glb"));
     assert_eq!(std::fs::read(installed.resource()).unwrap(), bytes);
     assert_eq!(installed.artifact.metadata.size, Some(bytes.len() as i64));
@@ -566,12 +592,19 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     newer["sketchfab"]["captured_at"] = 456.into();
     newer["sketchfab"]["profile"]["display"]["exposure"] = 2.into();
     info.metadata.provider_data = Some(newer.as_object().unwrap().clone());
-    let reused = prepare_artifact(&manager, "test", "model", root.path(), info, |_| {})
-        .await
-        .unwrap()
-        .publish(root.path())
-        .unwrap()
-        .commit();
+    let reused = prepare_artifact(
+        &manager.download_session("test").unwrap(),
+        "test",
+        "model",
+        root.path(),
+        info,
+        |_| {},
+    )
+    .await
+    .unwrap()
+    .publish(root.path())
+    .unwrap()
+    .commit();
     assert_eq!(reused.artifact.metadata.provider_data, Some(provider_data));
     assert_eq!(
         std::fs::metadata(reused.resource()).unwrap().ino(),
@@ -606,11 +639,16 @@ async fn remote_download_rejects_unsafe_archive_and_invalid_resolve_without_resi
         let root = tempfile::tempdir().unwrap();
         let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
         let info = manager.call_download("test", "model").await.unwrap();
-        assert!(
-            prepare_artifact(&manager, "test", "model", root.path(), info, |_| {})
-                .await
-                .is_err()
-        );
+        assert!(prepare_artifact(
+            &manager.download_session("test").unwrap(),
+            "test",
+            "model",
+            root.path(),
+            info,
+            |_| {}
+        )
+        .await
+        .is_err());
         assert_empty(root.path());
         assert!(repo::list_items_all(&db).await.unwrap().is_empty());
         assert!(!root.path().join("escape.txt").exists());
@@ -682,6 +720,266 @@ async fn remote_download_size_limits_cover_headers_and_streaming_cleanup() {
 }
 
 #[tokio::test]
+async fn auxiliary_downloads_preserve_encoded_bytes_and_check_exact_sizes() {
+    let gzip = vec![
+        31, 139, 8, 0, 0, 0, 0, 0, 0, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0,
+    ];
+    for chunked in [false, true] {
+        let http = Http::with_headers(
+            HashMap::from([(
+                "/environment".into(),
+                Reply {
+                    status: 200,
+                    bytes: gzip.clone(),
+                    chunked,
+                },
+            )]),
+            "Content-Encoding: gzip\r\n",
+        )
+        .await;
+        for expected in [gzip.len() as u64, gzip.len() as u64 + 1] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("environment");
+            let result = download_remote_file_checked(
+                &format!("{}/environment", http.url),
+                &path,
+                1024,
+                Some(expected),
+                true,
+                None,
+                |_| Ok(()),
+            )
+            .await;
+            if expected == gzip.len() as u64 {
+                result.unwrap();
+                assert_eq!(std::fs::read(path).unwrap(), gzip);
+            } else {
+                assert!(format!("{:#}", result.unwrap_err()).contains("match descriptor"));
+                assert_empty(root.path());
+            }
+        }
+        http.assert_requests(2);
+    }
+}
+
+#[tokio::test]
+async fn auxiliary_downloads_enforce_the_shared_byte_budget_before_writing() {
+    let http = Http::new(HashMap::from([(
+        "/environment".into(),
+        Reply {
+            status: 200,
+            bytes: vec![1; 17],
+            chunked: true,
+        },
+    )]))
+    .await;
+    let root = tempfile::tempdir().unwrap();
+    let budget = AtomicU64::new(crate::remote_asset::prepare::INPUT_LIMIT - 8);
+    let error = download_remote_file_checked(
+        &format!("{}/environment", http.url),
+        &root.path().join("environment"),
+        1024,
+        None,
+        true,
+        Some(&budget),
+        |_| Ok(()),
+    )
+    .await
+    .unwrap_err();
+    assert!(format!("{error:#}").contains("total size limit"));
+    assert_empty(root.path());
+}
+
+#[tokio::test]
+async fn artifact_transfers_deduplicate_urls_and_report_aggregate_progress() {
+    use crate::plugin::source::{DiscoverResource, DiscoverTransfer};
+
+    for chunked in [false, true] {
+        let http = Http::new(HashMap::from([
+            (
+                "/model".into(),
+                Reply {
+                    status: 200,
+                    bytes: b"model".to_vec(),
+                    chunked: false,
+                },
+            ),
+            (
+                "/environment".into(),
+                Reply {
+                    status: 200,
+                    bytes: b"environment".to_vec(),
+                    chunked,
+                },
+            ),
+        ]))
+        .await;
+        let root = tempfile::tempdir().unwrap();
+        let staged = StagedArtifact::create(root.path()).unwrap();
+        let info = DiscoverTransfer {
+            url: format!("{}/model", http.url),
+            resources: ["diffuse", "specular"]
+                .into_iter()
+                .map(|id| DiscoverResource {
+                    id: id.into(),
+                    url: format!("{}/environment", http.url),
+                    size: Some(11),
+                })
+                .chain(std::iter::once(DiscoverResource {
+                    id: "model_alias".into(),
+                    url: format!("{}/model", http.url),
+                    size: Some(5),
+                }))
+                .collect(),
+            ..Default::default()
+        };
+        let mut progress = Vec::new();
+        let (primary, resources) =
+            transfer::download(&info, &staged, &mut |value| progress.push(value))
+                .await
+                .unwrap();
+        assert_eq!(std::fs::read(primary).unwrap(), b"model");
+        assert_eq!(resources["diffuse"], resources["specular"]);
+        assert_eq!(resources["model_alias"], "input-0");
+        assert_eq!(std::fs::read_dir(staged.input_root()).unwrap().count(), 2);
+        assert!(progress.last().unwrap().is_none());
+        assert_eq!(progress.iter().filter(|value| value.is_none()).count(), 1);
+        let transfers = progress.iter().flatten().collect::<Vec<_>>();
+        assert!(transfers
+            .windows(2)
+            .all(|pair| pair[0].received_bytes <= pair[1].received_bytes));
+        assert_eq!(transfers.last().unwrap().received_bytes, 16);
+        assert_eq!(
+            transfers.last().unwrap().total_bytes,
+            (!chunked).then_some(16)
+        );
+        assert!(transfers
+            .iter()
+            .all(|value| value.total_bytes.is_none_or(|total| total == 16)));
+        http.assert_requests(2);
+        drop(staged);
+        assert_empty(root.path());
+    }
+}
+
+#[tokio::test]
+async fn download_slots_are_global_and_cancellation_releases_temporary_inputs() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let (accepted, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    let responses = Arc::new(tokio::sync::Semaphore::new(0));
+    let allowed = responses.clone();
+    let server = tokio::spawn(async move {
+        let mut connections = tokio::task::JoinSet::new();
+        loop {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let accepted = accepted.clone();
+            let allowed = allowed.clone();
+            connections.spawn(async move {
+                let mut request = Vec::new();
+                while !request.ends_with(b"\r\n\r\n") {
+                    request.push(stream.read_u8().await.unwrap());
+                }
+                let request = String::from_utf8(request).unwrap();
+                let index = request
+                    .lines()
+                    .next()
+                    .unwrap()
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap()
+                    .trim_start_matches('/')
+                    .parse::<usize>()
+                    .unwrap();
+                accepted.send(index).unwrap();
+                let permit = allowed.acquire().await.unwrap();
+                permit.forget();
+                let _ = stream
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 1\r\n\r\nx",
+                    )
+                    .await;
+            });
+        }
+    });
+    let directories = (0..3)
+        .map(|_| tempfile::tempdir().unwrap())
+        .collect::<Vec<_>>();
+    let mut downloads = directories
+        .iter()
+        .enumerate()
+        .map(|(index, root)| {
+            let path = root.path().join("input");
+            Some(tokio::spawn(async move {
+                download_remote_file(&format!("http://{address}/{index}"), &path, 1024, |_| {})
+                    .await
+            }))
+        })
+        .collect::<Vec<_>>();
+    let first = tokio::time::timeout(Duration::from_secs(5), requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    let second = tokio::time::timeout(Duration::from_secs(5), requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(first, second);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(25), requests.recv())
+            .await
+            .is_err()
+    );
+    let cancelled = downloads[first].take().unwrap();
+    cancelled.abort();
+    assert!(cancelled.await.unwrap_err().is_cancelled());
+    assert_empty(directories[first].path());
+    let third = tokio::time::timeout(Duration::from_secs(5), requests.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(third, first);
+    assert_ne!(third, second);
+    responses.add_permits(3);
+    for download in downloads.into_iter().flatten() {
+        download.await.unwrap().unwrap();
+    }
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test]
+async fn artifact_download_sessions_reject_reload_without_using_the_replacement() {
+    let http = Http::new(routes(archive(&[("scene.gltf", b"model")]))).await;
+    let (_old_plugin, manager) = source(&http.url, "scene.gltf");
+    let (_new_plugin, replacement) = source(&http.url, "replacement.gltf");
+    let session = manager.download_session("test").unwrap();
+    let info = session.download("model").await.unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let mut replacement = Some(replacement);
+    let result = prepare_artifact(&session, "test", "model", root.path(), info, |_| {
+        if let Some(replacement) = replacement.take() {
+            manager.replace_plugins(replacement).unwrap();
+        }
+    })
+    .await;
+    assert!(replacement.is_none());
+    assert!(format!("{:#}", result.err().unwrap()).contains("changed while downloading"));
+    assert_empty(root.path());
+    assert!(remote_asset::load(root.path(), "test", "model")
+        .unwrap()
+        .is_none());
+    assert!(session.ensure_active().is_err());
+    manager
+        .download_session("test")
+        .unwrap()
+        .download("model")
+        .await
+        .unwrap();
+    http.assert_requests(1);
+}
+
+#[tokio::test]
 async fn remote_download_database_failure_rolls_back_item_tags_and_publication() {
     use sea_orm::{ConnectionTrait, DbBackend, Statement};
 
@@ -693,9 +991,16 @@ async fn remote_download_database_failure_rolls_back_item_tags_and_publication()
         "CREATE TRIGGER reject_remote_tags BEFORE INSERT ON tag BEGIN SELECT RAISE(FAIL, 'reject remote tags'); END".to_owned()
     )).await.unwrap();
     let info = manager.call_download("test", "model").await.unwrap();
-    let prepared = prepare_artifact(&manager, "test", "model", root.path(), info, |_| {})
-        .await
-        .unwrap();
+    let prepared = prepare_artifact(
+        &manager.download_session("test").unwrap(),
+        "test",
+        "model",
+        root.path(),
+        info,
+        |_| {},
+    )
+    .await
+    .unwrap();
     let publication = prepared.publish(root.path()).unwrap();
     let installed = &publication.installed;
     assert!(installed.resource().is_file());
@@ -727,4 +1032,240 @@ async fn remote_download_database_failure_rolls_back_item_tags_and_publication()
         .unwrap()
         .is_none());
     http.assert_requests(2);
+}
+
+#[tokio::test]
+#[ignore = "copies an installed model and downloads explicitly selected public environment resources"]
+async fn sketchfab_environment_preparation_publishes_and_applies_real_artifact() {
+    let configured = |key| PathBuf::from(std::env::var_os(key).expect(key));
+    let output = configured("WAYWALLEN_SKETCHFAB_OUTPUT_DIR")
+        .canonicalize()
+        .unwrap();
+    assert_eq!(
+        configured("XDG_DATA_HOME"),
+        output.join("data"),
+        "run in an isolated process with XDG_DATA_HOME under output"
+    );
+    let id = std::env::var("WAYWALLEN_SKETCHFAB_MODEL_ID").unwrap();
+    let original = remote_asset::load(
+        &configured("WAYWALLEN_SKETCHFAB_SOURCE_ROOT"),
+        "sketchfab",
+        &id,
+    )
+    .unwrap()
+    .expect("model must already be installed");
+    assert!(!output.starts_with(&original.root));
+    let helper = configured("WAYWALLEN_SKETCHFAB_PREPARE_BIN");
+    let options = std::fs::read_to_string(configured("WAYWALLEN_SKETCHFAB_OPTIONS_PATH")).unwrap();
+    let environments =
+        std::fs::read_to_string(configured("WAYWALLEN_SKETCHFAB_ENVIRONMENTS_PATH")).unwrap();
+    assert!(options.len() <= 4 * 1024 * 1024 && environments.len() <= 4 * 1024 * 1024);
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    let zip_options =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    for file in &original.artifact.files {
+        let path = Path::new("nested").join(&file.path);
+        zip.start_file(path.to_str().unwrap(), zip_options).unwrap();
+        std::io::copy(
+            &mut std::fs::File::open(
+                remote_asset::validate_file(&original.root, &file.path).unwrap(),
+            )
+            .unwrap(),
+            &mut zip,
+        )
+        .unwrap();
+    }
+    let archive = zip.finish().unwrap().into_inner();
+    let archive_size = archive.len();
+    let http = Http::new(HashMap::from([(
+        "/model.zip".into(),
+        Reply {
+            status: 200,
+            bytes: archive,
+            chunked: false,
+        },
+    )]))
+    .await;
+    let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins/org.waywallen.sketchfab");
+    let plugin_root = output.join("plugins/org.waywallen.sketchfab");
+    std::fs::create_dir_all(&plugin_root).unwrap();
+    let manifest_text = std::fs::read_to_string(source_root.join("plugin.toml")).unwrap();
+    let manifest: crate::plugin::renderer_registry::PluginManifest =
+        toml::from_str(&manifest_text).unwrap();
+    let helper_relative = &manifest
+        .plugin
+        .prepare
+        .as_ref()
+        .expect("source must declare its converter")
+        .bin;
+    let files = std::fs::read_to_string(source_root.join("files.txt")).unwrap();
+    for relative in files.lines().filter(|line| !line.trim().is_empty()) {
+        let path = remote_asset::relative_path(Path::new(relative)).unwrap();
+        let target = plugin_root.join(&path);
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::copy(
+            if &path == helper_relative {
+                helper.clone()
+            } else {
+                source_root.join(&path)
+            },
+            &target,
+        )
+        .unwrap();
+    }
+    let entry = manifest.plugin.entry.as_ref().unwrap();
+    std::fs::copy(plugin_root.join(entry), plugin_root.join("original.lua")).unwrap();
+    std::fs::write(
+        plugin_root.join("files.txt"),
+        format!("{files}\noriginal.lua\n"),
+    )
+    .unwrap();
+    let model = serde_json::json!({
+        "uid": id, "name": original.artifact.metadata.title,
+        "isDownloadable": true, "isAgeRestricted": false,
+        "description": original.artifact.metadata.description,
+        "viewerUrl": original.artifact.metadata.web_url,
+        "user": {"username":"fixture-author","displayName":"Fixture author","profileUrl":"https://example.invalid/fixture-author"},
+        "license": {"slug":"by","label":"CC Attribution","url":"https://creativecommons.org/licenses/by/4.0/"},
+        "tags":[],
+    }).to_string();
+    let wrapper = format!(
+        r#"
+local api = import('sketchfab.api')
+local session = import('sketchfab.session')
+session.authenticated = function() return true end
+session.headers = function() return {{}} end
+local model_calls, options_calls, environment_calls, download_calls = 0,0,0,0
+api.model = function(ctx, uid)
+    assert(uid == {id:?}); model_calls=model_calls+1; assert(model_calls == 1)
+    return ctx.json.strict.decode({model:?})
+end
+api.viewer_options = function(ctx, uid)
+    assert(uid == {id:?}); options_calls=options_calls+1; assert(options_calls == 1)
+    return ctx.json.strict.decode({options:?})
+end
+api.environments = function(ctx, uid)
+    assert(uid == {id:?}); environment_calls=environment_calls+1; assert(environment_calls == 1)
+    return ctx.json.strict.decode({environments:?})
+end
+api.download = function(ctx, uid)
+    assert(uid == {id:?}); download_calls=download_calls+1; assert(download_calls == 1)
+    return {{url={url:?} .. '/model.zip',filename='model.zip',archive='zip',size={archive_size}}}
+end
+return import('original')
+"#,
+        url = http.url
+    );
+    std::fs::write(plugin_root.join(entry), wrapper).unwrap();
+    let scan = crate::plugin::renderer_registry::scan_plugin_roots(&[
+        crate::plugin::renderer_registry::PluginRoot::user(output.join("plugins")),
+    ]);
+    assert!(scan.incompatible.is_empty(), "{:?}", scan.incompatible);
+    assert_eq!(scan.entries.len(), 1);
+    let manager = SourceManager::with_probe_and_state_store(
+        Arc::new(AvFormatProbe::new()),
+        PluginStateStore::new(output.join("plugin-state"), output.join("legacy-state")),
+    )
+    .unwrap();
+    manager.load_entry(&scan.entries[0]).unwrap();
+    let session = manager.download_session("sketchfab").unwrap();
+    let info = session.download(&id).await.unwrap();
+    let uses_environment = info.transfer.prepare.is_some();
+    let inputs = info
+        .transfer
+        .resources
+        .iter()
+        .map(|resource| serde_json::json!({"id":resource.id,"size":resource.size}))
+        .collect::<Vec<_>>();
+    std::fs::write(
+        output.join("inputs.json"),
+        serde_json::to_vec_pretty(&inputs).unwrap(),
+    )
+    .unwrap();
+    let root = remote_content_dir("sketchfab");
+    let mut progress = Vec::new();
+    let prepared = prepare_artifact(&session, "sketchfab", &id, &root, info, |value| {
+        progress.push(value)
+    })
+    .await
+    .unwrap();
+    let publication = prepared.publish(&root).unwrap();
+    let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
+    upsert_remote_download(
+        &db,
+        "sketchfab",
+        "fixture",
+        &root,
+        &publication.installed.resource(),
+        publication.installed.preview().as_deref(),
+        &publication.installed.artifact.metadata,
+    )
+    .await
+    .unwrap();
+    let installed = publication.commit();
+    let entry = repo::load_entries(&db).await.unwrap().remove(0);
+    let applied = manager.call_apply("sketchfab", &entry).await.unwrap();
+    assert!(installed
+        .resource()
+        .strip_prefix(&installed.root)
+        .unwrap()
+        .starts_with("nested"));
+    if uses_environment {
+        assert!(installed.artifact.files.len() > original.artifact.files.len());
+        assert_eq!(
+            installed.artifact.metadata.provider_data.as_ref().unwrap()["sketchfab"]["sections"]
+                ["environment"]["status"],
+            "mapped"
+        );
+        assert!(installed
+            .artifact
+            .files
+            .iter()
+            .any(|file| file.path.starts_with(".waywallen/resources")));
+    }
+    for file in &installed.artifact.files {
+        remote_asset::validate_file(&installed.root, &file.path).unwrap();
+    }
+    assert_eq!(
+        installed.artifact.metadata.size,
+        Some(
+            installed
+                .artifact
+                .files
+                .iter()
+                .map(|file| file.bytes)
+                .sum::<u64>() as i64
+        )
+    );
+    std::fs::write(
+        output.join("snapshot.json"),
+        serde_json::to_vec_pretty(&installed.artifact.metadata).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        output.join("entry.json"),
+        serde_json::to_vec_pretty(&entry).unwrap(),
+    )
+    .unwrap();
+    std::fs::write(
+        output.join("extras.json"),
+        serde_json::to_vec_pretty(&applied.extras).unwrap(),
+    )
+    .unwrap();
+    let profile = applied
+        .extras
+        .get("render-profile")
+        .expect("prepared source must export profile");
+    std::fs::write(output.join("render-profile.json"), profile).unwrap();
+    let progress = progress.into_iter().map(|value| match value {
+        Some(value) => serde_json::json!({"received_bytes": value.received_bytes, "total_bytes": value.total_bytes}),
+        None => serde_json::Value::Null,
+    }).collect::<Vec<_>>();
+    std::fs::write(
+        output.join("progress.json"),
+        serde_json::to_vec_pretty(&progress).unwrap(),
+    )
+    .unwrap();
+    http.assert_requests(1);
+    eprintln!("prepared Sketchfab artifact: {}", installed.root.display());
 }

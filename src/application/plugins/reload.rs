@@ -65,12 +65,7 @@ async fn reload_source_entries(
 
         let mut failures = Vec::new();
         for entry in &entries {
-            if let Err(error) = source_manager.load_plugin(
-                &entry.entry,
-                &entry.plugin_id,
-                &entry.plugin_version,
-                entry.entry_version,
-            ) {
+            if let Err(error) = source_manager.load_entry(entry) {
                 let message = format!("load entry {}: {error:#}", entry.entry.display());
                 log::warn!("{message}");
                 failures.push((entry.plugin_id.clone(), message));

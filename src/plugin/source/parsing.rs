@@ -17,7 +17,7 @@ pub(super) fn parse_lua_string_map(
     Ok(map)
 }
 
-pub(super) fn redact_secrets(message: &str) -> String {
+pub(crate) fn redact_secrets(message: &str) -> String {
     let mut out = message.to_string();
     for marker in ["Authorization:", "authorization:", "Cookie:", "cookie:"] {
         let mut from = 0;

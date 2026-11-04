@@ -242,6 +242,12 @@ function M.viewer_options(ctx, id)
     return request_json(ctx, "/i/models/" .. id .. "/options", {}, {}, "presentation", "https://sketchfab.com")
 end
 
+function M.environments(ctx, id)
+    validate_id(id)
+    return request_json(ctx, "/i/models/" .. id .. "/environments", { optimized = "1" }, {},
+        "presentation", "https://sketchfab.com")
+end
+
 function M.me(ctx, token)
     if type(token) ~= "string" or token == "" then
         error("Sketchfab API Token is required")

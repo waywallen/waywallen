@@ -8,8 +8,11 @@ use sha2::{Digest, Sha256};
 
 use crate::plugin::source::DiscoverMetadata;
 
+pub(crate) mod prepare;
+
 const INTERNAL: &str = ".waywallen";
 const MANIFEST: &str = ".waywallen/asset.json";
+const RESOURCE_DIRECTORY: &str = ".waywallen/resources";
 const MANIFEST_LIMIT: u64 = 1024 * 1024;
 static MUTATION: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -76,6 +79,14 @@ pub(crate) fn relative_path(path: &Path) -> Result<PathBuf> {
         bail!("artifact path must be a normal relative path");
     }
     Ok(path.to_path_buf())
+}
+
+pub(crate) fn resource_path(relative: &Path) -> Result<PathBuf> {
+    let relative = relative_path(relative)?;
+    if relative.components().count() > 16 {
+        bail!("artifact resource path exceeds the depth limit");
+    }
+    Ok(Path::new(RESOURCE_DIRECTORY).join(relative))
 }
 
 pub(crate) fn validate_file(root: &Path, relative: &Path) -> Result<PathBuf> {
@@ -157,6 +168,8 @@ pub(crate) fn load(root: &Path, source_id: &str, id: &str) -> Result<Option<Inst
 pub(crate) struct StagedArtifact {
     temporary: tempfile::TempDir,
     content: PathBuf,
+    resource_files: Vec<crate::archive::ExtractedFile>,
+    internal_ready: bool,
 }
 
 impl StagedArtifact {
@@ -167,19 +180,60 @@ impl StagedArtifact {
             .tempdir_in(root)?;
         let content = temporary.path().join("content");
         fs::create_dir(&content)?;
-        Ok(Self { temporary, content })
+        fs::create_dir(temporary.path().join("inputs"))?;
+        fs::create_dir(temporary.path().join("outputs"))?;
+        Ok(Self {
+            temporary,
+            content,
+            resource_files: Vec::new(),
+            internal_ready: false,
+        })
     }
 
     pub fn content(&self) -> &Path {
         &self.content
     }
 
-    pub fn download_path(&self) -> PathBuf {
-        self.temporary.path().join("download.zip")
-    }
-
     pub fn preview_path(&self) -> PathBuf {
         self.temporary.path().join("preview")
+    }
+
+    pub fn input_root(&self) -> PathBuf {
+        self.temporary.path().join("inputs")
+    }
+    pub fn output_root(&self) -> PathBuf {
+        self.temporary.path().join("outputs")
+    }
+    pub fn request_path(&self) -> PathBuf {
+        self.temporary.path().join("request.json")
+    }
+
+    pub fn adopt_prepared_files(
+        &mut self,
+        files: Vec<crate::archive::ExtractedFile>,
+    ) -> Result<()> {
+        if self.internal_ready {
+            bail!("artifact resources were already prepared");
+        }
+        fs::create_dir(self.content.join(INTERNAL))
+            .context("reserve artifact resource directory")?;
+        self.internal_ready = true;
+        if !files.is_empty() {
+            fs::rename(self.output_root(), self.content.join(RESOURCE_DIRECTORY))
+                .context("adopt prepared artifact resources")?;
+        }
+        for file in &files {
+            let path = validate_file(&self.content, &resource_path(&file.path)?)?;
+            if fs::metadata(path)?.len() != file.bytes {
+                bail!("prepared artifact file changed");
+            }
+        }
+        self.resource_files = files;
+        Ok(())
+    }
+
+    pub fn prepared_bytes(&self) -> u64 {
+        self.resource_files.iter().map(|file| file.bytes).sum()
     }
 
     pub fn prepare(
@@ -189,7 +243,7 @@ impl StagedArtifact {
         resource: &Path,
         preview: Option<&Path>,
         metadata: DiscoverMetadata,
-        files: Vec<crate::archive::ExtractedFile>,
+        mut files: Vec<crate::archive::ExtractedFile>,
     ) -> Result<PreparedArtifact> {
         relative_path(resource)?;
         if resource.components().next() == Some(Component::Normal(INTERNAL.as_ref())) {
@@ -205,8 +259,23 @@ impl StagedArtifact {
                 bail!("artifact file changed after extraction");
             }
         }
-        fs::create_dir(self.content.join(INTERNAL))
-            .context("create artifact metadata directory")?;
+        if !self.internal_ready {
+            fs::create_dir(self.content.join(INTERNAL))
+                .context("create artifact metadata directory")?;
+        }
+        if !self.resource_files.is_empty() {
+            for file in &self.resource_files {
+                let path = resource_path(&file.path)?;
+                let actual = validate_file(&self.content, &path)?;
+                if fs::metadata(actual)?.len() != file.bytes {
+                    bail!("prepared artifact file changed");
+                }
+                files.push(crate::archive::ExtractedFile {
+                    path,
+                    bytes: file.bytes,
+                });
+            }
+        }
         let preview = match preview {
             Some(path) => {
                 if !fs::symlink_metadata(path)?.file_type().is_file() {

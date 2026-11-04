@@ -29,6 +29,81 @@ pub(super) struct PluginHandle {
     pub(super) runtime: Arc<tokio::sync::Mutex<LuaPluginRuntime>>,
     info: StdRwLock<LoadedPluginInfo>,
     generation_state: Arc<AtomicU8>,
+    prepare: Option<Arc<crate::remote_asset::prepare::Program>>,
+}
+
+pub struct DownloadSession {
+    handle: Arc<PluginHandle>,
+    source_id: String,
+}
+
+impl DownloadSession {
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+    pub fn plugin_version(&self) -> String {
+        self.handle
+            .info
+            .read()
+            .expect("plugin info lock poisoned")
+            .version
+            .clone()
+    }
+
+    pub(crate) fn ensure_active(&self) -> Result<()> {
+        if self.handle.generation_state.load(Ordering::Acquire) != RUNTIME_ACTIVE {
+            return Err(Error::Internal(anyhow!(
+                "source plugin '{}' changed while downloading",
+                self.source_id
+            )));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn prepare_helper(
+        &self,
+    ) -> Result<Option<Arc<crate::remote_asset::prepare::Program>>> {
+        self.ensure_active()?;
+        Ok(self.handle.prepare.clone())
+    }
+
+    pub async fn download(&self, id: &str) -> Result<DiscoverDownload> {
+        self.ensure_active()?;
+        let result = self
+            .handle
+            .runtime
+            .lock()
+            .await
+            .call_download(&self.source_id, id)
+            .await?;
+        self.ensure_active()?;
+        if result.transfer.prepare.is_some() && self.handle.prepare.is_none() {
+            return Err(Error::Internal(anyhow!(
+                "source plugin '{}' has no declared prepare helper",
+                self.source_id
+            )));
+        }
+        Ok(result)
+    }
+
+    pub async fn resolve(
+        &self,
+        id: &str,
+        dir: &str,
+        metadata: Option<&DiscoverMetadata>,
+        prepared: Option<&serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<DiscoverResolve> {
+        self.ensure_active()?;
+        let result = self
+            .handle
+            .runtime
+            .lock()
+            .await
+            .call_resolve(&self.source_id, id, dir, metadata, prepared)
+            .await?;
+        self.ensure_active()?;
+        Ok(result)
+    }
 }
 
 /// Registry and source catalog for Lua plugins.
@@ -180,6 +255,17 @@ impl LuaPluginRegistry {
         plugin_version: &str,
         entry_version: u32,
     ) -> Result<String> {
+        self.load_entry(&crate::plugin::renderer_registry::EntryRef {
+            plugin_id: plugin_id.to_owned(),
+            plugin_version: plugin_version.to_owned(),
+            plugin_system: false,
+            entry: path.to_owned(),
+            entry_version,
+            prepare: None,
+        })
+    }
+
+    pub fn load_entry(&self, entry: &crate::plugin::renderer_registry::EntryRef) -> Result<String> {
         let mut runtime = LuaPluginRuntime::with_probe(self.probe.clone())?;
         runtime.set_state_store(self.state_store.clone());
         if let Some(db) = self.db.read().expect("plugin DB lock poisoned").clone() {
@@ -193,7 +279,12 @@ impl LuaPluginRegistry {
         {
             runtime.attach_settings(settings);
         }
-        let name = runtime.load_plugin(path, plugin_id, plugin_version, entry_version)?;
+        let name = runtime.load_plugin(
+            &entry.entry,
+            &entry.plugin_id,
+            &entry.plugin_version,
+            entry.entry_version,
+        )?;
         let info = runtime
             .loaded_plugin_info(&name)
             .ok_or_else(|| Error::SourcePluginNotFound(name.clone()))?;
@@ -202,6 +293,13 @@ impl LuaPluginRegistry {
             runtime: Arc::new(tokio::sync::Mutex::new(runtime)),
             info: StdRwLock::new(info),
             generation_state,
+            prepare: entry
+                .prepare
+                .as_ref()
+                .map(crate::remote_asset::prepare::Program::open)
+                .transpose()
+                .map_err(Error::Internal)?
+                .map(Arc::new),
         });
         let mut plugins = self.plugins.write().expect("plugin registry lock poisoned");
         if plugins.contains_key(&name) {
@@ -211,6 +309,15 @@ impl LuaPluginRegistry {
         }
         plugins.insert(name.clone(), handle);
         Ok(name)
+    }
+
+    pub fn download_session(&self, plugin_name: &str) -> Result<DownloadSession> {
+        let session = DownloadSession {
+            handle: self.handle(plugin_name)?,
+            source_id: plugin_name.to_owned(),
+        };
+        session.ensure_active()?;
+        Ok(session)
     }
 
     pub(super) fn handle(&self, plugin_name: &str) -> Result<Arc<PluginHandle>> {
@@ -629,12 +736,7 @@ impl LuaPluginRegistry {
     }
 
     pub async fn call_download(&self, plugin_name: &str, id: &str) -> Result<DiscoverDownload> {
-        self.handle(plugin_name)?
-            .runtime
-            .lock()
-            .await
-            .call_download(plugin_name, id)
-            .await
+        self.download_session(plugin_name)?.download(id).await
     }
 
     pub async fn call_resolve(
@@ -644,11 +746,20 @@ impl LuaPluginRegistry {
         dir: &str,
         metadata: Option<&DiscoverMetadata>,
     ) -> Result<DiscoverResolve> {
-        self.handle(plugin_name)?
-            .runtime
-            .lock()
+        self.call_resolve_prepared(plugin_name, id, dir, metadata, None)
             .await
-            .call_resolve(plugin_name, id, dir, metadata)
+    }
+
+    pub async fn call_resolve_prepared(
+        &self,
+        plugin_name: &str,
+        id: &str,
+        dir: &str,
+        metadata: Option<&DiscoverMetadata>,
+        prepared: Option<&serde_json::Map<String, serde_json::Value>>,
+    ) -> Result<DiscoverResolve> {
+        self.download_session(plugin_name)?
+            .resolve(id, dir, metadata, prepared)
             .await
     }
 
