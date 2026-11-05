@@ -1678,7 +1678,7 @@ int run(int argc, char** argv) {
                         decoder  = rstd::Some(std::move(re_res).unwrap());
                         retained = RetainedFrame {};
                         frame_rate_limit.reset();
-                        hwaccel  = new_h;
+                        hwaccel = new_h;
                         presenter.reset();
                         // Video reopened at PTS 0 — keep audio aligned.
                         if (auto* player = current_av_player()) player->seek_to_start();
