@@ -32,6 +32,18 @@ local function status(json, value, reason)
     return json.object { status = value, reason = reason }
 end
 
+local function shadow_options(light, json)
+    local bias = number(light.shadowBias, 0)
+    return json.object {
+        resolution = 1024,
+        filter = "bilinear",
+        bias = 0.00005,
+        slope_bias = 0.05,
+        max_bias = number(math.max(0.00005, bias * 2), 0),
+        normal_bias = 0.0,
+    }
+end
+
 local function snapshot(ctx, id)
     if not map.valid_model_id(id) then error("Invalid Sketchfab model id") end
     local json = ctx.json.strict
@@ -135,15 +147,7 @@ function M.from_options(ctx, id, options)
                     if length == 0 then error("zero light direction") end
                     entry.direction = json.array { x / length, y / length, z / length }
                     if casts_shadow then
-                        local bias = number(light.shadowBias, 0)
-                        entry.shadow = json.object {
-                            resolution = 1024,
-                            filter = "bilinear",
-                            bias = 0.00005,
-                            slope_bias = 0.05,
-                            max_bias = number(math.max(0.00005, bias * 2), 0),
-                            normal_bias = 0.0,
-                        }
+                        entry.shadow = shadow_options(light, json)
                     end
                     directional[#directional + 1] = entry
                 elseif light.type == "POINT" then
@@ -162,8 +166,13 @@ function M.from_options(ctx, id, options)
                     entry.outer_cos = cutoff
                     entry.attenuation = json.array { 1.0, 0.0, number(light.falloff, 0) }
                     entry.attenuation_units = "reference"
+                    if casts_shadow and angle > 0 and angle < 90 then
+                        entry.shadow = shadow_options(light, json)
+                    end
                     spots[#spots + 1] = entry
-                    if casts_shadow then return "partial", "spot-shadow-unsupported" end
+                    if casts_shadow and not entry.shadow then
+                        return "partial", "spot-shadow-projection-unsupported"
+                    end
                 else
                     return "unsupported", "light-type-unsupported"
                 end

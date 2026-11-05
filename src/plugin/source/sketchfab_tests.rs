@@ -876,12 +876,17 @@ assert(intent and intent.uid == uid(42) and intent.profile.ibl_intensity == 2)
 local spot_options = J.decode([[{"orientation":{"matrix":[1,0,0,0,0,1,0,0,0,0,1,0,9,-4,7,1]},
   "lighting":{"enable":true,"lights":[{"enable":true,"type":"SPOT","attachedToCamera":false,
   "matrix":[1,0,0,0,0,1,0,0,0,0,1,0,4,5,6,1],"color":[1,1,1],"intensity":2,
-  "angle":60,"hardness":0.5,"falloff":0.25,"castShadows":true}]}}]])
+  "angle":60,"hardness":0.5,"falloff":0.25,"castShadows":true,"shadowBias":0.005}]}}]])
 local mapped = presentation.from_options(ctx,uid(1),spot_options).sketchfab
 local spot = mapped.profile.spot_lights[1]
 assert(spot.reference == 'scene-root' and spot.position[1] == 4 and spot.direction[3] == -1)
 assert(math.abs(spot.outer_cos - 0.5) < 1e-12 and math.abs(spot.inner_cos - 0.75) < 1e-12)
-assert(spot.attenuation[3] == 0.25 and mapped.sections.lighting.items[1].reason == 'spot-shadow-unsupported')
+assert(spot.attenuation[3] == 0.25 and spot.shadow.max_bias == 0.01)
+assert(mapped.sections.lighting.items[1].status == 'mapped')
+spot_options.lighting.lights[1].angle = 90
+mapped = presentation.from_options(ctx,uid(1),spot_options).sketchfab
+assert(mapped.profile.spot_lights[1].shadow == nil)
+assert(mapped.sections.lighting.items[1].reason == 'spot-shadow-projection-unsupported')
 options.lighting.enable, options.scene.postProcess.enable, options.ground.enable = false, false, false
 data = presentation.from_options(ctx,uid(1),options).sketchfab
 assert(#data.profile.directional_lights == 0 and #data.profile.point_lights == 0)
