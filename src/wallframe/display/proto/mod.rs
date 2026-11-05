@@ -69,6 +69,7 @@ mod tests {
     #[test]
     fn display_identity_tagged_compatibility() {
         let request = Request::ClientCapabilities {
+            follow_producer_gpu: None,
             identity: Some(generated::DisplayIdentity { role: 1 }),
             window_observation: None,
             pause_effect: None,
@@ -82,7 +83,7 @@ mod tests {
         assert!(Request::decode(request.opcode(), &invalid_type).is_err());
         let field = body[8..].to_vec();
         let mut future_field = field.clone();
-        future_field[..4].copy_from_slice(&5u32.to_le_bytes());
+        future_field[..4].copy_from_slice(&99u32.to_le_bytes());
         body.extend(future_field);
         let payload_size = (body.len() - 8) as u32;
         body[4..8].copy_from_slice(&payload_size.to_le_bytes());
@@ -108,6 +109,7 @@ mod tests {
                 Some(generated::TransitionCapabilities { flags: 7 }),
             ] {
                 roundtrip_req(Request::ClientCapabilities {
+                    follow_producer_gpu: None,
                     identity: None,
                     window_observation: None,
                     pause_effect: pause_effect.clone(),
