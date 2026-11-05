@@ -55,6 +55,7 @@ function M.from_options(ctx, id, options)
     end
     local profile = json.object { version = 2 }
     local references = true
+    local environment_references = true
     local function section(name, value, convert)
         if value == nil then
             result.sections[name] = status(json, "missing")
@@ -72,6 +73,12 @@ function M.from_options(ctx, id, options)
     section("orientation", options.orientation, function(value)
         local matrix = vector(value.matrix, 16, json)
         for i, component in ipairs(matrix) do
+            if i ~= 13 and i ~= 14 and i ~= 15
+                and component ~= ((i == 1 or i == 6 or i == 11 or i == 16) and 1 or 0) then
+                environment_references = false
+            end
+        end
+        for i, component in ipairs(matrix) do
             if component ~= ((i == 1 or i == 6 or i == 11 or i == 16) and 1 or 0) then
                 references = false
                 return "unsupported", "non-identity-export-orientation"
@@ -80,6 +87,7 @@ function M.from_options(ctx, id, options)
     end)
     if result.sections.orientation.status == "invalid" or result.sections.orientation.status == "null" then
         references = false
+        environment_references = false
     end
     section("camera", options.camera, function(value)
         if not references then return "unsupported", "unverified-export-reference" end
@@ -98,9 +106,9 @@ function M.from_options(ctx, id, options)
         }
     end)
     section("lighting", options.lighting, function(value)
-        local directional, point, details = json.array {}, json.array {}, json.array {}
+        local directional, point, spots, details = json.array {}, json.array {}, json.array {}, json.array {}
         if not boolean(value.enable) then
-            profile.directional_lights, profile.point_lights = directional, point
+            profile.directional_lights, profile.point_lights, profile.spot_lights = directional, point, spots
             return "disabled"
         end
         for _, light in ipairs(map.list(value.lights, 8, json)) do
@@ -109,7 +117,9 @@ function M.from_options(ctx, id, options)
                 if not boolean(light.enable) then return "disabled" end
                 local attached = boolean(light.attachedToCamera)
                 local casts_shadow = light.castShadows ~= nil and boolean(light.castShadows) or false
-                if not attached and not references then return "unsupported", "unverified-export-reference" end
+                if not attached and not references and not (light.type == "SPOT" and environment_references) then
+                    return "unsupported", "unverified-export-reference"
+                end
                 local matrix = vector(light.matrix, 16, json)
                 if matrix[4] ~= 0 or matrix[8] ~= 0 or matrix[12] ~= 0 or matrix[16] ~= 1 then
                     error("invalid affine light matrix")
@@ -142,6 +152,18 @@ function M.from_options(ctx, id, options)
                     entry.attenuation_units = "reference"
                     point[#point + 1] = entry
                     if casts_shadow then return "partial", "point-shadow-unsupported" end
+                elseif light.type == "SPOT" then
+                    local angle = number(light.angle, 0, 90)
+                    local hardness = number(light.hardness, 0, 1)
+                    local cutoff = math.cos(angle * math.pi / 180)
+                    entry.position = json.array { matrix[13], matrix[14], matrix[15] }
+                    entry.direction = json.array { -matrix[9], -matrix[10], -matrix[11] }
+                    entry.inner_cos = cutoff + (1 - cutoff) * hardness
+                    entry.outer_cos = cutoff
+                    entry.attenuation = json.array { 1.0, 0.0, number(light.falloff, 0) }
+                    entry.attenuation_units = "reference"
+                    spots[#spots + 1] = entry
+                    if casts_shadow then return "partial", "spot-shadow-unsupported" end
                 else
                     return "unsupported", "light-type-unsupported"
                 end
@@ -149,7 +171,7 @@ function M.from_options(ctx, id, options)
             end)
             details[#details + 1] = status(json, ok and state or "invalid", not ok and "invalid-light-values" or reason)
         end
-        profile.directional_lights, profile.point_lights = directional, point
+        profile.directional_lights, profile.point_lights, profile.spot_lights = directional, point, spots
         for _, item in ipairs(details) do
             if item.status ~= "mapped" and item.status ~= "disabled" then
                 return "partial", "some-lights-unavailable", details
@@ -157,7 +179,7 @@ function M.from_options(ctx, id, options)
         end
         return "mapped", nil, details
     end)
-    local fallback, environment_states, environment_intent = environment.describe(options, json, references)
+    local fallback, environment_states, environment_intent = environment.describe(options, json, environment_references)
     if options.environment ~= nil or options.background ~= nil then profile.environment = fallback end
     result.sections.environment, result.sections.background = environment_states.environment, environment_states.background
     local post

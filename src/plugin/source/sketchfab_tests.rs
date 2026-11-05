@@ -866,6 +866,22 @@ options.background.enable = 'environment'
 data = presentation.from_options(ctx,uid(1),options).sketchfab
 assert(data.sections.environment.status == 'unsupported' and data.sections.background.status == 'unsupported')
 assert(data.profile.environment.ibl_intensity == 0 and data.profile.environment.background == false)
+options.orientation = J.object{matrix=J.array{1,0,0,0,0,1,0,0,0,0,1,0,9,-4,7,1}}
+options.environment.uid = uid(42)
+options.environment.exposure, options.environment.rotation = 2, 0
+local translated, intent = presentation.from_options(ctx,uid(1),options)
+assert(translated.sketchfab.sections.orientation.status == 'unsupported')
+assert(translated.sketchfab.sections.camera.status == 'unsupported')
+assert(intent and intent.uid == uid(42) and intent.profile.ibl_intensity == 2)
+local spot_options = J.decode([[{"orientation":{"matrix":[1,0,0,0,0,1,0,0,0,0,1,0,9,-4,7,1]},
+  "lighting":{"enable":true,"lights":[{"enable":true,"type":"SPOT","attachedToCamera":false,
+  "matrix":[1,0,0,0,0,1,0,0,0,0,1,0,4,5,6,1],"color":[1,1,1],"intensity":2,
+  "angle":60,"hardness":0.5,"falloff":0.25,"castShadows":true}]}}]])
+local mapped = presentation.from_options(ctx,uid(1),spot_options).sketchfab
+local spot = mapped.profile.spot_lights[1]
+assert(spot.reference == 'scene-root' and spot.position[1] == 4 and spot.direction[3] == -1)
+assert(math.abs(spot.outer_cos - 0.5) < 1e-12 and math.abs(spot.inner_cos - 0.75) < 1e-12)
+assert(spot.attenuation[3] == 0.25 and mapped.sections.lighting.items[1].reason == 'spot-shadow-unsupported')
 options.lighting.enable, options.scene.postProcess.enable, options.ground.enable = false, false, false
 data = presentation.from_options(ctx,uid(1),options).sketchfab
 assert(#data.profile.directional_lights == 0 and #data.profile.point_lights == 0)
