@@ -2,7 +2,7 @@
 name = "waywallen"
 members = [
   "bridge",
-  "plugins",
+  "plugins/common",
   "plugins/org.waywallen.image",
   "plugins/org.waywallen.gltf",
   "plugins/org.waywallen.sketchfab",
@@ -28,7 +28,7 @@ version = "0.5.0"
 
 [workspace.dependencies]
 waywallen-bridge = { path = "bridge" }
-waywallen-plugin-common = { path = "plugins" }
+waywallen-plugin-common = { path = "plugins/common" }
 waywallen-backend-connection = { path = "ui/backend" }
 rstd-cppstd = { version = "0.1.7" }
 rstd-std = { version = "0.1.7" }

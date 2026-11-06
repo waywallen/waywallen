@@ -54,7 +54,7 @@ lito test -p waywallen-bridge --profile debug
 |---------|------|
 | `waywallen-ui` | `ui` |
 | `waywallen-bridge` | `bridge` |
-| `waywallen-plugin-common` | `plugins` |
+| `waywallen-plugin-common` | `plugins/common` |
 | `waywallen-image-plugin` | `plugins/org.waywallen.image` |
 | `waywallen-video-plugin` | `plugins/org.waywallen.video` |
 | `waywallen-wallhaven-plugin` | `plugins/org.waywallen.wallhaven` |

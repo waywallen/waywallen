@@ -11,7 +11,7 @@ sources = ["Bridge.cppm", "RunLoop.cppm", "RunLoop.cpp", "FrameRateLimit.cppm"]
 [[test]]
 name = "run-loop"
 module = "waywallen.plugin.tests"
-sources = ["tests/run_loop.cpp"]
+sources = ["tests/main.cppm", "tests/run_loop.cpp"]
 
 [usage]
 threads = true
@@ -32,3 +32,6 @@ workspace = true
 
 [dependencies.rstd-std]
 workspace = true
+
+[dev-dependencies.rstd-test]
+version = "0.1.9"

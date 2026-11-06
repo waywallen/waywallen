@@ -1,6 +1,16 @@
 version = 1
 
 [[packages]]
+name = "licompto"
+version = "0.1.0"
+source = "registry+https://registry.litocpp.org/"
+checksum = "49084be9cb72241f3d5f0cdf96dcb66a5d98e737ebd6b08a0a9de6731376733f"
+dependencies = [
+  "licrypto",
+  "rstd-std",
+]
+
+[[packages]]
 name = "licrypto"
 version = "0.2.1"
 source = "registry+https://registry.litocpp.org/"
@@ -208,6 +218,15 @@ dependencies = [
 ]
 
 [[packages]]
+name = "rstd-test"
+version = "0.1.11"
+source = "registry+https://registry.litocpp.org/"
+checksum = "01d4da8562198bb2f562da8c6c6a3183e28e5640aa6ad3a98c2c2c22c5316fe9"
+dependencies = [
+  "rstd-std",
+]
+
+[[packages]]
 name = "rstd-toml"
 version = "0.1.11"
 source = "registry+https://registry.litocpp.org/"
@@ -222,7 +241,7 @@ dependencies = [
 [[packages]]
 name = "vecgltf"
 version = "0.1.0"
-source = "git+https://github.com/vecren/vecgltf.git#c0174d46295a72b90364de5121b497e252f49044"
+source = "git+https://github.com/vecren/vecgltf.git#dfcbdf9ef2b3b9aa7a8dcfe86c1de8338d5e0485"
 dependencies = [
   "licrypto",
   "lito-spirv",
@@ -234,7 +253,7 @@ dependencies = [
 [[packages]]
 name = "vrento"
 version = "0.1.0"
-source = "git+https://github.com/vecren/vrento.git#00878a007e8009e4981e50eeb3b301c6fbc7d384"
+source = "git+https://github.com/vecren/vrento.git#b5030da3b31a53e50eea3d69e034d0550c016e35"
 dependencies = [
   "lito-spirv",
   "rstd-log",
@@ -326,6 +345,7 @@ dependencies = [
   "rstd-cppstd",
   "rstd-log",
   "rstd-std",
+  "rstd-test",
   "vvk",
   "waywallen-bridge",
 ]
@@ -340,6 +360,11 @@ dependencies = [
 [[packages]]
 name = "waywallen-sketchfab-plugin"
 version = "0.5.0"
+dependencies = [
+  "licompto",
+  "rstd-json",
+  "rstd-std",
+]
 
 [[packages]]
 name = "waywallen-ui"
@@ -356,7 +381,7 @@ dependencies = [
 
 [[packages.externals]]
 name = "qml-material"
-source = "git+https://github.com/hypengw/QmlMaterial.git#8f271f956050de5d958504596b465caed4d46e70"
+source = "git+https://github.com/hypengw/QmlMaterial.git#ecb58fd2f087564578e46c9a3f7e5f471b9f8879"
 
 [[packages]]
 name = "waywallen-video-plugin"
