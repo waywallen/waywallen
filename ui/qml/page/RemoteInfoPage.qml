@@ -16,6 +16,7 @@ MD.Page {
     property int remoteCapability: 0
     property string remoteHint: ""
     property var tagOptions: []
+    property var typeLabels: ({})
 
     // A source that cannot name an item while listing it may still name it once
     // the item is opened, so let a detail lookup fill in what the row lacks.
@@ -113,7 +114,7 @@ MD.Page {
             }
             InfoValue {
                 visible: root.hasText(root.item?.wpType)
-                text: root.value(root.item?.wpType)
+                text: W.I18n.valueLabel(root.typeLabels, root.item?.wpType)
             }
 
             InfoLabel {

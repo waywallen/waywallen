@@ -26,6 +26,7 @@ Item {
     property string remoteHint: ""
     property var downloadAction: null
     property var tagOptions: []
+    property var typeLabels: ({})
     property int downloadState: 0
     property bool downloadTransferActive: false
     property real downloadReceivedBytes: 0
@@ -110,7 +111,7 @@ Item {
 
                     MD.Text {
                         Layout.fillWidth: true
-                        text: root.item?.wpType ?? ""
+                        text: W.I18n.valueLabel(root.typeLabels, root.item?.wpType)
                         typescale: MD.Token.typescale.label_large
                         color: MD.Token.color.on_surface_variant
                         maximumLineCount: 1

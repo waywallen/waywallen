@@ -118,7 +118,8 @@ MD.Page {
                 sourceName: root.sourceName(root.detailRow.sourceId),
                 remoteCapability: root.sourceCapability(root.detailRow.sourceId),
                 remoteHint: root.sourceRemoteHint(root.detailRow.sourceId),
-                tagOptions: root.sourceFilterOptions(root.detailRow.sourceId)
+                tagOptions: root.sourceFilterOptions(root.detailRow.sourceId),
+                typeLabels: pluginQuery.typeLabels || ({})
             }
         });
     }
@@ -169,6 +170,7 @@ MD.Page {
     }
     function reloadAll() {
         availabilityQuery.reload();
+        pluginQuery.reload();
     }
     function sameList(a, b) {
         const left = a ?? [];
@@ -231,6 +233,9 @@ MD.Page {
             detailOpen = false;
             detailsQuery.itemId = "";
             m_grid.currentIndex = -1;
+        }
+        function onPluginChanged() {
+            pluginQuery.reload();
         }
     }
     function sortLabel() {
