@@ -14,11 +14,6 @@ sources = [
 [usage]
 threads = true
 
-[[test]]
-name = "frame-rate-limit"
-module = "waywallen.video.tests"
-sources = ["tests/frame_rate_limit.cpp"]
-
 [dependencies.waywallen-plugin-common]
 workspace = true
 

@@ -1,7 +1,6 @@
 module;
 
 #include <rstd/macro.hpp>
-#include "frame_rate_limit.hpp"
 
 #include <errno.h>
 #include <signal.h>
@@ -19,6 +18,7 @@ import rstd.log;
 import wavsen.video;
 import wavsen.audio;
 import waywallen.bridge;
+import waywallen.plugin.frame_rate_limit;
 import waywallen.plugin.run_loop;
 
 using namespace rstd::prelude;
@@ -1528,7 +1528,7 @@ int run(int argc, char** argv) {
     uint32_t                 stall_warn_counter = 0; // throttle ETIME log spam during backpressure
     bool                     submitted_since_negotiate = false;
     RetainedFrame            retained;
-    waywallen::video::FrameRateLimit frame_rate_limit;
+    waywallen::plugin::FrameRateLimit frame_rate_limit;
 
     const auto exit = host.events->run(
         [&](auto& event) {
@@ -1794,9 +1794,9 @@ int run(int argc, char** argv) {
             if (! presentation.present) return LoopStep::again();
 
             // Keep PTS pacing even for skipped frames so decoding cannot run ahead of audio.
-            if (! frame_rate_limit.accept(frame_pts.to_primitive(),
-                                          host.fps,
-                                          host.playback_rate.load(std::memory_order_acquire))) {
+            const auto frame_fps  = host.fps;
+            const auto frame_rate = host.playback_rate.load(std::memory_order_acquire);
+            if (! frame_rate_limit.ready(frame_pts.to_primitive(), frame_fps, frame_rate)) {
                 (void)wait_for_presentation(host, presentation);
                 return LoopStep::again();
             }
@@ -1968,6 +1968,7 @@ int run(int argc, char** argv) {
                 host.events->request_stop(ExitCause::Failure);
                 return LoopStep::again();
             }
+            frame_rate_limit.submitted(frame_pts.to_primitive(), frame_fps, frame_rate);
             submitted_since_negotiate = true;
             if (automatic) {
                 if (fkind == wavsen::video::FrameKind::Sw) {

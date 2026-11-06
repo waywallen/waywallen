@@ -6,7 +6,7 @@ version.workspace = true
 name = "waywallen-plugin-common"
 module = "waywallen.bridge"
 archive = "waywallen-plugin-common"
-sources = ["Bridge.cppm", "RunLoop.cppm", "RunLoop.cpp"]
+sources = ["Bridge.cppm", "RunLoop.cppm", "RunLoop.cpp", "FrameRateLimit.cppm"]
 
 [[test]]
 name = "run-loop"
