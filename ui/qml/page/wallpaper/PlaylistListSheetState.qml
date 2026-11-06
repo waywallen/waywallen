@@ -32,7 +32,7 @@ QtObject {
     readonly property bool mutationQuerying: playlistMutation.querying || playlistCreateMutation.querying
     readonly property bool createQuerying: playlistCreateMutation.querying
     readonly property var playlists: playlistListQuery.playlists || []
-    readonly property bool hasPlayTarget: targetState.hasSelection
+    readonly property bool hasPlayTarget: targetState.allTargets || targetState.hasSelection
 
     Component.onCompleted: {
         if (!playlistSheetSettings.targetScopeMigrated) {
@@ -44,7 +44,7 @@ QtObject {
     }
 
     function playlistIsPlayingOnSelectedTargets(playlist) {
-        if (!playlist || !root.hasPlayTarget)
+        if (!playlist || !root.hasPlayTarget || targetState.selectedDisplayIds.length === 0)
             return false;
         const playlistId = String(playlist.id);
         return targetState.selectedDisplayIds.every(displayId => {
