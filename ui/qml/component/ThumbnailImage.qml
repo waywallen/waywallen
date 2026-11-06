@@ -18,8 +18,11 @@ Item {
     readonly property url _displayUrl: _useDirect ? (/^[a-z][a-z0-9+.-]*:/i.test(root.source) ? root.source : Qt.url("file://" + root.source)) : req.cachePath
     readonly property bool _failed: state === W.ThumbnailRequest.Failed || status === (_useQExtra ? QE.Image.Error : Image.Error)
     readonly property bool _hasInput: source.length > 0 || resource.length > 0
+    // The software scene graph runs neither QExtra's image node nor the
+    // RoundClip shader effect; fall back to the stock image with square corners.
+    readonly property bool _rhi: GraphicsInfo.api !== GraphicsInfo.Software
     readonly property bool _useDirect: root.source.length > 0
-    readonly property bool _useQExtra: useQExtra && /^(file|qrc|https?):/i.test(String(_displayUrl))
+    readonly property bool _useQExtra: useQExtra && _rhi && /^(file|qrc|https?):/i.test(String(_displayUrl))
     readonly property real aspectRatio: {
         if (resourceSize.width > 0 && resourceSize.height > 0)
             return resourceSize.width / resourceSize.height;
@@ -70,7 +73,7 @@ Item {
         id: m_image
 
         anchors.fill: parent
-        layer.enabled: root.radius > 0
+        layer.enabled: root._rhi && root.radius > 0
         sourceComponent: root._useQExtra ? qextraImage : nativeImage
 
         layer.effect: MD.RoundClip {
