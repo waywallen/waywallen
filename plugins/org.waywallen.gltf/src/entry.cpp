@@ -423,7 +423,7 @@ auto create_gpu(Options& options) -> Option<Box<Gpu>> {
         return None();
     }
     auto                presentation = bound.unwrap();
-    gltf::SceneInstance scene(asset.clone());
+    gltf::SceneInstance scene(asset.clone(), gltf::SceneBoundsMode::Conservative);
     auto                initial =
         gltf::ResolvePresentation(presentation, scene, { .exposure_multiplier = options.exposure });
     if (initial.is_err()) {
