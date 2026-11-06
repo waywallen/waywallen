@@ -1,0 +1,27 @@
+[plugin]
+id = "org.waywallen.gltf"
+name = "glTF"
+version = "0.5.0"
+entry = "main.lua"
+entry_version = 4
+
+[plugin.i18n]
+directory = "i18n"
+
+[renderers.waywallen-gltf]
+bin = "../../../../bin/waywallen-gltf-renderer"
+types = ["gltf"]
+extras = ["asset-root", "camera-preset"]
+type_labels = { gltf = { msgid = "glTF" } }
+priority = 100
+activity = "continuous"
+spawn_version = 10
+
+[renderers.waywallen-gltf.settings]
+fps = { type = "u32", default = 30, min = 1, max = 240, step = 1, identity = true, label = { msgid = "Frame rate" }, group = "render", group_label = { msgid = "Rendering" }, order = 10 }
+resolution = { type = "i32", default = -2, choices = ["-2", "-1", "0", "1", "2", "3", "4"], identity = true, label = { msgid = "Resolution" }, group = "render", group_label = { msgid = "Rendering" }, order = 20 }
+custom_extent = { type = "u32", default = 1080, min = 1, max = 8192, step = 1, identity = true, label = { msgid = "Custom resolution" }, group = "render", group_label = { msgid = "Rendering" }, order = 21 }
+render_node = { type = "string", default = "", identity = true, label = { msgid = "Render node" }, group = "render", group_label = { msgid = "Rendering" }, order = 30 }
+exposure = { type = "f32", default = 1.0, min = 0.1, max = 16.0, step = 0.1, identity = false, label = { msgid = "Exposure" }, group = "render", group_label = { msgid = "Rendering" }, order = 40 }
+animation = { type = "i32", default = 0, min = -1, max = 2147483647, step = 1, identity = false, label = { msgid = "Animation index" }, description = { msgid = "Use -1 for the static pose. Animation indices start at 0." }, group = "playback", group_label = { msgid = "Playback" }, order = 50 }
+loop = { type = "bool", default = true, identity = false, label = { msgid = "Loop animation" }, group = "playback", group_label = { msgid = "Playback" }, order = 60 }

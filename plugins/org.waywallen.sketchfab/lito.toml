@@ -1,0 +1,3 @@
+[package]
+name = "waywallen-sketchfab-plugin"
+version.workspace = true

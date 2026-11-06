@@ -1,0 +1,6 @@
+../../../../bin/waywallen-gltf-renderer
+gltf/source.lua
+gltf/wallpaper.lua
+i18n/zh-CN.po
+main.lua
+plugin.toml

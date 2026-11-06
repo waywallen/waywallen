@@ -142,7 +142,7 @@ fn dedup_paths_by_canonical(paths: &[String]) -> Vec<String> {
     let mut seen: HashSet<std::path::PathBuf> = HashSet::new();
     let mut out = Vec::with_capacity(paths.len());
     for p in paths {
-        let canon = std::fs::canonicalize(p).unwrap_or_else(|_| std::path::PathBuf::from(p));
+        let canon = repo::library_path_key(p);
         if seen.insert(canon) {
             out.push(p.clone());
         }
@@ -337,4 +337,30 @@ async fn refresh_sources_inner(app: &Arc<DaemonContext>) -> Result<usize> {
         return Err(e);
     }
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_deduplicates_library_aliases_and_preserves_first_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("wallpapers");
+        let alias = dir.path().join("alias");
+        std::fs::create_dir(&root).unwrap();
+        std::os::unix::fs::symlink(&root, &alias).unwrap();
+        let first = format!("{}/./", alias.display());
+        let missing = dir.path().join("missing").to_str().unwrap().to_owned();
+        assert_eq!(
+            dedup_paths_by_canonical(&[
+                first.clone(),
+                root.to_str().unwrap().to_owned(),
+                alias.to_str().unwrap().to_owned(),
+                missing.clone(),
+                format!("{missing}/"),
+            ]),
+            vec![first, missing]
+        );
+    }
 }

@@ -20,12 +20,16 @@ import rstd.json;
 import rstd.log;
 import wavsen.video;
 import waywallen.bridge;
+import waywallen.plugin.run_loop;
+
+using namespace rstd::prelude;
+using namespace rstd::literals;
+using RunLoop   = waywallen::plugin::RunLoop;
+using LoopStep  = waywallen::plugin::LoopStep;
+using ExitCause = waywallen::plugin::ExitCause;
 
 namespace
 {
-
-using namespace rstd::literals;
-
 struct Options {
     std::string ipc_path;
     std::string image_path;
@@ -210,12 +214,9 @@ ParseArgsResult parse_args(int argc, char** argv) {
 struct HostState {
     int               sock { -1 };
     ww_pool_t*        pool { nullptr };
-    std::atomic<bool> shutdown { false };
     std::atomic<bool> negotiated { false };
+    Option<RunLoop>   events;
 
-    /* Reader → main negotiate handoff. */
-    std::mutex                             neg_mu;
-    std::condition_variable                neg_cv;
     bool                                   neg_pending { false };
     bool                                   frame_request_pending { false };
     ww_pool_directive_t                    neg_directive {};
@@ -223,15 +224,11 @@ struct HostState {
     waywallen_render_target_config_t       target_config {};
     waywallen_render_target_capabilities_t target_caps {};
     uint64_t                               target_revision {};
-    std::mutex                             send_mu;
 
     ClearColor scheme_color {};
 };
 
-void signal_shutdown(HostState& s) {
-    s.shutdown.store(true, std::memory_order_release);
-    s.neg_cv.notify_all();
-}
+void apply_control(HostState& host, ww_bridge_control_t& control);
 
 // Test hook: when WAYWALLEN_IMAGE_DUMP_DIR is set, write the RGBA8
 // bytes the renderer is about to upload to the GPU to a file the
@@ -326,8 +323,10 @@ enum class UploadStatus
 
 int cancel_slot_wait(void* userdata) {
     auto& host = *static_cast<HostState*>(userdata);
-    if (host.shutdown.load(std::memory_order_acquire)) return 1;
-    std::lock_guard<std::mutex> lk(host.neg_mu);
+    host.events->drain([&](auto& control) {
+        apply_control(host, control);
+    });
+    if (! host.events->running()) return 1;
     return host.neg_pending || host.target_pending ? 1 : 0;
 }
 
@@ -339,9 +338,8 @@ enum class RepublishStatus
 };
 
 RepublishStatus republish_latest(HostState& host) {
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
-    ww_pool_republish_result_t  result {};
-    const int                   rc = ww_bridge_pool_wait_republish_latest(
+    ww_pool_republish_result_t result {};
+    const int                  rc = ww_bridge_pool_wait_republish_latest(
         host.pool, host.sock, cancel_slot_wait, &host, &result);
     if (rc != 0) {
         rstd_error("waywallen-image-renderer: republish contract failed: {}", rc);
@@ -413,7 +411,6 @@ UploadStatus upload_to_slot(HostState& host, wavsen::video::Producer& producer,
         return UploadStatus::Failed;
     }
     int                          sync_fd = std::move(upload_res).unwrap();
-    std::lock_guard<std::mutex>  send_lk(host.send_mu);
     ww_pool_slot_submit_result_t submitted {};
     int                          rc = ww_bridge_pool_submit_acquired_slot(
         host.pool, host.sock, &acquired.identity, sync_fd, &submitted);
@@ -452,7 +449,6 @@ bool prepare_decoded_rgba(const Options& opt, ww_image::ImageSession& session,
 void release_decoded_rgba(ww_image::RgbaBuf& rgba) { std::vector<uint8_t>().swap(rgba.data); }
 
 void publish_clear_color(HostState& host, const ClearColor& c) {
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
     if (int rc = ww_bridge_send_report_state_clear_color(host.sock, c.r, c.g, c.b, c.a); rc != 0) {
         rstd_warn("waywallen-image-renderer: report_state(clear_color) failed ({})", rc);
     }
@@ -500,24 +496,20 @@ void apply_negotiate_request(HostState& host, wavsen::video::Producer& producer,
                              ww_image::ImageSession& session, ww_image::RgbaBuf& rgba,
                              const ww_pool_directive_t& d) {
     if (! prepare_decoded_rgba(opt, session, rgba)) {
-        signal_shutdown(host);
+        host.events->request_stop(ExitCause::Failure);
         return;
     }
 
-    int rc = 0;
-    {
-        std::lock_guard<std::mutex> send_lk(host.send_mu);
-        rc = ww_bridge_pool_apply_directive(host.pool, host.sock, &d);
-    }
+    int rc = ww_bridge_pool_apply_directive(host.pool, host.sock, &d);
     if (rc != 0) {
         rstd_error("waywallen-image-renderer: pool_apply_directive failed: {}", rc);
-        if (rc > 0) signal_shutdown(host);
+        if (rc > 0) host.events->request_stop(ExitCause::Failure);
         return;
     }
     const auto upload = upload_to_slot(host, producer, d, rgba);
     if (upload == UploadStatus::Cancelled) return;
     if (upload == UploadStatus::Failed) {
-        signal_shutdown(host);
+        host.events->request_stop(ExitCause::Failure);
         return;
     }
 
@@ -526,7 +518,7 @@ void apply_negotiate_request(HostState& host, wavsen::video::Producer& producer,
     if (release.is_err()) {
         rstd_error("waywallen-image-renderer: release upload buffer failed: {}",
                    std::move(release).unwrap_err().message.as_str());
-        signal_shutdown(host);
+        host.events->request_stop(ExitCause::Failure);
         return;
     }
     host.negotiated.store(true, std::memory_order_release);
@@ -577,7 +569,6 @@ void apply_render_target(HostState& host, wavsen::video::Producer& producer,
                     ::close(sync_fd);
                     message = "drain upload failed";
                 } else {
-                    std::lock_guard<std::mutex> send_lk(host.send_mu);
                     rc =
                         ww_bridge_pool_commit_target(host.pool, host.sock, &result.pool_generation);
                     if (rc == 0) {
@@ -600,7 +591,7 @@ void apply_render_target(HostState& host, wavsen::video::Producer& producer,
                     if (sync_fd >= 0) ::close(sync_fd);
                     if (result.status != 0) {
                         message = "publish render target failed";
-                        signal_shutdown(host);
+                        host.events->request_stop(ExitCause::Failure);
                     }
                 }
             }
@@ -610,17 +601,13 @@ void apply_render_target(HostState& host, wavsen::video::Producer& producer,
         (void)producer.release_upload_buffer();
     }
     result.message = message.data();
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
-    if (ww_bridge_send_render_target_result(host.sock, &result) != 0) signal_shutdown(host);
+    if (ww_bridge_send_render_target_result(host.sock, &result) != 0)
+        host.events->request_stop(ExitCause::Failure);
 }
 
 void apply_control(HostState& host, ww_bridge_control_t& c) {
     switch (c.op) {
     case WW_EVT_IN_INIT:
-        // Init is consumed by ww_bridge_recv_init at the top of main
-        // before the reader thread is even spawned. Anything that
-        // arrives here is either a buggy daemon resending it or a
-        // protocol violation; log and ignore to stay liberal.
         rstd_warn("waywallen-image-renderer: unexpected late Init; ignoring");
         break;
     case WW_EVT_IN_PLAY:
@@ -650,54 +637,27 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
         }
         break;
     }
-    case WW_EVT_IN_SHUTDOWN: signal_shutdown(host); break;
     case WW_EVT_IN_CONFIGURE_RENDER_TARGET: {
-        std::lock_guard<std::mutex> lk(host.neg_mu);
         host.target_config  = c.u.configure_render_target.config;
         host.target_pending = true;
-        host.neg_cv.notify_all();
         break;
     }
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
         ww_pool_directive_t d = c.u.negotiate_buffers.directive;
         /* Static image: one slot is enough. */
-        d.count = 1;
-        {
-            std::lock_guard<std::mutex> lk(host.neg_mu);
-            host.neg_directive = d;
-            host.neg_pending   = true;
-        }
-        host.neg_cv.notify_all();
+        d.count            = 1;
+        host.neg_directive = d;
+        host.neg_pending   = true;
         break;
     }
     case WW_EVT_IN_REQUEST_FRAME: {
-        {
-            std::lock_guard<std::mutex> lk(host.neg_mu);
-            host.frame_request_pending = true;
-        }
-        host.neg_cv.notify_all();
+        host.frame_request_pending = true;
         break;
     }
     case WW_EVT_IN_SET_LOG_LEVEL: ww_renderer_log_set_level(c.u.set_log_level.level); break;
     default:
         rstd_warn("waywallen-image-renderer: unknown control op {}", static_cast<int>(c.op));
         break;
-    }
-}
-
-void reader_loop(HostState& host) {
-    while (! host.shutdown.load(std::memory_order_acquire)) {
-        ww_bridge_control_t msg {};
-        int                 rc = ww_bridge_recv_control(host.sock, &msg);
-        if (rc != 0) {
-            if (! host.shutdown.load(std::memory_order_acquire)) {
-                rstd_error("waywallen-image-renderer: recv_control failed: {}", rc);
-            }
-            signal_shutdown(host);
-            return;
-        }
-        apply_control(host, msg);
-        ww_bridge_control_free(&msg);
     }
 }
 
@@ -984,6 +944,13 @@ int run(int argc, char** argv) {
     }
     apply_user_properties(host, init.user_properties);
     waywallen_renderer_init_free(&init);
+    auto events = RunLoop::start(host.sock);
+    if (events.is_err()) {
+        rstd_error("waywallen-image-renderer: control loop failed: {}", events.unwrap_err());
+        ww_bridge_close(host.sock);
+        return 1;
+    }
+    host.events = Some(rstd::move(events).unwrap());
 
     /* --- Decode + Vulkan setup --- */
     if (opt.image_path.empty()) die("--path <image-file> is required");
@@ -1077,51 +1044,41 @@ int run(int argc, char** argv) {
     rstd_info("waywallen-image-renderer: ready, advertised caps, "
               "waiting for allocation configuration");
 
-    std::thread reader([&]() {
-        reader_loop(host);
-    });
-
     /* Main loop: negotiation publishes new content; request_frame only
      * republishes the latest released slot. */
-    while (! host.shutdown.load(std::memory_order_acquire)) {
-        std::unique_lock<std::mutex> lk(host.neg_mu);
-        host.neg_cv.wait(lk, [&] {
-            return host.target_pending || host.neg_pending ||
-                   (host.frame_request_pending &&
-                    host.negotiated.load(std::memory_order_acquire)) ||
-                   host.shutdown.load(std::memory_order_acquire);
-        });
-        if (host.shutdown.load(std::memory_order_acquire)) break;
-        if (host.target_pending) {
-            auto config                = host.target_config;
-            host.target_pending        = false;
-            host.frame_request_pending = false;
-            lk.unlock();
-            apply_render_target(host, *producer, *session, config);
-            continue;
-        }
-        if (host.neg_pending) {
-            ww_pool_directive_t d      = host.neg_directive;
-            host.neg_pending           = false;
-            host.frame_request_pending = false;
-            lk.unlock();
-            apply_negotiate_request(host, *producer, opt, *session, rgba_buf, d);
-            continue;
-        }
-        if (host.frame_request_pending) {
-            host.frame_request_pending = false;
-            lk.unlock();
-            const auto status = republish_latest(host);
-            if (status == RepublishStatus::Failed) {
-                signal_shutdown(host);
+    const auto exit = host.events->run(
+        [&](auto& control) {
+            apply_control(host, control);
+        },
+        [&]() -> LoopStep {
+            if (host.target_pending) {
+                auto config                = host.target_config;
+                host.target_pending        = false;
+                host.frame_request_pending = false;
+                apply_render_target(host, *producer, *session, config);
+                return LoopStep::again();
             }
-        }
-    }
+            if (host.neg_pending) {
+                ww_pool_directive_t d      = host.neg_directive;
+                host.neg_pending           = false;
+                host.frame_request_pending = false;
+                apply_negotiate_request(host, *producer, opt, *session, rgba_buf, d);
+                return LoopStep::again();
+            }
+            if (host.frame_request_pending && host.negotiated.load(std::memory_order_acquire)) {
+                host.frame_request_pending = false;
+                const auto status          = republish_latest(host);
+                if (status == RepublishStatus::Failed) {
+                    host.events->request_stop(ExitCause::Failure);
+                }
+                return LoopStep::again();
+            }
+            return LoopStep::wait();
+        });
+    if (exit.cause == ExitCause::Transport)
+        rstd_error("waywallen-image-renderer: recv_control failed: {}", exit.code);
 
-    if (reader.joinable()) {
-        ::shutdown(host.sock, SHUT_RD);
-        reader.join();
-    }
+    host.events->close();
     if (host.pool) ww_bridge_pool_destroy(host.pool);
     ww_bridge_close(host.sock);
     return 0;

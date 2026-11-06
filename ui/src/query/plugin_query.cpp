@@ -85,6 +85,7 @@ auto PluginListQuery::inactiveSystem() const -> const QStringList& { return m_in
 auto PluginListQuery::inactiveUser() const -> const QStringList& { return m_inactive_user; }
 
 void PluginListQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -92,10 +93,10 @@ void PluginListQuery::reload() {
     req.setPluginList(proto::PluginListRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             QVariantList items;
@@ -191,6 +192,7 @@ PluginInspectQuery::PluginInspectQuery(QObject* parent): Query(parent) {}
 auto PluginInspectQuery::zipPath() const -> const QString& { return m_zip_path; }
 void PluginInspectQuery::setZipPath(const QString& v) {
     if (m_zip_path == v) return;
+    invalidateRequests();
     m_zip_path = v;
     Q_EMIT zipPathChanged();
 }
@@ -206,6 +208,7 @@ auto PluginInspectQuery::existingName() const -> const QString& { return m_exist
 auto PluginInspectQuery::existingSystem() const -> bool { return m_existing_system; }
 
 void PluginInspectQuery::reload() {
+    const auto revision = beginRequest();
     if (m_zip_path.isEmpty()) return;
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
@@ -216,10 +219,10 @@ void PluginInspectQuery::reload() {
     req.setPluginInspect(std::move(inner));
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             const auto& r            = rsp.pluginInspect();
@@ -298,6 +301,7 @@ void PluginUpdateCheckQuery::reload() { check(m_plugin_id); }
 
 void PluginUpdateCheckQuery::check(const QString& pluginId) {
     if (querying() || progressing()) return;
+    const auto revision = beginRequest();
     setPluginId(pluginId);
     beginProgressQuery();
     auto backend = App::instance()->backend();
@@ -308,10 +312,10 @@ void PluginUpdateCheckQuery::check(const QString& pluginId) {
     req.setPluginUpdateCheck(std::move(inner));
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         if (! result) {
             self->failProgressQuery(result.unwrap_err_unchecked());

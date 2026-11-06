@@ -33,6 +33,12 @@ pub fn expand_home_path(path: &str) -> String {
     expanded.to_string_lossy().into_owned()
 }
 
+pub fn library_path_key(path: &str) -> std::path::PathBuf {
+    let path = expand_home_path(path);
+    // Keep unavailable libraries addressable without changing their stored paths.
+    std::fs::canonicalize(&path).unwrap_or_else(|_| std::path::PathBuf::from(path))
+}
+
 pub async fn add_library(
     db: &DatabaseConnection,
     plugin_id: i64,
@@ -49,6 +55,12 @@ pub async fn add_named_library(
 ) -> Result<library::Model> {
     let path = expand_home_path(path);
     let txn = db.begin().await.context("begin library create")?;
+    if let Some(existing) = find_library(&txn, plugin_id, &path).await? {
+        return Err(Error::InvalidArgument(format!(
+            "Library folder is already registered: {}",
+            existing.path
+        )));
+    }
     let name = match name {
         Some(name) => validate_library_name(name)?.to_owned(),
         None => {
@@ -105,17 +117,21 @@ pub async fn rename_library(
 }
 
 pub async fn find_library(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     plugin_id: i64,
     path: &str,
 ) -> Result<Option<library::Model>> {
     let path = expand_home_path(path);
-    library::Entity::find()
+    let key = library_path_key(&path);
+    let libraries = library::Entity::find()
         .filter(library::Column::PluginId.eq(plugin_id))
-        .filter(library::Column::Path.eq(path.as_str()))
-        .one(db)
+        .order_by_asc(library::Column::Id)
+        .all(db)
         .await
-        .with_context(|| format!("select library plugin={plugin_id} path={path}"))
+        .with_context(|| format!("select library plugin={plugin_id} path={path}"))?;
+    Ok(libraries
+        .into_iter()
+        .find(|library| library.path == path || library_path_key(&library.path) == key))
 }
 
 pub async fn list_libraries_by_plugin(

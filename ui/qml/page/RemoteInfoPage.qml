@@ -206,6 +206,13 @@ MD.Page {
                 visible: root.hasText(root.details?.description)
                 text: root.value(root.details?.description)
             }
+
+            W.RemoteDetailFields {
+                Layout.columnSpan: 2
+                Layout.fillWidth: true
+                fields: root.details?.fields ?? []
+                labelForField: field => W.I18n.tr(field.labelText) || String(field.label ?? "")
+            }
         }
     }
 }

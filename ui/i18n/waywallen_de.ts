@@ -303,6 +303,10 @@
 <context>
     <name>DiscoverPage</name>
     <message>
+        <source>Retry</source>
+        <translation>Erneut versuchen</translation>
+    </message>
+    <message>
         <location filename="../qml/page/DiscoverPage.qml" line="109"/>
         <source>Sort</source>
         <translation>Sortierung</translation>
@@ -2294,6 +2298,14 @@ Betroffener Bildschirm: #%1</translation>
 <context>
     <name>SourceManagePage</name>
     <message>
+        <source>Auto detect libraries</source>
+        <translation>Bibliotheken automatisch erkennen</translation>
+    </message>
+    <message>
+        <source>No new libraries found</source>
+        <translation>Keine neuen Bibliotheken gefunden</translation>
+    </message>
+    <message>
         <source>Rename library</source>
         <translation>Bibliothek umbenennen</translation>
     </message>
@@ -2570,6 +2582,18 @@ Ungespeicherter Bildzustand kann verloren gehen.</translation>
 <context>
     <name>TweakSheet</name>
     <message>
+        <source>Layout</source>
+        <translation>Anordnung</translation>
+    </message>
+    <message>
+        <source>Grid</source>
+        <translation>Raster</translation>
+    </message>
+    <message>
+        <source>Masonry</source>
+        <translation>Wasserfall</translation>
+    </message>
+    <message>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="33"/>
         <source>Tweak</source>
         <translation>Ansicht</translation>
@@ -2583,6 +2607,10 @@ Ungespeicherter Bildzustand kann verloren gehen.</translation>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="89"/>
         <source>Size</source>
         <translation>Größe</translation>
+    </message>
+    <message>
+        <source>Spacing</source>
+        <translation>Abstand</translation>
     </message>
     <message>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="102"/>
@@ -3086,6 +3114,10 @@ Ungespeicherter Bildzustand kann verloren gehen.</translation>
 </context>
 <context>
     <name>WallpaperPage</name>
+    <message>
+        <source>Retry</source>
+        <translation>Erneut versuchen</translation>
+    </message>
     <message>
         <location filename="../qml/page/WallpaperPage.qml" line="39"/>
         <source>Removed %1</source>

@@ -20,6 +20,7 @@ TagListQuery::TagListQuery(QObject* parent): Query(parent) {}
 auto TagListQuery::tags() const -> const QStringList& { return m_tags; }
 
 void TagListQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -27,10 +28,10 @@ void TagListQuery::reload() {
     req.setTagList(proto::TagListRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             QStringList tags;
@@ -49,6 +50,7 @@ ContentRatingListQuery::ContentRatingListQuery(QObject* parent): Query(parent) {
 auto ContentRatingListQuery::ratings() const -> const QStringList& { return m_ratings; }
 
 void ContentRatingListQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -56,10 +58,10 @@ void ContentRatingListQuery::reload() {
     req.setContentRatingList(proto::ContentRatingListRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             QStringList ratings;

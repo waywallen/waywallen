@@ -1,13 +1,13 @@
 module;
 
 #include <rstd/macro.hpp>
+#include "frame_rate_limit.hpp"
 
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
 
 #include <sys/prctl.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 module waywallen.video.entry;
@@ -19,12 +19,18 @@ import rstd.log;
 import wavsen.video;
 import wavsen.audio;
 import waywallen.bridge;
+import waywallen.plugin.run_loop;
+
+using namespace rstd::prelude;
+using namespace rstd::literals;
+using RunLoop   = waywallen::plugin::RunLoop;
+using LoopStep  = waywallen::plugin::LoopStep;
+using ExitCause = waywallen::plugin::ExitCause;
+using Instant   = rstd::time::Instant;
+using Duration  = rstd::time::Duration;
 
 namespace
 {
-
-using namespace rstd::literals;
-
 struct Options {
     std::string ipc_path;
     std::string video_path;
@@ -271,7 +277,7 @@ wavsen::audio::AudioClientIdentity audio_client_identity() {
 struct HostState {
     int               sock { -1 };
     ww_pool_t*        pool { nullptr };
-    std::atomic<bool> shutdown { false };
+    Option<RunLoop>   events;
     std::atomic<bool> negotiated { false };
     std::atomic<bool> paused { false };
     std::atomic<bool> muted { false };
@@ -279,8 +285,6 @@ struct HostState {
     std::atomic<bool> settings_enable_audio { true };
     std::atomic<bool> property_enable_audio { true };
 
-    std::mutex                             neg_mu;
-    std::condition_variable                neg_cv;
     bool                                   neg_pending { false };
     uint64_t                               frame_request_revision { 0 };
     uint64_t                               served_frame_request_revision { 0 };
@@ -289,7 +293,6 @@ struct HostState {
     waywallen_render_target_config_t       target_config {};
     waywallen_render_target_capabilities_t target_caps {};
     uint64_t                               target_revision {};
-    std::mutex                             send_mu;
     std::string                            reported_hwdec;
 
     std::atomic<bool> loop_pending { false };
@@ -297,7 +300,6 @@ struct HostState {
 
     /* hwdec changes are applied at the next file/loop boundary, not
      * mid-stream — store the pending value here. */
-    std::mutex  hwdec_mu;
     std::string pending_hwdec;
     bool        hwdec_pending { false };
 
@@ -311,24 +313,33 @@ struct HostState {
     std::atomic<uint32_t> mute_fade_ms { 0 };
     std::atomic<uint32_t> pause_fade_ms { 0 };
     ClearColor            scheme_color {};
+    uint32_t              fps { 30 };
 };
+
+void set_fps(HostState& host, const char* value) {
+    char* end = nullptr;
+    long  fps = std::strtol(value, &end, 10);
+    if (end != value && *end == '\0' && fps >= 1 && fps <= 240) {
+        host.fps = static_cast<uint32_t>(fps);
+    } else {
+        rstd_warn("waywallen-video-renderer: invalid fps value '{}'; ignoring", value);
+    }
+}
 
 bool effective_audio_enabled(const HostState& host) {
     return host.settings_enable_audio.load(std::memory_order_acquire) &&
            host.property_enable_audio.load(std::memory_order_acquire);
 }
 
-using Clock = std::chrono::steady_clock;
-
 struct AudioRuntime {
-    uint32_t          volume_pct { 100 };
-    bool              enabled { true };
-    bool              paused { false };
-    bool              muted { false };
-    bool              device_muted { false };
-    bool              pause_pending { false };
-    Clock::time_point pause_at {};
-    float             target_scale { 1.0f };
+    uint32_t volume_pct { 100 };
+    bool     enabled { true };
+    bool     paused { false };
+    bool     muted { false };
+    bool     device_muted { false };
+    bool     pause_pending { false };
+    Instant  pause_at {};
+    float    target_scale { 1.0f };
 };
 
 wavsen::video::HwAccel parse_hwdec(const char* v) {
@@ -370,21 +381,14 @@ const char* runtime_hwdec_label(wavsen::video::FrameKind kind) {
     return "unknown";
 }
 
-void signal_shutdown(HostState& s) {
-    s.shutdown.store(true, std::memory_order_release);
-    s.neg_cv.notify_all();
-}
-
 void publish_clear_color(HostState& host, const ClearColor& c) {
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
     if (int rc = ww_bridge_send_report_state_clear_color(host.sock, c.r, c.g, c.b, c.a); rc != 0) {
         rstd_warn("waywallen-video-renderer: report_state(clear_color) failed ({})", rc);
     }
 }
 
 void publish_hwdec_tag(HostState& host, wavsen::video::FrameKind kind) {
-    const char*                 value = runtime_hwdec_label(kind);
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
+    const char* value = runtime_hwdec_label(kind);
     if (host.reported_hwdec == value) return;
 
     ww_kv_t tag {
@@ -514,12 +518,10 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
         host.pause_fade_ms.store(c.u.play.transition.fade_ms, std::memory_order_release);
         host.paused.store(false, std::memory_order_release);
         host.audio_gate_open.store(true, std::memory_order_release);
-        host.neg_cv.notify_all();
         break;
     case WW_EVT_IN_PAUSE:
         host.pause_fade_ms.store(c.u.pause.transition.fade_ms, std::memory_order_release);
         host.paused.store(true, std::memory_order_release);
-        host.neg_cv.notify_all();
         break;
     case WW_EVT_IN_UNMUTE:
         host.mute_fade_ms.store(c.u.unmute.transition.fade_ms, std::memory_order_release);
@@ -539,12 +541,13 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
             const char* key = settings.data[i].key;
             const char* val = settings.data[i].value;
             if (! key || ! val) continue;
-            if (std::strcmp(key, "loop_file") == 0) {
+            if (std::strcmp(key, "fps") == 0) {
+                set_fps(host, val);
+            } else if (std::strcmp(key, "loop_file") == 0) {
                 bool enabled = ! (std::strcmp(val, "no") == 0);
                 host.loop_value.store(enabled, std::memory_order_release);
                 host.loop_pending.store(true, std::memory_order_release);
             } else if (std::strcmp(key, "hwdec") == 0) {
-                std::lock_guard<std::mutex> lk(host.hwdec_mu);
                 host.pending_hwdec = val;
                 host.hwdec_pending = true;
             } else if (std::strcmp(key, "volume") == 0) {
@@ -573,38 +576,26 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
                           static_cast<const char*>(key));
             }
         }
-        host.neg_cv.notify_all();
         break;
     }
-    case WW_EVT_IN_SHUTDOWN: signal_shutdown(host); break;
     case WW_EVT_IN_CONFIGURE_RENDER_TARGET: {
-        std::lock_guard<std::mutex> lk(host.neg_mu);
         host.target_config  = c.u.configure_render_target.config;
         host.target_pending = true;
-        host.neg_cv.notify_all();
         break;
     }
     case WW_EVT_IN_NEGOTIATE_BUFFERS: {
         const ww_pool_directive_t& d = c.u.negotiate_buffers.directive;
-        {
-            std::lock_guard<std::mutex> lk(host.neg_mu);
-            host.neg_directive = d;
-            host.neg_pending   = true;
-        }
-        host.neg_cv.notify_all();
+        host.neg_directive           = d;
+        host.neg_pending             = true;
         break;
     }
     case WW_EVT_IN_REQUEST_FRAME: {
-        {
-            std::lock_guard<std::mutex> lk(host.neg_mu);
-            if (host.frame_request_revision == std::numeric_limits<uint64_t>::max()) {
-                host.frame_request_revision        = 1;
-                host.served_frame_request_revision = 0;
-            } else {
-                ++host.frame_request_revision;
-            }
+        if (host.frame_request_revision == std::numeric_limits<uint64_t>::max()) {
+            host.frame_request_revision        = 1;
+            host.served_frame_request_revision = 0;
+        } else {
+            ++host.frame_request_revision;
         }
-        host.neg_cv.notify_all();
         break;
     }
     case WW_EVT_IN_SET_LOG_LEVEL: ww_renderer_log_set_level(c.u.set_log_level.level); break;
@@ -615,7 +606,6 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
 }
 
 uint64_t pending_frame_request(HostState& host) {
-    std::lock_guard<std::mutex> lk(host.neg_mu);
     return host.frame_request_revision > host.served_frame_request_revision
                ? host.frame_request_revision
                : 0;
@@ -623,21 +613,29 @@ uint64_t pending_frame_request(HostState& host) {
 
 void complete_frame_request(HostState& host, uint64_t revision) {
     if (revision == 0) return;
-    std::lock_guard<std::mutex> lk(host.neg_mu);
     host.served_frame_request_revision = std::max(host.served_frame_request_revision, revision);
+}
+
+bool wait_for_presentation(HostState& host, const wavsen::video::PresentationSchedule& schedule) {
+    if (schedule.deadline)
+        host.events->wait_until(*schedule.deadline, [&](auto& event) {
+            apply_control(host, event);
+        });
+    return host.events->running();
 }
 
 int cancel_republish_wait(void* userdata) {
     auto& host = *static_cast<HostState*>(userdata);
-    if (host.shutdown.load(std::memory_order_acquire)) return 1;
-    std::lock_guard<std::mutex> lk(host.neg_mu);
+    host.events->drain([&](auto& event) {
+        apply_control(host, event);
+    });
+    if (! host.events->running()) return 1;
     return host.neg_pending || host.target_pending ? 1 : 0;
 }
 
 bool republish_latest(HostState& host, uint64_t revision) {
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
-    ww_pool_republish_result_t  result {};
-    const int                   rc = ww_bridge_pool_wait_republish_latest(
+    ww_pool_republish_result_t result {};
+    const int                  rc = ww_bridge_pool_wait_republish_latest(
         host.pool, host.sock, cancel_republish_wait, &host, &result);
     if (rc != 0) {
         rstd_error("waywallen-video-renderer: republish contract failed: {}", rc);
@@ -712,8 +710,7 @@ bool set_audio_device_enabled(wavsen::audio::AvPlayer* av_player, AudioRuntime& 
 }
 
 void sync_audio_state(wavsen::audio::AvPlayer* av_player, AudioRuntime& audio, bool paused,
-                      bool muted, uint32_t pause_fade_ms, uint32_t mute_fade_ms,
-                      Clock::time_point now) {
+                      bool muted, uint32_t pause_fade_ms, uint32_t mute_fade_ms, Instant now) {
     if (! av_player) {
         audio.paused        = paused;
         audio.muted         = muted;
@@ -762,7 +759,7 @@ void sync_audio_state(wavsen::audio::AvPlayer* av_player, AudioRuntime& audio, b
                 }
             } else if (was_audible && fade_ms > 0) {
                 audio.pause_pending = true;
-                audio.pause_at      = now + std::chrono::milliseconds(fade_ms);
+                audio.pause_at      = now + Duration::from_millis(u64(fade_ms));
             } else {
                 av_player->pause();
                 audio.pause_pending = false;
@@ -910,7 +907,6 @@ bool apply_video_target(HostState& host, wavsen::video::VideoDecoder& decoder,
             message = "drain candidate conversion failed";
             return false;
         }
-        std::lock_guard<std::mutex> send_lk(host.send_mu);
         rc = ww_bridge_pool_commit_target(host.pool, host.sock, &result.pool_generation);
         if (rc == 0) {
             ww_pool_slot_acquire_result_t acquired {};
@@ -932,7 +928,7 @@ bool apply_video_target(HostState& host, wavsen::video::VideoDecoder& decoder,
         }
         if (sync_fd >= 0) ::close(sync_fd);
         message = "publish render target failed";
-        signal_shutdown(host);
+        host.events->request_stop(ExitCause::Failure);
         return false;
     };
     const bool applied = perform();
@@ -940,14 +936,14 @@ bool apply_video_target(HostState& host, wavsen::video::VideoDecoder& decoder,
         if (yuv.drain_submissions(rstd::u64(1'000'000'000)).is_err() ||
             yuv.invalidate_targets().is_err()) {
             message = "failed to retire candidate conversion";
-            signal_shutdown(host);
+            host.events->request_stop(ExitCause::Failure);
         } else {
             ww_bridge_pool_abort_target(host.pool);
         }
     }
     result.message = message.data();
-    std::lock_guard<std::mutex> send_lk(host.send_mu);
-    if (ww_bridge_send_render_target_result(host.sock, &result) != 0) signal_shutdown(host);
+    if (ww_bridge_send_render_target_result(host.sock, &result) != 0)
+        host.events->request_stop(ExitCause::Failure);
     return applied;
 }
 
@@ -1201,22 +1197,6 @@ int run_selftest(const Options& opt) {
     return 0;
 }
 
-void reader_loop(HostState& host) {
-    while (! host.shutdown.load(std::memory_order_acquire)) {
-        ww_bridge_control_t msg {};
-        int                 rc = ww_bridge_recv_control(host.sock, &msg);
-        if (rc != 0) {
-            if (! host.shutdown.load(std::memory_order_acquire)) {
-                rstd_error("waywallen-video-renderer: recv_control failed: {}", rc);
-            }
-            signal_shutdown(host);
-            return;
-        }
-        apply_control(host, msg);
-        ww_bridge_control_free(&msg);
-    }
-}
-
 } // namespace
 
 namespace waywallen::video
@@ -1254,6 +1234,7 @@ int run(int argc, char** argv) {
     }
     // Video path arrives via CLI argv `--path` (already in
     // opt.video_path). Init carries only the resolved settings kv.
+    if (const char* v = kv_get(init.settings, "fps")) set_fps(host, v);
     if (const char* v = kv_get(init.settings, "loop_file")) {
         opt.loop_file = ! (std::strcmp(v, "no") == 0);
     }
@@ -1299,6 +1280,13 @@ int run(int argc, char** argv) {
     }
     apply_user_properties(host, init.user_properties);
     waywallen_renderer_init_free(&init);
+    auto events = RunLoop::start(host.sock);
+    if (events.is_err()) {
+        rstd_error("waywallen-video-renderer: start control loop failed: {}", events.unwrap_err());
+        ww_bridge_close(host.sock);
+        return 1;
+    }
+    host.events = Some(rstd::move(events).unwrap());
     if (opt.video_path.empty()) die("--path <video-file> is required");
 
     /* Probe the file's native dimensions. `Producer::create_with_render_node`
@@ -1522,39 +1510,6 @@ int run(int argc, char** argv) {
               even_h,
               opt.loop_file ? 1 : 0);
 
-    std::thread reader([&]() {
-        reader_loop(host);
-    });
-
-    /* Block until first NegotiateBuffers. */
-    if (! automatic) {
-        std::unique_lock<std::mutex> lk(host.neg_mu);
-        host.neg_cv.wait(lk, [&] {
-            return host.neg_pending || host.shutdown.load(std::memory_order_acquire);
-        });
-        if (host.neg_pending && ! host.shutdown.load(std::memory_order_acquire)) {
-            ww_pool_directive_t d = host.neg_directive;
-            host.neg_pending      = false;
-            lk.unlock();
-            if (! prepare_pool_reconfigure(d.count)) {
-                signal_shutdown(host);
-            } else {
-                int rc = 0;
-                {
-                    std::lock_guard<std::mutex> send_lk(host.send_mu);
-                    rc = ww_bridge_pool_apply_directive(host.pool, host.sock, &d);
-                }
-                if (rc != 0) {
-                    rstd_error("waywallen-video-renderer: pool_apply_directive (initial) rc={}",
-                               rc);
-                    signal_shutdown(host);
-                } else {
-                    host.negotiated.store(true, std::memory_order_release);
-                }
-            }
-        }
-    }
-
     rstd_info("waywallen-video-renderer: decoder mode = {}", kind_label(decoder->get()->kind()));
 
     /* --- Main loop ----------------------------------------------------- */
@@ -1573,469 +1528,466 @@ int run(int argc, char** argv) {
     uint32_t                 stall_warn_counter = 0; // throttle ETIME log spam during backpressure
     bool                     submitted_since_negotiate = false;
     RetainedFrame            retained;
+    waywallen::video::FrameRateLimit frame_rate_limit;
 
-    while (! host.shutdown.load(std::memory_order_acquire)) {
-        {
-            std::unique_lock<std::mutex> lk(host.neg_mu);
-            if (automatic && ! host.negotiated.load(std::memory_order_acquire)) {
-                host.neg_cv.wait(lk, [&] {
-                    return host.target_pending || host.shutdown.load(std::memory_order_acquire);
-                });
-                if (host.shutdown.load(std::memory_order_acquire)) break;
-            }
-            if (host.target_pending) {
-                auto config         = host.target_config;
-                host.target_pending = false;
-                lk.unlock();
-                if (apply_video_target(host, **decoder, *yuv, retained, config)) {
-                    submitted_since_negotiate = true;
-                    last_submitted_pts = retained.vk      ? retained.vk->info().pts_seconds
-                                         : retained.vaapi ? retained.vaapi->view().pts_seconds
-                                                          : retained.sw.pts_seconds;
-                }
-                continue;
-            }
-            if (host.neg_pending) {
-                ww_pool_directive_t d = host.neg_directive;
-                host.neg_pending      = false;
-                lk.unlock();
-                if (! prepare_pool_reconfigure(d.count)) {
-                    signal_shutdown(host);
-                    break;
-                }
-                int rc = 0;
-                {
-                    std::lock_guard<std::mutex> send_lk(host.send_mu);
-                    rc = ww_bridge_pool_apply_directive(host.pool, host.sock, &d);
-                }
-                if (rc != 0) {
-                    rstd_error("waywallen-video-renderer: pool_apply_directive (re) rc={}", rc);
-                    if (rc > 0) {
-                        signal_shutdown(host);
-                        break;
-                    }
-                } else {
-                    submitted_since_negotiate = false;
-                }
-            }
-        }
-
-        if (host.loop_pending.exchange(false, std::memory_order_acq_rel)) {
-            decoder->get()->set_loop(host.loop_value.load(std::memory_order_acquire));
-            // Loop toggled — let the presenter re-baseline on next frame.
-            presenter.reset();
-        }
-
-        /* Runtime audio controls do not reopen the media decoder. */
-        if (host.volume_pending.exchange(false, std::memory_order_acq_rel)) {
-            audio_runtime.volume_pct = host.pending_volume.load(std::memory_order_acquire);
-            if (auto* player = current_av_player()) {
-                player->set_volume(
-                    rstd::f32(static_cast<float>(audio_runtime.volume_pct) / 100.0f));
-            }
-        }
-        if (host.playback_rate_pending.exchange(false, std::memory_order_acq_rel)) {
-            const auto rate  = host.playback_rate.load(std::memory_order_acquire);
-            const auto value = rstd::f64(static_cast<double>(rate));
-            if (auto* player = current_av_player(); player && ! player->set_playback_rate(value)) {
-                rstd_warn("waywallen-video-renderer: failed to apply audio playback rate {}",
-                          rstd::f32(rate));
-            }
-            if (! presenter.set_playback_rate(value)) {
-                rstd_warn("waywallen-video-renderer: failed to apply playback rate {}",
-                          rstd::f32(rate));
-            }
-        }
-        if (host.enable_audio_pending.exchange(false, std::memory_order_acq_rel)) {
-            const bool audio_enabled = effective_audio_enabled(host);
-            set_audio_device_enabled(current_av_player(),
-                                     audio_runtime,
-                                     audio_enabled,
-                                     prev_pts,
-                                     audio_runtime.volume_pct);
-            presenter.reset();
-        }
-        const bool     audio_gate_open = host.audio_gate_open.load(std::memory_order_acquire);
-        const bool     paused_now      = host.paused.load(std::memory_order_acquire);
-        const bool     muted_now = ! audio_gate_open || host.muted.load(std::memory_order_acquire);
-        const bool     pause_started = ! audio_runtime.paused && paused_now;
-        const bool     resumed_now   = audio_runtime.paused && ! paused_now;
-        const uint64_t frame_request = pending_frame_request(host);
-        if (pause_started) pause_resume_pts = last_submitted_pts;
-        if (resumed_now && audio_runtime.enabled && pause_resume_pts >= rstd::f64()) {
-            if (auto* player = current_av_player()) player->seek_to(pause_resume_pts);
-        }
-        sync_audio_state(current_av_player(),
-                         audio_runtime,
-                         paused_now,
-                         muted_now,
-                         host.pause_fade_ms.load(std::memory_order_acquire),
-                         host.mute_fade_ms.load(std::memory_order_acquire),
-                         Clock::now());
-        if (resumed_now) {
-            pause_resume_pts = rstd::f64(-1.0);
-            presenter.reset();
-        }
-
-        /* hwdec change requested — apply at this loop boundary by
-         * tearing down + reopening the decoder. The reopen runs the
-         * full hwaccel trial again with the new mode. */
-        {
-            std::string new_hwdec;
-            bool        do_reopen = false;
+    const auto exit = host.events->run(
+        [&](auto& event) {
+            apply_control(host, event);
+        },
+        [&]() -> LoopStep {
             {
-                std::lock_guard<std::mutex> lk(host.hwdec_mu);
-                if (host.hwdec_pending) {
-                    new_hwdec          = host.pending_hwdec;
-                    host.hwdec_pending = false;
-                    do_reopen          = true;
+                const bool negotiated = host.negotiated.load(std::memory_order_acquire);
+                if (! negotiated && ! (automatic ? host.target_pending : host.neg_pending))
+                    return LoopStep::wait();
+                if (host.target_pending) {
+                    auto config         = host.target_config;
+                    host.target_pending = false;
+                    if (apply_video_target(host, **decoder, *yuv, retained, config)) {
+                        submitted_since_negotiate = true;
+                        last_submitted_pts = retained.vk      ? retained.vk->info().pts_seconds
+                                             : retained.vaapi ? retained.vaapi->view().pts_seconds
+                                                              : retained.sw.pts_seconds;
+                    }
+                    return LoopStep::again();
+                }
+                if (host.neg_pending) {
+                    ww_pool_directive_t d = host.neg_directive;
+                    host.neg_pending      = false;
+                    if (! prepare_pool_reconfigure(d.count)) {
+                        host.events->request_stop(ExitCause::Failure);
+                        return LoopStep::again();
+                    }
+                    int rc = ww_bridge_pool_apply_directive(host.pool, host.sock, &d);
+                    if (rc != 0) {
+                        rstd_error("waywallen-video-renderer: pool_apply_directive (re) rc={}", rc);
+                        if (rc > 0 || ! negotiated) {
+                            host.events->request_stop(ExitCause::Failure);
+                            return LoopStep::again();
+                        }
+                    } else {
+                        host.negotiated.store(true, std::memory_order_release);
+                        submitted_since_negotiate = false;
+                    }
                 }
             }
-            if (do_reopen) {
-                wavsen::video::HwAccel new_h = parse_hwdec(new_hwdec.c_str());
-                if (new_h != hwaccel) {
-                    rstd_info("waywallen-video-renderer: hwdec change {} → {}, reopening decoder",
-                              hwdec_label(hwaccel),
-                              hwdec_label(new_h));
-                    auto drained = yuv->drain_submissions(rstd::u64(1'000'000'000));
-                    if (drained.is_err()) {
-                        rstd_error("waywallen-video-renderer: drain before decoder reopen: {}",
-                                   rstd::move(drained).unwrap_err().message.as_str());
-                        signal_shutdown(host);
-                        break;
-                    }
-                    (void)decoder.take();
-                    wavsen::video::OpenOpts new_opts {
-                        new_h, rstd::string::String::make(as_rstd_str(opt.render_node))
-                    };
-                    auto re_res = wavsen::video::VideoDecoder::open_with_vk(
-                        as_rstd_str(opt.video_path),
-                        rstd::u32(even_w),
-                        rstd::u32(even_h),
-                        host.loop_value.load(std::memory_order_acquire),
-                        *producer,
-                        new_opts);
-                    if (re_res.is_err()) {
-                        rstd_error("waywallen-video-renderer: reopen failed: {}",
-                                   std::move(re_res).unwrap_err().message.as_str());
-                        signal_shutdown(host);
-                        break;
-                    }
-                    decoder  = rstd::Some(std::move(re_res).unwrap());
-                    retained = RetainedFrame {};
-                    hwaccel  = new_h;
-                    presenter.reset();
-                    // Video reopened at PTS 0 — keep audio aligned.
-                    if (auto* player = current_av_player()) player->seek_to_start();
-                    prev_pts = rstd::f64(-1.0);
-                    publish_hwdec_tag(host, decoder->get()->kind());
-                    rstd_info("waywallen-video-renderer: reopened, kind={}",
-                              kind_label(decoder->get()->kind()));
-                }
-            }
-        }
 
-        if (paused_now && submitted_since_negotiate) {
-            if (frame_request != 0) {
-                if (! republish_latest(host, frame_request)) {
-                    signal_shutdown(host);
-                    break;
-                }
-                continue;
+            if (host.loop_pending.exchange(false, std::memory_order_acq_rel)) {
+                decoder->get()->set_loop(host.loop_value.load(std::memory_order_acquire));
+                // Loop toggled — let the presenter re-baseline on next frame.
+                presenter.reset();
             }
-            std::unique_lock<std::mutex> lk(host.neg_mu);
-            auto                         wake = [&] {
-                return host.shutdown.load(std::memory_order_acquire) || host.target_pending ||
-                       host.neg_pending || ! host.paused.load(std::memory_order_acquire) ||
-                       host.playback_rate_pending.load(std::memory_order_acquire) ||
-                       host.frame_request_revision > host.served_frame_request_revision;
+
+            /* Runtime audio controls do not reopen the media decoder. */
+            if (host.volume_pending.exchange(false, std::memory_order_acq_rel)) {
+                audio_runtime.volume_pct = host.pending_volume.load(std::memory_order_acquire);
+                if (auto* player = current_av_player()) {
+                    player->set_volume(
+                        rstd::f32(static_cast<float>(audio_runtime.volume_pct) / 100.0f));
+                }
+            }
+            if (host.playback_rate_pending.exchange(false, std::memory_order_acq_rel)) {
+                frame_rate_limit.reset();
+                const auto rate  = host.playback_rate.load(std::memory_order_acquire);
+                const auto value = rstd::f64(static_cast<double>(rate));
+                if (auto* player = current_av_player();
+                    player && ! player->set_playback_rate(value)) {
+                    rstd_warn("waywallen-video-renderer: failed to apply audio playback rate {}",
+                              rstd::f32(rate));
+                }
+                if (! presenter.set_playback_rate(value)) {
+                    rstd_warn("waywallen-video-renderer: failed to apply playback rate {}",
+                              rstd::f32(rate));
+                }
+            }
+            if (host.enable_audio_pending.exchange(false, std::memory_order_acq_rel)) {
+                const bool audio_enabled = effective_audio_enabled(host);
+                set_audio_device_enabled(current_av_player(),
+                                         audio_runtime,
+                                         audio_enabled,
+                                         prev_pts,
+                                         audio_runtime.volume_pct);
+                presenter.reset();
+            }
+            const bool audio_gate_open = host.audio_gate_open.load(std::memory_order_acquire);
+            const bool paused_now      = host.paused.load(std::memory_order_acquire);
+            const bool muted_now = ! audio_gate_open || host.muted.load(std::memory_order_acquire);
+            const bool pause_started     = ! audio_runtime.paused && paused_now;
+            const bool resumed_now       = audio_runtime.paused && ! paused_now;
+            const uint64_t frame_request = pending_frame_request(host);
+            if (pause_started) pause_resume_pts = last_submitted_pts;
+            if (resumed_now && audio_runtime.enabled && pause_resume_pts >= rstd::f64()) {
+                if (auto* player = current_av_player()) player->seek_to(pause_resume_pts);
+            }
+            sync_audio_state(current_av_player(),
+                             audio_runtime,
+                             paused_now,
+                             muted_now,
+                             host.pause_fade_ms.load(std::memory_order_acquire),
+                             host.mute_fade_ms.load(std::memory_order_acquire),
+                             Instant::now());
+            if (resumed_now) {
+                frame_rate_limit.reset();
+                pause_resume_pts = rstd::f64(-1.0);
+                presenter.reset();
+            }
+
+            /* hwdec change requested — apply at this loop boundary by
+             * tearing down + reopening the decoder. The reopen runs the
+             * full hwaccel trial again with the new mode. */
+            {
+                std::string new_hwdec;
+                bool        do_reopen = false;
+                {
+                    if (host.hwdec_pending) {
+                        new_hwdec          = host.pending_hwdec;
+                        host.hwdec_pending = false;
+                        do_reopen          = true;
+                    }
+                }
+                if (do_reopen) {
+                    wavsen::video::HwAccel new_h = parse_hwdec(new_hwdec.c_str());
+                    if (new_h != hwaccel) {
+                        rstd_info(
+                            "waywallen-video-renderer: hwdec change {} → {}, reopening decoder",
+                            hwdec_label(hwaccel),
+                            hwdec_label(new_h));
+                        auto drained = yuv->drain_submissions(rstd::u64(1'000'000'000));
+                        if (drained.is_err()) {
+                            rstd_error("waywallen-video-renderer: drain before decoder reopen: {}",
+                                       rstd::move(drained).unwrap_err().message.as_str());
+                            host.events->request_stop(ExitCause::Failure);
+                            return LoopStep::again();
+                        }
+                        (void)decoder.take();
+                        wavsen::video::OpenOpts new_opts {
+                            new_h, rstd::string::String::make(as_rstd_str(opt.render_node))
+                        };
+                        auto re_res = wavsen::video::VideoDecoder::open_with_vk(
+                            as_rstd_str(opt.video_path),
+                            rstd::u32(even_w),
+                            rstd::u32(even_h),
+                            host.loop_value.load(std::memory_order_acquire),
+                            *producer,
+                            new_opts);
+                        if (re_res.is_err()) {
+                            rstd_error("waywallen-video-renderer: reopen failed: {}",
+                                       std::move(re_res).unwrap_err().message.as_str());
+                            host.events->request_stop(ExitCause::Failure);
+                            return LoopStep::again();
+                        }
+                        decoder  = rstd::Some(std::move(re_res).unwrap());
+                        retained = RetainedFrame {};
+                        frame_rate_limit.reset();
+                        hwaccel = new_h;
+                        presenter.reset();
+                        // Video reopened at PTS 0 — keep audio aligned.
+                        if (auto* player = current_av_player()) player->seek_to_start();
+                        prev_pts = rstd::f64(-1.0);
+                        publish_hwdec_tag(host, decoder->get()->kind());
+                        rstd_info("waywallen-video-renderer: reopened, kind={}",
+                                  kind_label(decoder->get()->kind()));
+                    }
+                }
+            }
+
+            if (paused_now && submitted_since_negotiate) {
+                if (frame_request != 0) {
+                    if (! republish_latest(host, frame_request)) {
+                        host.events->request_stop(ExitCause::Failure);
+                        return LoopStep::again();
+                    }
+                    return LoopStep::again();
+                }
+                return LoopStep::wait(audio_runtime.pause_pending ? Some(audio_runtime.pause_at)
+                                                                  : None<Instant>());
+            }
+
+            rstd::f64  frame_pts { -1.0 };
+            const auto fkind = decoder->get()->kind();
+            if (fkind == wavsen::video::FrameKind::VideoToolbox) {
+                rstd_error("waywallen-video-renderer: VideoToolbox frames are unsupported by the "
+                           "Vulkan bridge");
+                host.events->request_stop(ExitCause::Failure);
+                return LoopStep::again();
+            }
+            rstd::Option<wavsen::video::VkFrameLease>                    vulkan_frame;
+            rstd::Option<wavsen::video::VaapiFrameLease>                 vaapi_frame;
+            rstd::Result<wavsen::video::NextFrame, wavsen::video::Error> fs_res =
+                rstd::Ok(wavsen::video::NextFrame::Ok);
+            switch (fkind) {
+            case wavsen::video::FrameKind::VideoToolbox: break;
+            case wavsen::video::FrameKind::VulkanShared: {
+                auto pulled = decoder->get()->next_vk_frame();
+                if (pulled.is_err()) {
+                    fs_res = rstd::Err(rstd::move(pulled).unwrap_err());
+                } else {
+                    auto value   = rstd::move(pulled).unwrap();
+                    fs_res       = rstd::Ok(value.status);
+                    vulkan_frame = rstd::move(value.frame);
+                }
+                break;
+            }
+            case wavsen::video::FrameKind::VaapiDrm: {
+                auto pulled = decoder->get()->next_vaapi_frame();
+                if (pulled.is_err()) {
+                    fs_res = rstd::Err(rstd::move(pulled).unwrap_err());
+                } else {
+                    auto value  = rstd::move(pulled).unwrap();
+                    fs_res      = rstd::Ok(value.status);
+                    vaapi_frame = rstd::move(value.frame);
+                }
+                break;
+            }
+            case wavsen::video::FrameKind::Sw: fs_res = decoder->get()->next_frame(frame); break;
+            }
+            if (fs_res.is_err()) {
+                rstd_error("waywallen-video-renderer: decode error (hwdec={}): {}",
+                           hwdec_label(hwaccel),
+                           std::move(fs_res).unwrap_err().message.as_str());
+                host.events->request_stop(ExitCause::Failure);
+                return LoopStep::again();
+            }
+            const auto fs = std::move(fs_res).unwrap();
+            if (fs == wavsen::video::NextFrame::Eof) {
+                if (frame_request != 0 && submitted_since_negotiate) {
+                    if (! republish_latest(host, frame_request)) {
+                        host.events->request_stop(ExitCause::Failure);
+                        return LoopStep::again();
+                    }
+                    return LoopStep::again();
+                }
+                rstd_info("waywallen-video-renderer: clean EOF (loop=off); idling until shutdown");
+                return LoopStep::wait();
+            }
+            const bool decoder_looped = fs == wavsen::video::NextFrame::Looped;
+            switch (fkind) {
+            case wavsen::video::FrameKind::VideoToolbox: break;
+            case wavsen::video::FrameKind::VulkanShared:
+                if (vulkan_frame.is_none()) {
+                    rstd_error("waywallen-video-renderer: Vulkan decode returned no frame lease");
+                    host.events->request_stop(ExitCause::Failure);
+                    return LoopStep::again();
+                }
+                frame_pts = vulkan_frame->info().pts_seconds;
+                break;
+            case wavsen::video::FrameKind::VaapiDrm:
+                if (vaapi_frame.is_none()) {
+                    rstd_error("waywallen-video-renderer: VAAPI decode returned no surface lease");
+                    host.events->request_stop(ExitCause::Failure);
+                    return LoopStep::again();
+                }
+                frame_pts = vaapi_frame->view().pts_seconds;
+                break;
+            case wavsen::video::FrameKind::Sw: frame_pts = frame.pts_seconds; break;
+            }
+
+            const bool pts_regressed = frame_pts >= rstd::f64() && prev_pts >= rstd::f64() &&
+                                       frame_pts + rstd::f64(0.5) < prev_pts;
+            if (decoder_looped || pts_regressed) {
+                frame_rate_limit.reset();
+                if (auto* player = current_av_player()) player->seek_to_start();
+                presenter.reset();
+            }
+            prev_pts = frame_pts;
+
+            const auto presentation = presenter.schedule_frame(frame_pts);
+            if (! presentation.present) return LoopStep::again();
+
+            // Keep PTS pacing even for skipped frames so decoding cannot run ahead of audio.
+            if (! frame_rate_limit.accept(frame_pts.to_primitive(),
+                                          host.fps,
+                                          host.playback_rate.load(std::memory_order_acquire))) {
+                (void)wait_for_presentation(host, presentation);
+                return LoopStep::again();
+            }
+
+            ww_pool_slot_acquire_result_t acquired {};
+            int acquire_rc = ww_bridge_pool_try_acquire_any_for_render(host.pool, &acquired);
+            if (acquire_rc != 0) {
+                rstd_error("waywallen-video-renderer: acquire slot contract failed: {}",
+                           acquire_rc);
+                host.events->request_stop(ExitCause::Failure);
+                return LoopStep::again();
+            }
+            if (acquired.status == WW_POOL_SLOT_ACQUIRE_BUSY) {
+                if ((stall_warn_counter++ % 30) == 0) {
+                    rstd_warn("waywallen-video-renderer: all slots are busy, dropping frame");
+                }
+                (void)wait_for_presentation(host, presentation);
+                return LoopStep::again();
+            }
+            stall_warn_counter = 0;
+            if (acquired.status == WW_POOL_SLOT_ACQUIRE_SESSION_LOST ||
+                acquired.status == WW_POOL_SLOT_ACQUIRE_ERROR) {
+                rstd_error("waywallen-video-renderer: cannot acquire a slot (status={}, error={})",
+                           static_cast<int>(acquired.status),
+                           acquired.error_code);
+                host.events->request_stop(ExitCause::Failure);
+                return LoopStep::again();
+            }
+            const auto& s = acquired.slot;
+            if (! s.vk_image) {
+                ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
+                rstd_error("waywallen-video-renderer: slot {} has no VkImage handle", s.index);
+                host.events->request_stop(ExitCause::Failure);
+                return LoopStep::again();
+            }
+
+            const wavsen::video::ConversionTargetView conversion_target {
+                .image  = reinterpret_cast<VkImage>(s.vk_image),
+                .width  = rstd::u32(s.width),
+                .height = rstd::u32(s.height),
+                .kind   = wavsen::video::ConvertTarget::BridgeForeign,
             };
-            if (audio_runtime.pause_pending) {
-                host.neg_cv.wait_until(lk, audio_runtime.pause_at, wake);
-            } else {
-                host.neg_cv.wait(lk, wake);
+            rstd::Option<wavsen::video::ConversionReservation> conversion_reservation;
+            if (fkind != wavsen::video::FrameKind::Sw) {
+                auto reserved = yuv->reserve({
+                    .target   = conversion_target,
+                    .deadline = presentation.deadline,
+                });
+                if (reserved.is_err()) {
+                    ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
+                    rstd_error("waywallen-video-renderer: reserve conversion: {}",
+                               rstd::move(reserved).unwrap_err().message.as_str());
+                    host.events->request_stop(ExitCause::Failure);
+                    return LoopStep::again();
+                }
+                auto value = rstd::move(reserved).unwrap();
+                if (value.is_none()) {
+                    ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
+                    (void)wait_for_presentation(host, presentation);
+                    return LoopStep::again();
+                }
+                conversion_reservation = rstd::move(value);
             }
-            continue;
-        }
 
-        rstd::f64  frame_pts { -1.0 };
-        const auto fkind = decoder->get()->kind();
-        if (fkind == wavsen::video::FrameKind::VideoToolbox) {
-            rstd_error("waywallen-video-renderer: VideoToolbox frames are unsupported by the "
-                       "Vulkan bridge");
-            signal_shutdown(host);
-            break;
-        }
-        rstd::Option<wavsen::video::VkFrameLease>                    vulkan_frame;
-        rstd::Option<wavsen::video::VaapiFrameLease>                 vaapi_frame;
-        rstd::Result<wavsen::video::NextFrame, wavsen::video::Error> fs_res =
-            rstd::Ok(wavsen::video::NextFrame::Ok);
-        switch (fkind) {
-        case wavsen::video::FrameKind::VideoToolbox: break;
-        case wavsen::video::FrameKind::VulkanShared: {
-            auto pulled = decoder->get()->next_vk_frame();
-            if (pulled.is_err()) {
-                fs_res = rstd::Err(rstd::move(pulled).unwrap_err());
-            } else {
-                auto value   = rstd::move(pulled).unwrap();
-                fs_res       = rstd::Ok(value.status);
-                vulkan_frame = rstd::move(value.frame);
+            int       sync_fd = -1;
+            rstd::u32 cs_id;
+            rstd::u32 cr_id;
+            switch (fkind) {
+            case wavsen::video::FrameKind::VideoToolbox: break;
+            case wavsen::video::FrameKind::VulkanShared:
+                cs_id = vulkan_frame->info().colorspace;
+                cr_id = vulkan_frame->info().color_range;
+                break;
+            case wavsen::video::FrameKind::VaapiDrm:
+                cs_id = vaapi_frame->view().colorspace;
+                cr_id = vaapi_frame->view().color_range;
+                break;
+            case wavsen::video::FrameKind::Sw:
+                cs_id = frame.colorspace;
+                cr_id = frame.color_range;
+                break;
             }
-            break;
-        }
-        case wavsen::video::FrameKind::VaapiDrm: {
-            auto pulled = decoder->get()->next_vaapi_frame();
-            if (pulled.is_err()) {
-                fs_res = rstd::Err(rstd::move(pulled).unwrap_err());
-            } else {
-                auto value  = rstd::move(pulled).unwrap();
-                fs_res      = rstd::Ok(value.status);
-                vaapi_frame = rstd::move(value.frame);
+            const auto color_matrix = wavsen::video::make_color_matrix(
+                static_cast<wavsen::video::ColorSpace>(cs_id.to_primitive()),
+                static_cast<wavsen::video::ColorRange>(cr_id.to_primitive()));
+            rstd::Result<int, wavsen::video::Error> cv_res = rstd::Ok(-1);
+            RetainedFrame                           next_retained;
+            if (automatic && vulkan_frame) {
+                auto copied = vulkan_frame->try_clone();
+                if (copied.is_err()) {
+                    ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
+                    host.events->request_stop(ExitCause::Failure);
+                    return LoopStep::again();
+                }
+                next_retained.vk = rstd::Some(rstd::move(copied).unwrap());
             }
-            break;
-        }
-        case wavsen::video::FrameKind::Sw: fs_res = decoder->get()->next_frame(frame); break;
-        }
-        if (fs_res.is_err()) {
-            rstd_error("waywallen-video-renderer: decode error (hwdec={}): {}",
-                       hwdec_label(hwaccel),
-                       std::move(fs_res).unwrap_err().message.as_str());
-            signal_shutdown(host);
-            break;
-        }
-        const auto fs = std::move(fs_res).unwrap();
-        if (fs == wavsen::video::NextFrame::Eof) {
-            if (frame_request != 0 && submitted_since_negotiate) {
-                if (! republish_latest(host, frame_request)) {
-                    signal_shutdown(host);
+            if (automatic && vaapi_frame) {
+                auto copied = vaapi_frame->try_clone();
+                if (copied.is_err()) {
+                    ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
+                    host.events->request_stop(ExitCause::Failure);
+                    return LoopStep::again();
+                }
+                next_retained.vaapi = rstd::Some(rstd::move(copied).unwrap());
+            }
+            switch (fkind) {
+            case wavsen::video::FrameKind::VideoToolbox: break;
+            case wavsen::video::FrameKind::VulkanShared: {
+                auto converted = yuv->submit_av_vk_frame(
+                    rstd::move(*conversion_reservation), rstd::move(*vulkan_frame), color_matrix);
+                if (converted.is_err()) {
+                    cv_res = rstd::Err(rstd::move(converted).unwrap_err());
+                } else {
+                    cv_res = rstd::Ok(rstd::move(converted).unwrap().sync_fd);
+                }
+                break;
+            }
+            case wavsen::video::FrameKind::VaapiDrm: {
+                auto mapped = rstd::move(*vaapi_frame).into_drm();
+                if (mapped.is_err()) {
+                    cv_res = rstd::Err(rstd::move(mapped).unwrap_err());
                     break;
                 }
-                continue;
-            }
-            rstd_info("waywallen-video-renderer: clean EOF (loop=off); idling until shutdown");
-            std::unique_lock<std::mutex> lk(host.neg_mu);
-            host.neg_cv.wait(lk, [&] {
-                return host.shutdown.load(std::memory_order_acquire) || host.target_pending ||
-                       host.neg_pending || host.loop_pending.load(std::memory_order_acquire) ||
-                       host.playback_rate_pending.load(std::memory_order_acquire) ||
-                       host.frame_request_revision > host.served_frame_request_revision;
-            });
-            continue;
-        }
-        const bool decoder_looped = fs == wavsen::video::NextFrame::Looped;
-        switch (fkind) {
-        case wavsen::video::FrameKind::VideoToolbox: break;
-        case wavsen::video::FrameKind::VulkanShared:
-            if (vulkan_frame.is_none()) {
-                rstd_error("waywallen-video-renderer: Vulkan decode returned no frame lease");
-                signal_shutdown(host);
-                continue;
-            }
-            frame_pts = vulkan_frame->info().pts_seconds;
-            break;
-        case wavsen::video::FrameKind::VaapiDrm:
-            if (vaapi_frame.is_none()) {
-                rstd_error("waywallen-video-renderer: VAAPI decode returned no surface lease");
-                signal_shutdown(host);
-                continue;
-            }
-            frame_pts = vaapi_frame->view().pts_seconds;
-            break;
-        case wavsen::video::FrameKind::Sw: frame_pts = frame.pts_seconds; break;
-        }
-
-        const bool pts_regressed = frame_pts >= rstd::f64() && prev_pts >= rstd::f64() &&
-                                   frame_pts + rstd::f64(0.5) < prev_pts;
-        if (decoder_looped || pts_regressed) {
-            if (auto* player = current_av_player()) player->seek_to_start();
-            presenter.reset();
-        }
-        prev_pts = frame_pts;
-
-        const auto presentation = presenter.schedule_frame(frame_pts);
-        if (! presentation.present) continue;
-
-        ww_pool_slot_acquire_result_t acquired {};
-        int acquire_rc = ww_bridge_pool_try_acquire_any_for_render(host.pool, &acquired);
-        if (acquire_rc != 0) {
-            rstd_error("waywallen-video-renderer: acquire slot contract failed: {}", acquire_rc);
-            signal_shutdown(host);
-            break;
-        }
-        if (acquired.status == WW_POOL_SLOT_ACQUIRE_BUSY) {
-            if ((stall_warn_counter++ % 30) == 0) {
-                rstd_warn("waywallen-video-renderer: all slots are busy, dropping frame");
-            }
-            wavsen::video::Presenter::wait_until(presentation);
-            continue;
-        }
-        stall_warn_counter = 0;
-        if (acquired.status == WW_POOL_SLOT_ACQUIRE_SESSION_LOST ||
-            acquired.status == WW_POOL_SLOT_ACQUIRE_ERROR) {
-            rstd_error("waywallen-video-renderer: cannot acquire a slot (status={}, error={})",
-                       static_cast<int>(acquired.status),
-                       acquired.error_code);
-            signal_shutdown(host);
-            break;
-        }
-        const auto& s = acquired.slot;
-        if (! s.vk_image) {
-            ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
-            rstd_error("waywallen-video-renderer: slot {} has no VkImage handle", s.index);
-            signal_shutdown(host);
-            break;
-        }
-
-        const wavsen::video::ConversionTargetView conversion_target {
-            .image  = reinterpret_cast<VkImage>(s.vk_image),
-            .width  = rstd::u32(s.width),
-            .height = rstd::u32(s.height),
-            .kind   = wavsen::video::ConvertTarget::BridgeForeign,
-        };
-        rstd::Option<wavsen::video::ConversionReservation> conversion_reservation;
-        if (fkind != wavsen::video::FrameKind::Sw) {
-            auto reserved = yuv->reserve({
-                .target   = conversion_target,
-                .deadline = presentation.deadline,
-            });
-            if (reserved.is_err()) {
-                ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
-                rstd_error("waywallen-video-renderer: reserve conversion: {}",
-                           rstd::move(reserved).unwrap_err().message.as_str());
-                signal_shutdown(host);
+                auto converted = yuv->submit_drm_prime(
+                    rstd::move(*conversion_reservation), rstd::move(mapped).unwrap(), color_matrix);
+                if (converted.is_err()) {
+                    cv_res = rstd::Err(rstd::move(converted).unwrap_err());
+                    break;
+                }
+                auto submission = rstd::move(converted).unwrap();
+                if (submission.is_none()) {
+                    ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
+                    (void)wait_for_presentation(host, presentation);
+                    return LoopStep::again();
+                }
+                cv_res = rstd::Ok(submission->sync_fd);
                 break;
             }
-            auto value = rstd::move(reserved).unwrap();
-            if (value.is_none()) {
-                ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
-                wavsen::video::Presenter::wait_until(presentation);
-                continue;
+            case wavsen::video::FrameKind::Sw:
+                cv_res = yuv->convert_nv12(reinterpret_cast<VkImage>(s.vk_image),
+                                           rstd::u32(s.width),
+                                           rstd::u32(s.height),
+                                           frame,
+                                           color_matrix);
+                break;
             }
-            conversion_reservation = rstd::move(value);
-        }
+            if (cv_res.is_err()) {
+                ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
+                rstd_error("waywallen-video-renderer: yuv conversion failed: {}",
+                           std::move(cv_res).unwrap_err().message.as_str());
+                host.events->request_stop(ExitCause::Failure);
+                return LoopStep::again();
+            }
+            sync_fd = std::move(cv_res).unwrap();
+            if (! wait_for_presentation(host, presentation)) {
+                ::close(sync_fd);
+                ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
+                return LoopStep::again();
+            }
+            ww_pool_slot_submit_result_t submitted {};
+            int                          submit_rc = ww_bridge_pool_submit_acquired_slot(
+                host.pool, host.sock, &acquired.identity, sync_fd, &submitted);
+            if (submit_rc != 0 || submitted.status != WW_POOL_SLOT_SUBMIT_SUBMITTED) {
+                rstd_error(
+                    "waywallen-video-renderer: submit slot failed (rc={}, status={}, error={})",
+                    submit_rc,
+                    static_cast<int>(submitted.status),
+                    submitted.error_code);
+                host.events->request_stop(ExitCause::Failure);
+                return LoopStep::again();
+            }
+            submitted_since_negotiate = true;
+            if (automatic) {
+                if (fkind == wavsen::video::FrameKind::Sw) {
+                    std::swap(retained.sw, frame);
+                    (void)retained.vk.take();
+                    (void)retained.vaapi.take();
+                } else {
+                    retained = rstd::move(next_retained);
+                }
+                retained.valid = true;
+            }
+            if (frame_pts >= rstd::f64()) last_submitted_pts = frame_pts;
+            complete_frame_request(host, frame_request);
+            return LoopStep::again();
+        });
 
-        int       sync_fd = -1;
-        rstd::u32 cs_id;
-        rstd::u32 cr_id;
-        switch (fkind) {
-        case wavsen::video::FrameKind::VideoToolbox: break;
-        case wavsen::video::FrameKind::VulkanShared:
-            cs_id = vulkan_frame->info().colorspace;
-            cr_id = vulkan_frame->info().color_range;
-            break;
-        case wavsen::video::FrameKind::VaapiDrm:
-            cs_id = vaapi_frame->view().colorspace;
-            cr_id = vaapi_frame->view().color_range;
-            break;
-        case wavsen::video::FrameKind::Sw:
-            cs_id = frame.colorspace;
-            cr_id = frame.color_range;
-            break;
-        }
-        const auto color_matrix = wavsen::video::make_color_matrix(
-            static_cast<wavsen::video::ColorSpace>(cs_id.to_primitive()),
-            static_cast<wavsen::video::ColorRange>(cr_id.to_primitive()));
-        rstd::Result<int, wavsen::video::Error> cv_res = rstd::Ok(-1);
-        RetainedFrame                           next_retained;
-        if (automatic && vulkan_frame) {
-            auto copied = vulkan_frame->try_clone();
-            if (copied.is_err()) {
-                ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
-                signal_shutdown(host);
-                break;
-            }
-            next_retained.vk = rstd::Some(rstd::move(copied).unwrap());
-        }
-        if (automatic && vaapi_frame) {
-            auto copied = vaapi_frame->try_clone();
-            if (copied.is_err()) {
-                ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
-                signal_shutdown(host);
-                break;
-            }
-            next_retained.vaapi = rstd::Some(rstd::move(copied).unwrap());
-        }
-        switch (fkind) {
-        case wavsen::video::FrameKind::VideoToolbox: break;
-        case wavsen::video::FrameKind::VulkanShared: {
-            auto converted = yuv->submit_av_vk_frame(
-                rstd::move(*conversion_reservation), rstd::move(*vulkan_frame), color_matrix);
-            if (converted.is_err()) {
-                cv_res = rstd::Err(rstd::move(converted).unwrap_err());
-            } else {
-                cv_res = rstd::Ok(rstd::move(converted).unwrap().sync_fd);
-            }
-            break;
-        }
-        case wavsen::video::FrameKind::VaapiDrm: {
-            auto mapped = rstd::move(*vaapi_frame).into_drm();
-            if (mapped.is_err()) {
-                cv_res = rstd::Err(rstd::move(mapped).unwrap_err());
-                break;
-            }
-            auto converted = yuv->submit_drm_prime(
-                rstd::move(*conversion_reservation), rstd::move(mapped).unwrap(), color_matrix);
-            if (converted.is_err()) {
-                cv_res = rstd::Err(rstd::move(converted).unwrap_err());
-                break;
-            }
-            auto submission = rstd::move(converted).unwrap();
-            if (submission.is_none()) {
-                ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
-                wavsen::video::Presenter::wait_until(presentation);
-                continue;
-            }
-            cv_res = rstd::Ok(submission->sync_fd);
-            break;
-        }
-        case wavsen::video::FrameKind::Sw:
-            cv_res = yuv->convert_nv12(reinterpret_cast<VkImage>(s.vk_image),
-                                       rstd::u32(s.width),
-                                       rstd::u32(s.height),
-                                       frame,
-                                       color_matrix);
-            break;
-        }
-        if (cv_res.is_err()) {
-            ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
-            rstd_error("waywallen-video-renderer: yuv conversion failed: {}",
-                       std::move(cv_res).unwrap_err().message.as_str());
-            signal_shutdown(host);
-            break;
-        }
-        sync_fd = std::move(cv_res).unwrap();
-        wavsen::video::Presenter::wait_until(presentation);
-        std::lock_guard<std::mutex>  send_lk(host.send_mu);
-        ww_pool_slot_submit_result_t submitted {};
-        int                          submit_rc = ww_bridge_pool_submit_acquired_slot(
-            host.pool, host.sock, &acquired.identity, sync_fd, &submitted);
-        if (submit_rc != 0 || submitted.status != WW_POOL_SLOT_SUBMIT_SUBMITTED) {
-            rstd_error("waywallen-video-renderer: submit slot failed (rc={}, status={}, error={})",
-                       submit_rc,
-                       static_cast<int>(submitted.status),
-                       submitted.error_code);
-            signal_shutdown(host);
-            break;
-        }
-        submitted_since_negotiate = true;
-        if (automatic) {
-            if (fkind == wavsen::video::FrameKind::Sw) {
-                std::swap(retained.sw, frame);
-                (void)retained.vk.take();
-                (void)retained.vaapi.take();
-            } else {
-                retained = rstd::move(next_retained);
-            }
-            retained.valid = true;
-        }
-        if (frame_pts >= rstd::f64()) last_submitted_pts = frame_pts;
-        complete_frame_request(host, frame_request);
-    }
+    if (exit.cause == ExitCause::Transport)
+        rstd_error("waywallen-video-renderer: recv_control failed: {}", exit.code);
 
-    if (reader.joinable()) {
-        ::shutdown(host.sock, SHUT_RD);
-        reader.join();
-    }
+    host.events->close();
     if (auto drained = yuv->drain_submissions(rstd::u64(1'000'000'000)); drained.is_err()) {
         rstd_warn("waywallen-video-renderer: final conversion drain failed: {}",
                   rstd::move(drained).unwrap_err().message.as_str());

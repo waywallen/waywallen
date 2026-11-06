@@ -10,6 +10,7 @@ mod m20260929_000001_item_hidden;
 mod m20261015_000001_smart_playlists;
 mod m20261015_000002_library_name;
 mod m20261019_000001_item_update_available;
+mod m20261024_000001_item_can_remove;
 
 pub struct Migrator;
 
@@ -27,6 +28,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_000001_smart_playlists::Migration),
             Box::new(m20261015_000002_library_name::Migration),
             Box::new(m20261019_000001_item_update_available::Migration),
+            Box::new(m20261024_000001_item_can_remove::Migration),
         ]
     }
 }
@@ -39,7 +41,7 @@ mod tests {
     #[tokio::test]
     async fn library_names_migrate_existing_rows() {
         let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
-        Migrator::down(&db, Some(2)).await.unwrap();
+        Migrator::down(&db, Some(3)).await.unwrap();
         db.execute_unprepared("INSERT INTO source_plugin (id, name) VALUES (1, 'image')")
             .await
             .unwrap();
@@ -64,6 +66,28 @@ mod tests {
             crate::model::repo::list_libraries(&db).await.unwrap()[1].name,
             "My wallpapers"
         );
+    }
+
+    #[tokio::test]
+    async fn item_can_remove_migrates_existing_items_as_unknown() {
+        let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
+        Migrator::down(&db, Some(1)).await.unwrap();
+        db.execute_unprepared("INSERT INTO source_plugin (id, name) VALUES (1, 'image')")
+            .await
+            .unwrap();
+        db.execute_unprepared(
+            "INSERT INTO library (id, plugin_id, path) VALUES (1, 1, '/backgrounds')",
+        )
+        .await
+        .unwrap();
+        db.execute_unprepared("INSERT INTO item (id, plugin_id, library_id, path, type) VALUES (1, 1, 1, 'one.png', 'image')").await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        let entry = crate::model::repo::get_entry(&db, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.can_remove, None);
+        assert_eq!(entry.resource, "/backgrounds/one.png");
     }
 
     #[tokio::test]

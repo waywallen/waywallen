@@ -134,8 +134,8 @@ msgid "Not safe for work"
 msgstr "Nicht jugendfrei"
 
 #: main.lua:28
-msgid "Optional. Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password."
-msgstr "Optional. Verwenden Sie einen API-Schlüssel aus Ihren Wallhaven-Kontoeinstellungen. Geben Sie nicht Ihr Wallhaven-Passwort ein."
+msgid "Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password."
+msgstr "Verwenden Sie einen API-Schlüssel aus Ihren Wallhaven-Kontoeinstellungen. Geben Sie nicht Ihr Wallhaven-Passwort ein."
 
 #: wallhaven/api.lua:86
 msgid "Pixel art"

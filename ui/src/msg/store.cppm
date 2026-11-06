@@ -30,7 +30,10 @@ public:
     wallpaper_store wallpapers;
     remote_store    remotes;
 
-    void setRemoteAcquisitionState(const QString& sourceId, const QString& itemId, int state);
+    void setRemoteAcquisitionState(const QString& sourceId, const QString& itemId, int state,
+                                   bool transferActive = false, quint64 receivedBytes = 0,
+                                   quint64 totalBytes = 0);
+    auto mergeRemoteRow(model::RemoteRow row) const -> model::RemoteRow;
 };
 
 } // namespace waywallen

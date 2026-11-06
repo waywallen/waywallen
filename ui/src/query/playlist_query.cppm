@@ -26,7 +26,6 @@ public:
 
 private:
     QVariantList m_playlists;
-    quint64      m_generation { 0 };
 };
 
 export class PlaylistDetailQuery
@@ -61,7 +60,6 @@ private:
     QVariantMap m_playlist;
     qint64      m_revision { 0 };
     QStringList m_entry_ids;
-    quint64     m_generation { 0 };
 };
 
 export class PlaylistMutationQuery

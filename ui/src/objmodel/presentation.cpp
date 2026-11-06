@@ -38,6 +38,7 @@ void PresentationManager::attachTo(Backend* backend, DisplayManager* displays) {
         ++m_request_generation;
         m_requests.cancel();
         m_presentations.clear();
+        m_wallpapers.clear();
         rebuildRows();
     });
     connect(displays, &DisplayManager::displaysChanged, this, &PresentationManager::rebuildRows);
@@ -54,6 +55,14 @@ void PresentationManager::replaceSnapshot(const proto::WallpaperPresentationSnap
     m_presentations = snapshot.presentations();
     ++m_request_generation;
     m_requests.cancel();
+    QList<AppStore::wallpaper_store::store_item_type> wallpapers;
+    auto&                                             store = AppStore::instance()->wallpapers;
+    for (const auto& presentation : m_presentations) {
+        if (auto wallpaper = store.store_item(presentation.wallpaperId())) {
+            wallpapers.append(std::move(*wallpaper));
+        }
+    }
+    m_wallpapers = std::move(wallpapers);
     rebuildRows();
     requestMissingWallpapers();
 }
@@ -121,7 +130,7 @@ void PresentationManager::requestMissingWallpapers() {
         [self, backend, request = std::move(request), generation]() mutable -> task<void> {
             auto result = co_await backend->send(std::move(request));
             if (! co_await QAsyncResult::qexecutor()) co_return;
-            if (! self) co_return;
+            if (! self || generation != self->m_request_generation) co_return;
             if (! result) {
                 qWarning("wallpaper presentation lookup failed: %s",
                          qPrintable(result.unwrap_err_unchecked()));
@@ -132,11 +141,11 @@ void PresentationManager::requestMissingWallpapers() {
             auto&       store    = AppStore::instance()->wallpapers;
             QStringList changed;
             for (const auto& wallpaper : response.wallpaperLookup().wallpapers()) {
-                store.store_insert(wallpaper);
+                self->m_wallpapers.append(store.store_insert(wallpaper).first);
                 changed.append(wallpaper.id_proto());
             }
             if (! changed.isEmpty()) store.store_changed_callback(changed);
-            if (generation == self->m_request_generation) self->rebuildRows();
+            self->rebuildRows();
             co_return;
         });
 }

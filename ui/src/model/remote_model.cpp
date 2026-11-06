@@ -9,8 +9,7 @@ import :model.remote;
 namespace waywallen::model
 {
 
-RemoteListModel::RemoteListModel(QObject* parent)
-    : kstore::QGadgetListModel(this, parent), list_crtp_t() {
+RemoteListModel::RemoteListModel(QObject* parent): GridListModel(this, parent), list_crtp_t() {
     connect(this, &QAbstractItemModel::modelReset, this, &RemoteListModel::countChanged);
     connect(this, &QAbstractItemModel::rowsInserted, this, &RemoteListModel::countChanged);
     connect(this, &QAbstractItemModel::rowsRemoved, this, &RemoteListModel::countChanged);

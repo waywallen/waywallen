@@ -31,6 +31,7 @@ public:
     Wallpaper wallpaper;
     QString   targetSummary;
     int       state { 0 };
+    bool      operator==(const NowPlayingItem&) const = default;
 };
 
 } // namespace waywallen::model
@@ -89,13 +90,14 @@ private:
     void requestMissingWallpapers();
     auto targetSummary(const proto::WallpaperPresentationInfo& presentation) const -> QString;
 
-    Backend*                                m_backend { nullptr };
-    DisplayManager*                         m_displays { nullptr };
-    QList<proto::WallpaperPresentationInfo> m_presentations;
-    ShareStore<model::NowPlayingItem>       m_store;
-    NowPlayingModel                         m_model;
-    QAsyncScope                             m_requests;
-    quint64                                 m_request_generation { 0 };
+    Backend*                                          m_backend { nullptr };
+    DisplayManager*                                   m_displays { nullptr };
+    QList<proto::WallpaperPresentationInfo>           m_presentations;
+    QList<AppStore::wallpaper_store::store_item_type> m_wallpapers;
+    ShareStore<model::NowPlayingItem>                 m_store;
+    NowPlayingModel                                   m_model;
+    QAsyncScope                                       m_requests;
+    quint64                                           m_request_generation { 0 };
 };
 
 } // namespace waywallen

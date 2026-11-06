@@ -25,6 +25,7 @@ auto RemoteAvailabilityQuery::defaultSourceId() const -> const QString& {
 }
 
 void RemoteAvailabilityQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -32,10 +33,10 @@ void RemoteAvailabilityQuery::reload() {
     req.setRemoteAvailability(proto::RemoteAvailabilityRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             const auto&  av = rsp.remoteAvailability();
@@ -92,12 +93,21 @@ void RemoteAvailabilityQuery::reload() {
                 m[u"ownerPluginId"_s]    = src.ownerPluginId();
                 m[u"displayName"_s]      = src.displayName();
                 m[u"remoteCapability"_s] = static_cast<int>(src.remoteCapability());
+                m[u"pagination"_s]       = static_cast<int>(src.pagination());
                 m[u"remoteHint"_s]       = src.remoteHint();
                 m[u"avatarUrl"_s]        = src.avatarUrl();
                 m[u"displayNameText"_s] =
                     pluginMessageFromPb(src.displayNameText(), src.displayName());
                 m[u"remoteHintText"_s] =
                     pluginMessageFromPb(src.remoteHintText(), src.remoteHint());
+                const auto& download = src.downloadAction();
+                QVariantMap download_action;
+                download_action[u"enabled"_s] = ! src.hasDownloadAction() || download.enabled();
+                download_action[u"labelText"_s] =
+                    pluginMessageFromPb(download.labelText(), download.label());
+                download_action[u"tooltipText"_s] =
+                    pluginMessageFromPb(download.tooltipText(), download.tooltip());
+                m[u"downloadAction"_s] = download_action;
 
                 QVariantList settings;
                 for (const auto& ss : src.settings()) {
@@ -195,10 +205,11 @@ void RemoteAvailabilityQuery::reload() {
 
 RemoteSearchQuery::RemoteSearchQuery(QObject* parent): QueryList(parent) {
     tdata()->set_store(tdata(), AppStore::instance()->remotes);
-    connect_requet_reload(&RemoteSearchQuery::sourceIdChanged, this);
-    connect_requet_reload(&RemoteSearchQuery::queryChanged, this);
-    connect_requet_reload(&RemoteSearchQuery::sortKeyChanged, this);
-    connect_requet_reload(&RemoteSearchQuery::tagsChanged, this);
+    connect(this, &RemoteSearchQuery::statusChanged, this, &RemoteSearchQuery::stateChanged);
+    connect(this, &RemoteSearchQuery::sourceIdChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(this, &RemoteSearchQuery::queryChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(this, &RemoteSearchQuery::sortKeyChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(this, &RemoteSearchQuery::tagsChanged, this, &RemoteSearchQuery::invalidateSearch);
 }
 
 auto RemoteSearchQuery::sourceId() const -> const QString& { return m_source_id; }
@@ -239,10 +250,9 @@ void RemoteSearchQuery::setBrowsingEnabled(bool v) {
     m_browsing_enabled = v;
     Q_EMIT browsingEnabledChanged();
     if (v) {
-        delayReload();
+        invalidateSearch();
     } else {
-        ++m_generation;
-        cancel();
+        invalidateRequests();
         clearResults();
     }
 }
@@ -252,7 +262,7 @@ auto RemoteSearchQuery::hasMore() const -> bool {
     const auto t = model();
     return t && t->hasMore();
 }
-auto RemoteSearchQuery::errorText() const -> const QString& { return m_error; }
+auto RemoteSearchQuery::errorText() const -> const QString& { return error(); }
 
 void RemoteSearchQuery::reload() {
     if (! m_browsing_enabled || m_source_id.isEmpty()) {
@@ -261,23 +271,45 @@ void RemoteSearchQuery::reload() {
     }
     setOffset(0);
     setNoMore(false);
+    m_next_cursor.clear();
+    m_seen_cursors.clear();
     fetchPage(1, false);
 }
 
 void RemoteSearchQuery::loadMore() {
-    if (! m_browsing_enabled || noMore() || querying()) return;
+    if (! m_browsing_enabled || m_reload_pending || noMore() || querying()) return;
     fetchPage(static_cast<quint32>(offset() + 2), true);
 }
 
 void RemoteSearchQuery::fetchMore(qint32) {
-    if (! m_browsing_enabled || noMore()) return;
+    if (! m_browsing_enabled || m_reload_pending || noMore() || querying()) return;
     fetchPage(static_cast<quint32>(offset() + 2), true);
 }
 
+void RemoteSearchQuery::retry() {
+    if (status() != Status::Error) return;
+    if (m_failed_append)
+        loadMore();
+    else
+        reload();
+}
+
+void RemoteSearchQuery::invalidateSearch() {
+    m_reload_pending = true;
+    m_failed_append  = false;
+    m_next_cursor.clear();
+    m_seen_cursors.clear();
+    if (auto t = model()) t->setHasMore(false);
+    delayReload();
+}
+
 void RemoteSearchQuery::clearResults() {
+    m_reload_pending = false;
+    m_failed_append  = false;
     setOffset(0);
     setNoMore(true);
-    m_error.clear();
+    m_next_cursor.clear();
+    m_seen_cursors.clear();
     setError({});
     if (auto t = model()) t->reset({}, false);
     setStatus(Status::Finished);
@@ -287,7 +319,10 @@ void RemoteSearchQuery::clearResults() {
 void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
     auto t = model();
     if (! t) return;
+    m_reload_pending = false;
     t->setHasMore(false);
+    m_failed_append = append;
+    setError({});
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -298,22 +333,39 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
     inner.setSortKey(m_sort_key);
     inner.setPage(page);
     inner.setRequiredTags(m_tags);
+    if (append) inner.setCursor(m_next_cursor);
     req.setRemoteSearch(std::move(inner));
 
-    const auto generation = ++m_generation;
-    auto       self       = QWatcher { this };
-    spawn([self, backend, req = std::move(req), page, append, generation]() mutable -> task<void> {
+    const auto revision = beginRequest();
+    auto       self     = QWatcher { this };
+    spawn([self, backend, req = std::move(req), page, append, revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
         if (! self) co_return;
-        if (self->m_generation != generation) co_return;
+        if (! self->isCurrentRequest(revision)) co_return;
 
-        self->inspect_set(result, [self, page, append](const proto::Response& rsp) {
-            const auto&             sr = rsp.remoteSearch();
+        if (! result) {
+            self->setError(result.unwrap_err_unchecked());
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        const auto& sr = result->remoteSearch();
+        if (! sr.error().isEmpty()) {
+            self->setError(sr.error());
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        if (sr.hasMore() && ! sr.nextCursor().isEmpty() &&
+            self->m_seen_cursors.contains(sr.nextCursor())) {
+            self->setError(tr("The source returned a repeated continuation token."));
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        {
             QList<model::RemoteRow> rows;
             rows.reserve(sr.items().size());
             for (const auto& it : sr.items()) {
-                rows.push_back(model::RemoteRow {
+                rows.push_back(AppStore::instance()->mergeRemoteRow(model::RemoteRow {
                     it.sourceId(),
                     it.id_proto(),
                     it.title(),
@@ -322,20 +374,28 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
                     it.authorAvatarUrl(),
                     it.wpType(),
                     it.downloaded() ? 3 : 0,
-                });
+                    it.hasWidth() ? it.width() : 0,
+                    it.hasHeight() ? it.height() : 0,
+                }));
             }
             auto t = self->model();
-            if (! t) return;
-            const bool more = sr.hasMore() && ! rows.isEmpty();
+            if (! t) co_return;
+            const bool more = sr.hasMore() && (! rows.isEmpty() || ! sr.nextCursor().isEmpty());
             self->setOffset(static_cast<qint32>(page - 1));
             self->setNoMore(! more);
-            self->m_error = sr.error();
+            self->m_next_cursor = sr.nextCursor();
+            if (! sr.nextCursor().isEmpty()) {
+                if (self->m_seen_cursors.size() == 128) self->m_seen_cursors.removeFirst();
+                self->m_seen_cursors.push_back(sr.nextCursor());
+            }
+            self->m_failed_append = false;
             if (append)
                 t->append(rows, more);
             else
                 t->reset(std::move(rows), more);
             Q_EMIT self->stateChanged();
-        });
+        }
+        self->setStatus(Status::Finished);
         co_return;
     });
 }
@@ -362,24 +422,33 @@ void RemoteDetailsQuery::setItemId(const QString& v) {
 }
 auto RemoteDetailsQuery::author() const -> const QString& { return m_author; }
 auto RemoteDetailsQuery::authorAvatarUrl() const -> const QString& { return m_author_avatar_url; }
+auto RemoteDetailsQuery::authorUrl() const -> const QString& { return m_author_url; }
 auto RemoteDetailsQuery::description() const -> const QString& { return m_description; }
 auto RemoteDetailsQuery::size() const -> const QString& { return m_size; }
 auto RemoteDetailsQuery::width() const -> int { return m_width; }
 auto RemoteDetailsQuery::height() const -> int { return m_height; }
 auto RemoteDetailsQuery::tags() const -> const QStringList& { return m_tags; }
 auto RemoteDetailsQuery::webUrl() const -> const QString& { return m_web_url; }
+auto RemoteDetailsQuery::fields() const -> const QVariantList& { return m_fields; }
 
 void RemoteDetailsQuery::reload() {
+    const auto revision = beginRequest();
     m_author.clear();
     m_author_avatar_url.clear();
+    m_author_url.clear();
     m_description.clear();
     m_size.clear();
     m_width  = 0;
     m_height = 0;
     m_tags.clear();
     m_web_url.clear();
+    m_fields.clear();
+    setError({});
     Q_EMIT loaded();
-    if (m_item_id.isEmpty()) return;
+    if (m_item_id.isEmpty()) {
+        setStatus(Status::Finished);
+        return;
+    }
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -390,15 +459,26 @@ void RemoteDetailsQuery::reload() {
     req.setRemoteDetails(std::move(inner));
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
-        self->inspect_set(result, [self](const proto::Response& rsp) {
-            const auto& dr            = rsp.remoteDetails();
+        if (! result) {
+            self->setError(result.unwrap_err_unchecked());
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        const auto& dr = result->remoteDetails();
+        if (! dr.error().isEmpty()) {
+            self->setError(dr.error());
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        {
             self->m_author            = dr.author();
             self->m_author_avatar_url = dr.authorAvatarUrl();
+            self->m_author_url        = dr.authorUrl();
             self->m_description       = dr.description();
             self->m_size              = dr.size();
             self->m_width             = static_cast<int>(dr.width());
@@ -406,8 +486,22 @@ void RemoteDetailsQuery::reload() {
             self->m_web_url           = dr.webUrl();
             self->m_tags.clear();
             for (const auto& t : dr.tags()) self->m_tags.push_back(t);
+            for (const auto& field : dr.fields()) {
+                QVariantMap row;
+                row[u"key"_s]       = field.key();
+                row[u"label"_s]     = field.label();
+                row[u"labelText"_s] = pluginMessageFromPb(field.labelText(), field.label());
+                row[u"value"_s]     = field.value();
+                const QUrl url(field.url());
+                if (url.isValid() && ! url.host().isEmpty() &&
+                    (url.scheme() == u"https"_s || url.scheme() == u"http"_s)) {
+                    row[u"url"_s] = url;
+                }
+                self->m_fields.push_back(row);
+            }
             Q_EMIT self->loaded();
-        });
+        }
+        self->setStatus(Status::Finished);
         co_return;
     });
 }
@@ -499,7 +593,7 @@ void RemoteSubscriptionQuery::reload() {}
 void RemoteSubscriptionQuery::refresh(const QString& sourceId, const QString& id) {
     if (sourceId.isEmpty() || id.isEmpty()) return;
     AppStore::instance()->setRemoteAcquisitionState(sourceId, id, 3);
-    const auto generation = ++m_refresh_generation;
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -510,11 +604,11 @@ void RemoteSubscriptionQuery::refresh(const QString& sourceId, const QString& id
     req.setSubscriptionStatus(std::move(inner));
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req), sourceId, id, generation]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), sourceId, id, revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
         if (! self) co_return;
-        if (self->m_refresh_generation != generation) co_return;
+        if (! self->isCurrentRequest(revision)) co_return;
 
         if (! result) {
             self->inspect_set(result, [](const proto::Response&) {
@@ -543,6 +637,7 @@ void RemoteSubscriptionQuery::refresh(const QString& sourceId, const QString& id
 
 void RemoteSubscriptionQuery::setSubscribed(const QString& sourceId, const QString& id,
                                             bool subscribed) {
+    const auto revision = beginRequest();
     if (sourceId.isEmpty() || id.isEmpty()) return;
     AppStore::instance()->setRemoteAcquisitionState(sourceId, id, 3);
     setStatus(Status::Querying);
@@ -556,10 +651,11 @@ void RemoteSubscriptionQuery::setSubscribed(const QString& sourceId, const QStri
     req.setSubscriptionSet(std::move(inner));
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req), sourceId, id, subscribed]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), sourceId, id, subscribed, revision]() mutable
+              -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         if (! result) {
             self->inspect_set(result, [](const proto::Response&) {

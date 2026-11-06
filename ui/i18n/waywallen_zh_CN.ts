@@ -294,6 +294,10 @@
 <context>
     <name>DiscoverPage</name>
     <message>
+        <source>Retry</source>
+        <translation>重试</translation>
+    </message>
+    <message>
         <location filename="../qml/page/DiscoverPage.qml" line="102"/>
         <source>Sort</source>
         <translation>排序</translation>
@@ -2183,6 +2187,14 @@ Related display: #%1</source>
 <context>
     <name>SourceManagePage</name>
     <message>
+        <source>Auto detect libraries</source>
+        <translation>自动检测库</translation>
+    </message>
+    <message>
+        <source>No new libraries found</source>
+        <translation>未发现新的库</translation>
+    </message>
+    <message>
         <source>Rename library</source>
         <translation>重命名库</translation>
     </message>
@@ -2459,6 +2471,18 @@ Unsaved frame state may be lost.</source>
 <context>
     <name>TweakSheet</name>
     <message>
+        <source>Layout</source>
+        <translation>布局</translation>
+    </message>
+    <message>
+        <source>Grid</source>
+        <translation>网格</translation>
+    </message>
+    <message>
+        <source>Masonry</source>
+        <translation>瀑布流</translation>
+    </message>
+    <message>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="35"/>
         <source>Tweak</source>
         <translation>调整</translation>
@@ -2472,6 +2496,10 @@ Unsaved frame state may be lost.</source>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="91"/>
         <source>Size</source>
         <translation>大小</translation>
+    </message>
+    <message>
+        <source>Spacing</source>
+        <translation>间距</translation>
     </message>
     <message>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="104"/>
@@ -2994,6 +3022,10 @@ Unsaved frame state may be lost.</source>
 </context>
 <context>
     <name>WallpaperPage</name>
+    <message>
+        <source>Retry</source>
+        <translation>重试</translation>
+    </message>
     <message>
         <location filename="../qml/page/WallpaperPage.qml" line="40"/>
         <source>Removed %1</source>

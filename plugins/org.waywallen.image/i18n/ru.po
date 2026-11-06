@@ -2,8 +2,8 @@ msgid ""
 msgstr "Project-Id-Version: org.waywallen.image 0.5.0\nLanguage: ru\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 #: main.lua:15
-msgid "A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF."
-msgstr "Каталог с файлами изображений. Также сканируются подкаталоги глубиной до двух уровней. Поддерживаемые форматы: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF."
+msgid "A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Auto-detect also finds installed KDE and GNOME system wallpapers."
+msgstr "Каталог с файлами изображений. Также сканируются подкаталоги глубиной до двух уровней. Поддерживаемые форматы: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Автоопределение также находит установленные системные обои KDE и GNOME."
 
 #: plugin.toml
 msgid "Frame rate"

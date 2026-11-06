@@ -11,6 +11,12 @@ pub enum RemoteDownloadState {
     Error,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoteDownloadTransfer {
+    pub received_bytes: u64,
+    pub total_bytes: Option<u64>,
+}
+
 /// Transient process-wide notifications.
 #[derive(Debug, Clone)]
 pub enum GlobalEvent {
@@ -65,6 +71,7 @@ pub enum GlobalEvent {
         id: String,
         state: RemoteDownloadState,
         error: String,
+        transfer: Option<RemoteDownloadTransfer>,
     },
     QrLoginProgress {
         session_id: String,

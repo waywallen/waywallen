@@ -3,6 +3,7 @@ use super::*;
 use crate::plugin::i18n::LocalizedText;
 
 const MAX_LOCALIZED_ARGUMENTS: usize = 16;
+const MAX_PROVIDER_DATA_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(transparent)]
@@ -24,8 +25,10 @@ pub(super) struct DiscoverCapability {
     pub(super) supports_details: bool,
     pub(super) supports_download: bool,
     pub(super) supports_resolve: bool,
+    pub(super) pagination: DiscoverPagination,
     pub(super) remote: Option<RemoteCapability>,
     pub(super) remote_hint: LocalizedText,
+    pub(super) download_action: DiscoverDownloadAction,
     pub(super) sorts: Vec<DiscoverSort>,
     pub(super) filters: Vec<DiscoverFilter>,
     /// The plugin exposes `discover.tags(ctx)`; the daemon calls it to refresh
@@ -68,6 +71,7 @@ pub(super) struct LoadedPluginInfo {
     pub(super) display_name: LocalizedText,
     pub(super) plugin_id: String,
     pub(super) version: String,
+    entry_version: u32,
     pub(super) capabilities: PluginCapabilities,
     pub(super) settings: Vec<SourceSetting>,
     pub(super) actions: Vec<SourceAction>,
@@ -556,6 +560,21 @@ impl LuaPluginRuntime {
         }
     }
 
+    fn optional_dimension(tbl: &LuaTable, key: &str) -> Option<u32> {
+        match tbl.get::<LuaValue>(key).ok()? {
+            LuaValue::Integer(value) => u32::try_from(value).ok().filter(|value| *value > 0),
+            LuaValue::Number(value)
+                if value.is_finite()
+                    && value > 0.0
+                    && value <= u32::MAX as f64
+                    && value.fract() == 0.0 =>
+            {
+                Some(value as u32)
+            }
+            _ => None,
+        }
+    }
+
     fn redact_localized_text(value: LocalizedText) -> LocalizedText {
         match value {
             LocalizedText::Raw(value) => LocalizedText::raw(redact_secrets(&value)),
@@ -889,6 +908,27 @@ impl LuaPluginRuntime {
         Ok(())
     }
 
+    fn optional_download_action(
+        tbl: &LuaTable,
+        context: &str,
+        supports_download: bool,
+    ) -> Result<Option<DiscoverDownloadAction>> {
+        let Some(action) = Self::optional_table(tbl, "download_action", context)? else {
+            return Ok(None);
+        };
+        if !supports_download {
+            return Err(Error::Internal(anyhow!(
+                "{context}.download_action requires download capability"
+            )));
+        }
+        let context = format!("{context}.download_action");
+        Ok(Some(DiscoverDownloadAction {
+            enabled: Self::optional_bool(&action, "enabled", &context, true)?,
+            label: Self::optional_localized_text(&action, "label", &context)?,
+            tooltip: Self::optional_localized_text(&action, "tooltip", &context)?,
+        }))
+    }
+
     fn parse_plugin_info(
         &self,
         module: &LuaTable,
@@ -988,6 +1028,26 @@ impl LuaPluginRuntime {
                 }
                 let discover_api = Self::require_module_table(module, "discover")?;
                 Self::require_table_function(&discover_api, "search", "module.discover")?;
+                let pagination = match Self::optional_string(
+                    &discover_tbl,
+                    "pagination",
+                    "info().capabilities.discover",
+                )?
+                .as_str()
+                {
+                    "" | "page" => DiscoverPagination::Page,
+                    "cursor" if entry_version >= ENTRY_VERSION_V5 => DiscoverPagination::Cursor,
+                    "cursor" => {
+                        return Err(Error::Internal(anyhow!(
+                            "cursor pagination requires Lua entry_version 5"
+                        )))
+                    }
+                    _ => {
+                        return Err(Error::Internal(anyhow!(
+                            "info().capabilities.discover.pagination must be page or cursor"
+                        )))
+                    }
+                };
                 let supports_details = Self::optional_bool(
                     &discover_tbl,
                     "details",
@@ -1092,12 +1152,19 @@ impl LuaPluginRuntime {
                     supports_details,
                     supports_download,
                     supports_resolve,
+                    pagination,
                     remote,
                     remote_hint: Self::optional_localized_text(
                         &discover_tbl,
                         "remote_hint",
                         "info().capabilities.discover",
                     )?,
+                    download_action: Self::optional_download_action(
+                        &discover_tbl,
+                        "info().capabilities.discover",
+                        supports_download,
+                    )?
+                    .unwrap_or_default(),
                     sorts,
                     filters,
                     dynamic_tags,
@@ -1156,17 +1223,17 @@ impl LuaPluginRuntime {
         }
 
         let has_action_surface = !actions.is_empty() || !status.is_empty();
-        if has_action_surface != actions_api.is_some() {
+        let supports_download = discover
+            .as_ref()
+            .is_some_and(|value| value.supports_download);
+        if (has_action_surface && actions_api.is_none())
+            || (!has_action_surface && actions_api.is_some() && !supports_download)
+        {
             return Err(Error::Internal(anyhow!(
                 "module.actions presence must match declared actions/status"
             )));
         }
-        if has_action_surface {
-            let actions_api = actions_api.as_ref().ok_or_else(|| {
-                Error::Internal(anyhow!(
-                    "module.actions table required for declared actions/status"
-                ))
-            })?;
+        if let Some(actions_api) = &actions_api {
             Self::require_table_function(actions_api, "status", "module.actions")?;
             if actions.iter().any(|action| {
                 matches!(
@@ -1208,6 +1275,7 @@ impl LuaPluginRuntime {
             display_name,
             plugin_id: plugin_id.to_owned(),
             version: plugin_version.to_owned(),
+            entry_version,
             capabilities: PluginCapabilities {
                 source,
                 source_item_remove,
@@ -1791,6 +1859,7 @@ impl LuaPluginRuntime {
                 width: tbl.get::<u32>("width").ok(),
                 height: tbl.get::<u32>("height").ok(),
                 content_rating: tbl.get::<String>("content_rating").ok(),
+                can_remove: tbl.get::<Option<bool>>("can_remove")?,
                 // Daemon-only (filled from DB on read); scan leaves it None.
                 modified_at: None,
                 create_at: 0,
@@ -1809,6 +1878,10 @@ impl LuaPluginRuntime {
 
     fn install_json_context(&self, ctx: &LuaTable) -> LuaResult<()> {
         let json = mlua_extra::json::create_nullable_module(&self.lua)?;
+        json.set(
+            "strict",
+            mlua_extra::json::strict::create_module(&self.lua)?,
+        )?;
         let parse = json.get::<LuaFunction>("parse")?;
         let encode = json.get::<LuaFunction>("encode")?;
         ctx.set("json_parse", parse)?;
@@ -2001,6 +2074,55 @@ impl LuaPluginRuntime {
         })?;
         ctx.set("remove_dir", remove_dir_fn.clone())?;
 
+        let artifact_plugin = plugin_name.map(str::to_owned);
+        ctx.set(
+            "remote_artifact_root",
+            self.lua.create_function(move |_, resource: String| {
+                let name = artifact_plugin
+                    .as_deref()
+                    .ok_or_else(|| mlua::Error::external("remote artifact has no owning source"))?;
+                crate::remote_asset::artifact_root(
+                    &crate::settings::remote_content_dir(name),
+                    name,
+                    Path::new(&resource),
+                )
+                .map_err(mlua::Error::external)?
+                .into_os_string()
+                .into_string()
+                .map_err(|_| mlua::Error::external("remote artifact root is not UTF-8"))
+            })?,
+        )?;
+
+        let artifact_plugin = plugin_name.map(str::to_owned);
+        ctx.set(
+            "remote_artifact",
+            self.lua.create_function(move |lua, resource: String| {
+                let name = artifact_plugin
+                    .as_deref()
+                    .ok_or_else(|| mlua::Error::external("remote artifact has no owning source"))?;
+                let installed = crate::remote_asset::load_resource(
+                    &crate::settings::remote_content_dir(name),
+                    name,
+                    Path::new(&resource),
+                )
+                .map_err(mlua::Error::external)?;
+                let root = installed
+                    .root
+                    .into_os_string()
+                    .into_string()
+                    .map_err(|_| mlua::Error::external("remote artifact root is not UTF-8"))?;
+                let metadata = serde_json::to_vec(&installed.artifact.metadata)
+                    .map_err(mlua::Error::external)?;
+                let artifact = lua.create_table()?;
+                artifact.set("root", root)?;
+                artifact.set(
+                    "metadata",
+                    mlua_extra::json::strict::decode(lua, &metadata)?,
+                )?;
+                Ok(artifact)
+            })?,
+        )?;
+
         let fs = self.lua.create_table()?;
         fs.set("glob", glob_fn)?;
         fs.set("list_dirs", list_dirs_fn)?;
@@ -2012,6 +2134,7 @@ impl LuaPluginRuntime {
         fs.set("size", file_size_fn)?;
         fs.set("remove_file", remove_file_fn)?;
         fs.set("remove_dir", remove_dir_fn)?;
+        super::filesystem::install(&self.lua, &fs)?;
         ctx.set("fs", fs)?;
 
         // ctx.probe(path) -> table|nil
@@ -2124,6 +2247,7 @@ impl LuaPluginRuntime {
         // ctx.http:get(url):headers({...}):send()
         ctx.set("http", self.http_view())?;
         ctx.set("html", mlua_extra::html::create_module(&self.lua)?)?;
+        ctx.set("xml", mlua_extra::xml::create_module(&self.lua)?)?;
         ctx.set("url", mlua_extra::url::create_module(&self.lua)?)?;
 
         Ok(ctx)
@@ -2168,6 +2292,7 @@ impl LuaPluginRuntime {
         entry_tbl.set("wp_type", entry.wp_type.clone())?;
         entry_tbl.set("path", entry.resource.clone())?;
         entry_tbl.set("resource", entry.resource.clone())?;
+        entry_tbl.set("can_remove", entry.can_remove)?;
         if let Some(p) = &entry.preview {
             entry_tbl.set("preview", p.clone())?;
         }
@@ -2383,6 +2508,112 @@ impl LuaPluginRuntime {
     // -----------------------------------------------------------------------
     // Discover API — generic remote browsing relayed into plugin Lua.
 
+    fn validate_discover_cursor(cursor: &str) -> Result<()> {
+        if cursor.len() > MAX_DISCOVER_CURSOR_BYTES || cursor.chars().any(char::is_control) {
+            return Err(Error::InvalidArgument(format!(
+                "discover cursor must be at most {MAX_DISCOVER_CURSOR_BYTES} bytes without control characters"
+            )));
+        }
+        Ok(())
+    }
+
+    fn optional_discover_url(tbl: &LuaTable, key: &str, context: &str) -> Result<String> {
+        let url = Self::optional_string(tbl, key, context)?;
+        if !url.is_empty() {
+            let parsed = reqwest::Url::parse(&url).ok();
+            if url.len() > 4096
+                || url.chars().any(char::is_whitespace)
+                || url.chars().any(char::is_control)
+                || !parsed.is_some_and(|parsed| {
+                    matches!(parsed.scheme(), "http" | "https")
+                        && parsed.host_str().is_some()
+                        && parsed.username().is_empty()
+                        && parsed.password().is_none()
+                })
+            {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.{key} must be an http or https URL without credentials"
+                )));
+            }
+        }
+        Ok(url)
+    }
+
+    fn discover_detail_fields(
+        result: &LuaTable,
+        entry_version: u32,
+    ) -> Result<Vec<DiscoverDetailField>> {
+        let context = "module.discover.details result";
+        if entry_version < ENTRY_VERSION_V5 {
+            Self::require_field_absent(result, "fields", context)?;
+            return Ok(Vec::new());
+        }
+        let Some(fields) = Self::optional_table(result, "fields", context)? else {
+            return Ok(Vec::new());
+        };
+        let count = fields.raw_len();
+        if count > 32 {
+            return Err(Error::Internal(anyhow!("{context}.fields exceeds 32 rows")));
+        }
+        for pair in fields.clone().pairs::<LuaValue, LuaValue>() {
+            let (key, _) = pair?;
+            if !matches!(key, LuaValue::Integer(index) if index > 0 && index as usize <= count) {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.fields must be a dense sequence"
+                )));
+            }
+        }
+        let mut out = Vec::with_capacity(count);
+        let mut keys = HashSet::new();
+        for index in 1..=count {
+            let field: LuaTable = fields.raw_get(index).map_err(|error| {
+                Error::Internal(anyhow!(
+                    "{context}.fields[{index}] must be a table: {error}"
+                ))
+            })?;
+            let context = format!("{context}.fields[{index}]");
+            let key = Self::require_string(&field, "key", &context)?;
+            if key.is_empty()
+                || key.len() > 128
+                || !key
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+                || !keys.insert(key.clone())
+            {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.key must be a unique identifier of at most 128 bytes"
+                )));
+            }
+            let label = Self::require_localized_text(&field, "label", &context)?;
+            if label.text().len() > 512
+                || label.message().is_some_and(|message| {
+                    message
+                        .arguments
+                        .iter()
+                        .any(|argument| argument.len() > 512)
+                })
+            {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.label exceeds 512 bytes"
+                )));
+            }
+            let value = Self::require_string(&field, "value", &context)?;
+            if value.len() > 8192 {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.value exceeds 8192 bytes"
+                )));
+            }
+            let url = Self::optional_discover_url(&field, "url", &context)?;
+            out.push(DiscoverDetailField {
+                key,
+                label,
+                value,
+                url,
+            });
+        }
+        Ok(out)
+    }
+
     /// List plugins that opt into discovery and their declared sort/filter
     /// options.
     pub fn discover_sources(&self) -> Result<Vec<DiscoverSourceInfo>> {
@@ -2396,8 +2627,10 @@ impl LuaPluginRuntime {
                 name: info.name.clone(),
                 display_name: info.display_name.clone(),
                 supports_search: disc.supports_search,
+                pagination: disc.pagination,
                 remote_capability: disc.remote,
                 remote_hint: disc.remote_hint.clone(),
+                download_action: disc.download_action.clone(),
                 sorts: disc.sorts.clone(),
                 filters: disc.filters.clone(),
                 owner_plugin_id: info.plugin_id.clone(),
@@ -2412,7 +2645,7 @@ impl LuaPluginRuntime {
     }
 
     /// Relay a discover/search request to a plugin's `discover.search(ctx, params)`
-    /// Lua function. `params` is `{ query, sort, page, tags }`.
+    /// Lua function with page-based pagination.
     pub async fn call_discover(
         &mut self,
         plugin_name: &str,
@@ -2420,6 +2653,19 @@ impl LuaPluginRuntime {
         sort: &str,
         page: u32,
         tags: &[String],
+    ) -> Result<DiscoverSearchResult> {
+        self.call_discover_with_cursor(plugin_name, query, sort, page, tags, "")
+            .await
+    }
+
+    pub async fn call_discover_with_cursor(
+        &mut self,
+        plugin_name: &str,
+        query: &str,
+        sort: &str,
+        page: u32,
+        tags: &[String],
+        cursor: &str,
     ) -> Result<DiscoverSearchResult> {
         let callbacks = self
             .callbacks
@@ -2434,6 +2680,22 @@ impl LuaPluginRuntime {
             .as_ref()
             .ok_or_else(|| Error::DiscoverUnsupported(plugin_name.to_string()))?;
         Self::validate_discover_filter_values(plugin_name, discover, tags)?;
+        Self::validate_discover_cursor(cursor)?;
+        match discover.pagination {
+            DiscoverPagination::Page if !cursor.is_empty() => {
+                return Err(Error::InvalidArgument(
+                    "page pagination does not accept a cursor".into(),
+                ));
+            }
+            DiscoverPagination::Cursor if page > 1 && cursor.is_empty() => {
+                return Err(Error::InvalidArgument(
+                    "cursor pagination requires the preceding next_cursor for later pages".into(),
+                ));
+            }
+            _ => {}
+        }
+        let pagination = discover.pagination;
+        let entry_version = info.entry_version;
         let default_wp_type = info
             .capabilities
             .source
@@ -2452,6 +2714,9 @@ impl LuaPluginRuntime {
         params.set("query", query)?;
         params.set("sort", sort)?;
         params.set("page", page)?;
+        if !cursor.is_empty() {
+            params.set("cursor", cursor)?;
+        }
         let tags_tbl = self.lua.create_table()?;
         for (i, t) in tags.iter().enumerate() {
             tags_tbl.set(i + 1, t.clone())?;
@@ -2495,6 +2760,8 @@ impl LuaPluginRuntime {
                         value
                     }
                 },
+                width: Self::optional_dimension(&row, "width"),
+                height: Self::optional_dimension(&row, "height"),
                 extra: parse_lua_string_map(&row, "extra", &context)?,
             });
         }
@@ -2504,8 +2771,38 @@ impl LuaPluginRuntime {
                 plugin: plugin_name.to_string(),
                 message: format!("discover.search result.has_more required: {e}"),
             })?;
+        if entry_version < ENTRY_VERSION_V5 {
+            Self::require_field_absent(&result, "next_cursor", "module.discover.search result")?;
+        }
+        let next_cursor =
+            Self::optional_string(&result, "next_cursor", "module.discover.search result")?;
+        Self::validate_discover_cursor(&next_cursor)?;
+        match pagination {
+            DiscoverPagination::Page if !next_cursor.is_empty() => {
+                return Err(Error::Internal(anyhow!(
+                    "page pagination must not return next_cursor"
+                )));
+            }
+            DiscoverPagination::Cursor => {
+                if has_more == next_cursor.is_empty() {
+                    return Err(Error::Internal(anyhow!(
+                        "cursor pagination has_more must match a nonempty next_cursor"
+                    )));
+                }
+                if !next_cursor.is_empty() && next_cursor == cursor {
+                    return Err(Error::Internal(anyhow!(
+                        "cursor pagination returned the current cursor again"
+                    )));
+                }
+            }
+            _ => {}
+        }
         self.persist_state(plugin_name)?;
-        Ok(DiscoverSearchResult { items, has_more })
+        Ok(DiscoverSearchResult {
+            items,
+            has_more,
+            next_cursor,
+        })
     }
 
     /// Fetch a legacy plugin's live tag taxonomy via `discover.tags(ctx)`.
@@ -2601,6 +2898,11 @@ impl LuaPluginRuntime {
                 "author_avatar_url",
                 "module.discover.details result",
             )?,
+            author_url: Self::optional_discover_url(
+                &result,
+                "author_url",
+                "module.discover.details result",
+            )?,
             description: Self::require_string(
                 &result,
                 "description",
@@ -2612,6 +2914,7 @@ impl LuaPluginRuntime {
             tags: Self::require_string_sequence(&result, "tags", "module.discover.details result")?,
             web_url: Self::optional_string(&result, "web_url", "module.discover.details result")?,
             extra: parse_lua_string_map(&result, "extra", "module.discover.details result")?,
+            fields: Self::discover_detail_fields(&result, info.entry_version)?,
         };
         self.persist_state(plugin_name)?;
         Ok(details)
@@ -2649,14 +2952,93 @@ impl LuaPluginRuntime {
                 message: redact_secrets(&e.to_string()),
             })?;
 
-        let download = DiscoverDownload {
-            wp_type: Self::require_string(&result, "wp_type", "module.discover.download result")?,
+        let archive = result.get::<LuaValue>("archive")?;
+        let attribution = result.get::<LuaValue>("attribution")?;
+        let provider_data = result.get::<LuaValue>("provider_data")?;
+        if info.entry_version < ENTRY_VERSION_V6 {
+            if !matches!(archive, LuaValue::Nil) {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.archive requires Lua entry_version 6"
+                )));
+            }
+            if !matches!(attribution, LuaValue::Nil) {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.attribution requires Lua entry_version 6"
+                )));
+            }
+            if !matches!(provider_data, LuaValue::Nil) {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.provider_data requires Lua entry_version 6"
+                )));
+            }
+        }
+        let format = match archive {
+            LuaValue::Nil => DownloadFormat::File,
+            LuaValue::String(value) if value.to_str()?.as_ref() == "zip" => {
+                if !discover.supports_resolve {
+                    return Err(Error::Internal(anyhow!(
+                        "module.discover.download result.archive requires discover.resolve capability"
+                    )));
+                }
+                DownloadFormat::Zip
+            }
+            _ => {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.archive must be 'zip' when present"
+                )))
+            }
+        };
+        let attribution = match attribution {
+            LuaValue::Nil => None,
+            LuaValue::Table(value) => {
+                let context = "module.discover.download result.attribution";
+                Some(DiscoverAttribution {
+                    author: Self::optional_string(&value, "author", context)?,
+                    author_url: Self::optional_string(&value, "author_url", context)?,
+                    license: Self::optional_string(&value, "license", context)?,
+                    license_url: Self::optional_string(&value, "license_url", context)?,
+                    requirements: Self::optional_string(&value, "requirements", context)?,
+                })
+            }
+            _ => {
+                return Err(Error::Internal(anyhow!(
+                    "module.discover.download result.attribution must be a table when present"
+                )))
+            }
+        };
+        let provider_data = match provider_data {
+            LuaValue::Nil => None,
+            value => {
+                let encoded = mlua_extra::json::strict::encode(&value).map_err(|_| {
+                    Error::Internal(anyhow!(
+                        "module.discover.download result.provider_data must be a JSON object"
+                    ))
+                })?;
+                if encoded.len() > MAX_PROVIDER_DATA_BYTES {
+                    return Err(Error::Internal(anyhow!(
+                        "module.discover.download result.provider_data exceeds 64 KiB"
+                    )));
+                }
+                let value = serde_json::from_slice(&encoded).map_err(|_| {
+                    Error::Internal(anyhow!(
+                        "module.discover.download result.provider_data must be a JSON object"
+                    ))
+                })?;
+                Some(value)
+            }
+        };
+        let transfer = DiscoverTransfer {
             url: Self::optional_string(&result, "url", "module.discover.download result")?,
             filename: Self::optional_string(
                 &result,
                 "filename",
                 "module.discover.download result",
             )?,
+            format,
+            resolve: discover.supports_resolve,
+        };
+        let metadata = DiscoverMetadata {
+            wp_type: Self::require_string(&result, "wp_type", "module.discover.download result")?,
             title: Self::require_string(&result, "title", "module.discover.download result")?,
             preview_url: Self::optional_string(
                 &result,
@@ -2683,9 +3065,11 @@ impl LuaPluginRuntime {
             width: result.get::<u32>("width").ok(),
             height: result.get::<u32>("height").ok(),
             content_rating: result.get::<String>("content_rating").ok(),
+            attribution,
+            provider_data,
         };
         self.persist_state(plugin_name)?;
-        Ok(download)
+        Ok(DiscoverDownload { transfer, metadata })
     }
 
     /// Classify a directory fetched by a download provider. `dir` is the absolute
@@ -2695,6 +3079,7 @@ impl LuaPluginRuntime {
         plugin_name: &str,
         id: &str,
         dir: &str,
+        metadata: Option<&DiscoverMetadata>,
     ) -> Result<DiscoverResolve> {
         let callbacks = self
             .callbacks
@@ -2720,6 +3105,13 @@ impl LuaPluginRuntime {
         let params = self.lua.create_table()?;
         params.set("id", id.to_string())?;
         params.set("dir", dir.to_string())?;
+        if let Some(metadata) = metadata {
+            let encoded = serde_json::to_vec(metadata)?;
+            params.set(
+                "metadata",
+                mlua_extra::json::strict::decode(&self.lua, &encoded)?,
+            )?;
+        }
         let result: LuaTable = self
             .call_plugin_callback_async(plugin_name, &resolve_fn, (ctx, params))
             .await
@@ -2824,7 +3216,12 @@ impl LuaPluginRuntime {
     pub async fn call_action_status(
         &mut self,
         plugin_name: &str,
-    ) -> Result<(Vec<SourceAction>, Vec<SourceStatus>, String)> {
+    ) -> Result<(
+        Vec<SourceAction>,
+        Vec<SourceStatus>,
+        String,
+        DiscoverDownloadAction,
+    )> {
         let avatar_url = self
             .check_lifecycle(plugin_name)
             .await?
@@ -2837,12 +3234,23 @@ impl LuaPluginRuntime {
             .clone();
         let mut actions = info.actions;
         let mut status = info.status;
+        let supports_download = info
+            .capabilities
+            .discover
+            .as_ref()
+            .is_some_and(|value| value.supports_download);
+        let mut download_action = info
+            .capabilities
+            .discover
+            .as_ref()
+            .map(|value| value.download_action.clone())
+            .unwrap_or_default();
         let callbacks = self
             .callbacks
             .get(plugin_name)
             .ok_or_else(|| Error::SourcePluginNotFound(plugin_name.to_string()))?;
         let Some(status_key) = callbacks.actions_status.as_ref() else {
-            return Ok((actions, status, avatar_url));
+            return Ok((actions, status, avatar_url, download_action));
         };
         let status_fn: LuaFunction = self.lua.registry_value(status_key)?;
         let ctx = self.build_remote_ctx(plugin_name)?;
@@ -2885,8 +3293,15 @@ impl LuaPluginRuntime {
                 }
             }
         }
+        if let Some(value) = Self::optional_download_action(
+            &result,
+            "module.actions.status result",
+            supports_download,
+        )? {
+            download_action = value;
+        }
         self.persist_state(plugin_name)?;
-        Ok((actions, status, avatar_url))
+        Ok((actions, status, avatar_url, download_action))
     }
 
     pub async fn invoke_action(
@@ -3287,7 +3702,7 @@ impl LuaPluginRuntime {
         plugin_name: &str,
         entry: &WallpaperEntry,
         libraries: &[String],
-    ) -> Result<()> {
+    ) -> Result<SourceRemoval> {
         let callbacks = self
             .callbacks
             .get(plugin_name)
@@ -3307,14 +3722,47 @@ impl LuaPluginRuntime {
         )?;
         let ctx = self.build_ctx(Some(plugin_name), libraries)?;
         let entry_tbl = self.wallpaper_entry_table(entry)?;
-        self.call_plugin_callback_async::<()>(plugin_name, &remove_fn, (ctx, entry_tbl))
-            .await
-            .map_err(|e| Error::SourceItemRemoveFailed {
-                plugin: plugin_name.to_string(),
-                message: redact_secrets(&e.to_string()),
-            })?;
+        let artifact = Arc::new(StdMutex::new(None::<crate::remote_asset::Removal>));
+        let retained = artifact.clone();
+        let source_id = plugin_name.to_owned();
+        let expected_resource = entry.resource.clone();
+        ctx.set(
+            "remove_remote_artifact",
+            self.lua.create_async_function(move |_, resource: String| {
+                let retained = retained.clone();
+                let source_id = source_id.clone();
+                let expected = expected_resource.clone();
+                async move {
+                    if resource != expected || retained.lock().unwrap().is_some() {
+                        return Err(mlua::Error::external(
+                            "removal must identify the selected artifact once",
+                        ));
+                    }
+                    let receipt = crate::remote_asset::remove(
+                        &crate::settings::remote_content_dir(&source_id),
+                        &source_id,
+                        Path::new(&resource),
+                    )
+                    .await
+                    .map_err(mlua::Error::external)?;
+                    let removed = receipt.removed;
+                    *retained.lock().unwrap() = Some(receipt);
+                    Ok(removed)
+                }
+            })?,
+        )?;
+        let result = self
+            .call_plugin_callback_async::<()>(plugin_name, &remove_fn, (ctx, entry_tbl))
+            .await;
+        let removal = SourceRemoval {
+            _artifact: artifact.lock().unwrap().take(),
+        };
+        result.map_err(|e| Error::SourceItemRemoveFailed {
+            plugin: plugin_name.to_string(),
+            message: redact_secrets(&e.to_string()),
+        })?;
         self.persist_state(plugin_name)?;
-        Ok(())
+        Ok(removal)
     }
 
     pub fn plugin_version(&self, plugin_name: &str) -> Option<String> {

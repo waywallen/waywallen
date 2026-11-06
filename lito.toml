@@ -4,14 +4,19 @@ members = [
   "bridge",
   "plugins",
   "plugins/org.waywallen.image",
+  "plugins/org.waywallen.gltf",
+  "plugins/org.waywallen.sketchfab",
   "plugins/org.waywallen.video",
   "plugins/org.waywallen.wallhaven",
   "tools/i18n",
   "tools/i18n/po",
   "ui",
+  "ui/backend",
 ]
 default-members = [
   "plugins/org.waywallen.image",
+  "plugins/org.waywallen.gltf",
+  "plugins/org.waywallen.sketchfab",
   "plugins/org.waywallen.video",
   "plugins/org.waywallen.wallhaven",
   "tools/i18n",
@@ -24,6 +29,7 @@ version = "0.5.0"
 [workspace.dependencies]
 waywallen-bridge = { path = "bridge" }
 waywallen-plugin-common = { path = "plugins" }
+waywallen-backend-connection = { path = "ui/backend" }
 rstd-cppstd = { version = "0.1.7" }
 rstd-std = { version = "0.1.7" }
 rstd-json = { version = "0.1.7" }
@@ -32,10 +38,11 @@ rstd-log = { version = "0.1.7" }
 rstd-toml = { version = "0.1.7" }
 lito-qt = { version = "0.1.1" }
 vvk = { version = "0.1.0" }
+ncrequest = { version = "0.2.1" }
 luato = { git = "https://github.com/litocpp/luato.git" }
 wavsen = { git = "https://github.com/hypengw/wavsen.git" }
-ncrequest = { git = "https://github.com/hypengw/ncrequest.git" }
 qextra = { git = "https://github.com/hypengw/QExtra.git" }
+vecgltf = { git = "https://github.com/vecren/vecgltf.git" }
 
 [workspace.external-dependencies.pkg-config]
 gbm = { module = "gbm" }
@@ -69,6 +76,7 @@ components = [
   "Core",
   "DBus",
   "LinguistTools",
+  "Network",
   "Protobuf",
   "ProtobufQuick",
   "ProtobufWellKnownTypes",

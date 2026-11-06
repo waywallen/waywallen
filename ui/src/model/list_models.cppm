@@ -7,6 +7,7 @@ module;
 
 export module waywallen:model.list_models;
 export import :msg.backend_msg;
+export import :model.grid;
 import qextra;
 import rstd.cppstd;
 
@@ -17,7 +18,7 @@ template<typename TItem, typename CRTP>
 using MetaListCRTP = kstore::QMetaListModelCRTP<TItem, CRTP, kstore::ListStoreType::Share,
                                                 std::pmr::polymorphic_allocator<TItem>>;
 
-class WallpaperListModel : public kstore::QGadgetListModel,
+class WallpaperListModel : public GridListModel,
                            public MetaListCRTP<model::Wallpaper, WallpaperListModel> {
     Q_OBJECT
     QML_ANONYMOUS

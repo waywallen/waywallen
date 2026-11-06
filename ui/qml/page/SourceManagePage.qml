@@ -22,11 +22,25 @@ MD.Page {
 
     actions: [
         MD.Action {
+            icon.name: MD.Token.icon.search
+            text: qsTr("Auto detect libraries")
+            enabled: !autoDetectQuery.querying
+            onTriggered: autoDetectQuery.reload()
+        },
+        MD.Action {
             icon.name: MD.Token.icon.add
             text: qsTr("Add library")
             onTriggered: root.MD.MProp.page.pushItem('waywallen.ui/AddLibraryPage')
         }
     ]
+
+    W.LibraryAutoDetectQuery {
+        id: autoDetectQuery
+        onFinished: {
+            if (addedCount === 0)
+                W.Action.toast(qsTr("No new libraries found"));
+        }
+    }
 
     W.LibraryRemoveQuery {
         id: removeQuery

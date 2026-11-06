@@ -107,9 +107,15 @@ Notify::Notify(QObject* parent): QObject(parent) {
                 Q_EMIT displayConnectionFailed(
                     f.clientName(), f.clientProtocolVersion(), f.errorCode(), f.reason());
             } else if (evt.hasRemoteDownloadProgress()) {
-                const auto& p = evt.remoteDownloadProgress();
+                const auto& p        = evt.remoteDownloadProgress();
+                const auto& transfer = p.transfer();
                 AppStore::instance()->setRemoteAcquisitionState(
-                    p.sourceId(), p.id_proto(), static_cast<int>(p.state()));
+                    p.sourceId(),
+                    p.id_proto(),
+                    static_cast<int>(p.state()),
+                    p.hasTransfer(),
+                    transfer.receivedBytes(),
+                    transfer.hasTotalBytes() ? transfer.totalBytes() : 0);
                 Q_EMIT remoteDownloadProgress(
                     p.sourceId(), p.id_proto(), static_cast<int>(p.state()), p.error());
             } else if (evt.hasQrLoginProgress()) {

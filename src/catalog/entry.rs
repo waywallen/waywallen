@@ -45,6 +45,9 @@ pub struct WallpaperEntry {
     /// "Mature"). Free-form string; the daemon doesn't interpret it.
     #[serde(default)]
     pub content_rating: Option<String>,
+    /// Scan-time deletion permission hint; never an execution-time authorization.
+    #[serde(default)]
+    pub can_remove: Option<bool>,
     /// File mtime in ms since epoch (DB `item.modified_at`). Daemon-only
     /// (filled on read for sorting); plugins do not set it.
     #[serde(default)]

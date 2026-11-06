@@ -59,7 +59,7 @@ impl LuaPluginRegistry {
         )
     }
 
-    pub(super) fn with_probe_and_state_store(
+    pub(crate) fn with_probe_and_state_store(
         probe: Arc<dyn MediaProbe>,
         state_store: crate::plugin::state_store::PluginStateStore,
     ) -> Result<Self> {
@@ -457,8 +457,10 @@ impl LuaPluginRegistry {
                 name: info.name.clone(),
                 display_name: info.display_name.clone(),
                 supports_search: disc.supports_search,
+                pagination: disc.pagination,
                 remote_capability: disc.remote,
                 remote_hint: disc.remote_hint.clone(),
+                download_action: disc.download_action.clone(),
                 sorts: disc.sorts.clone(),
                 filters: disc.filters.clone(),
                 owner_plugin_id: info.plugin_id.clone(),
@@ -532,10 +534,13 @@ impl LuaPluginRegistry {
             .collect();
         let mut sources = self.discover_sources()?;
         for source in &mut sources {
-            if let Some((actions, status, avatar_url)) = dynamic.get(&source.plugin_id) {
+            if let Some((actions, status, avatar_url, download_action)) =
+                dynamic.get(&source.plugin_id)
+            {
                 source.actions = actions.clone();
                 source.status = status.clone();
                 source.avatar_url = avatar_url.clone();
+                source.download_action = download_action.clone();
             }
         }
         Ok(sources)
@@ -549,11 +554,24 @@ impl LuaPluginRegistry {
         page: u32,
         tags: &[String],
     ) -> Result<DiscoverSearchResult> {
+        self.call_discover_with_cursor(plugin_name, query, sort, page, tags, "")
+            .await
+    }
+
+    pub async fn call_discover_with_cursor(
+        &self,
+        plugin_name: &str,
+        query: &str,
+        sort: &str,
+        page: u32,
+        tags: &[String],
+        cursor: &str,
+    ) -> Result<DiscoverSearchResult> {
         self.handle(plugin_name)?
             .runtime
             .lock()
             .await
-            .call_discover(plugin_name, query, sort, page, tags)
+            .call_discover_with_cursor(plugin_name, query, sort, page, tags, cursor)
             .await
     }
 
@@ -624,12 +642,13 @@ impl LuaPluginRegistry {
         plugin_name: &str,
         id: &str,
         dir: &str,
+        metadata: Option<&DiscoverMetadata>,
     ) -> Result<DiscoverResolve> {
         self.handle(plugin_name)?
             .runtime
             .lock()
             .await
-            .call_resolve(plugin_name, id, dir)
+            .call_resolve(plugin_name, id, dir, metadata)
             .await
     }
 
@@ -665,6 +684,10 @@ impl LuaPluginRegistry {
         })
     }
 
+    pub fn supports_entry_remove(&self, entry: &WallpaperEntry) -> bool {
+        entry.can_remove != Some(false) && self.supports_item_remove(&entry.plugin_name)
+    }
+
     pub fn supports_item_unsubscribe(&self, entry: &WallpaperEntry) -> bool {
         if entry.external_id.as_deref().is_none_or(str::is_empty) {
             return false;
@@ -687,7 +710,7 @@ impl LuaPluginRegistry {
         plugin_name: &str,
         entry: &WallpaperEntry,
         libraries: &[String],
-    ) -> Result<()> {
+    ) -> Result<SourceRemoval> {
         self.handle(plugin_name)?
             .runtime
             .lock()

@@ -23,6 +23,7 @@ DisplayListQuery::DisplayListQuery(QObject* parent): Query(parent) {}
 auto DisplayListQuery::displays() const -> const QVariantList& { return m_displays; }
 
 void DisplayListQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
@@ -30,10 +31,10 @@ void DisplayListQuery::reload() {
     req.setDisplayList(proto::DisplayListRequest {});
 
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
             auto& list_rsp = rsp.displayList();
@@ -295,16 +296,17 @@ void DisplayRenameQuery::reload() {
 CanvasListQuery::CanvasListQuery(QObject* parent): Query(parent) {}
 
 void CanvasListQuery::reload() {
+    const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
     proto::Request req;
     req.setCanvasList(proto::CanvasListRequest {});
     auto self = QWatcher { this };
-    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
-        if (! self) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
         self->inspect_set(result, [](const proto::Response& response) {
             if (auto* manager = DisplayManager::instance()) {
                 manager->replaceCanvases(response.canvasList().canvases(),

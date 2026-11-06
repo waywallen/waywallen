@@ -24,6 +24,7 @@ sources = [
   "src/mod.cppm",
   "src/model/filter_rule_model.cpp",
   "src/model/filter_rule_model.cppm",
+  "src/model/grid_model.cppm",
   "src/model/list_models.cpp",
   "src/model/list_models.cppm",
   "src/model/remote_model.cpp",
@@ -130,9 +131,8 @@ workspace = true
 [dependencies.waywallen-plugin-i18n]
 path = "../tools/i18n/po"
 
-[dependencies.ncrequest]
+[dependencies.waywallen-backend-connection]
 workspace = true
-features = ["qt"]
 
 [dependencies.qextra]
 workspace = true

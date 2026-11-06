@@ -12,7 +12,7 @@ function M.info()
                 scan = true,
                 auto_detect = true,
                 library_label = tr("Image Folder"),
-                library_hint = tr([[A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF.]]),
+                library_hint = tr([[A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Auto-detect also finds installed KDE and GNOME system wallpapers.]]),
             },
             wallpaper = {
                 properties = true,

@@ -1114,6 +1114,22 @@ message RemoteSourceInfo {
   repeated RemoteFilterDef filters = 15;
   PluginMessage display_name_text = 16;
   PluginMessage remote_hint_text = 17;
+  RemotePagination pagination = 18;
+  DownloadAction download_action = 19;
+}
+
+message DownloadAction {
+  bool enabled = 1;
+  string label = 2;
+  string tooltip = 3;
+  PluginMessage label_text = 4;
+  PluginMessage tooltip_text = 5;
+}
+
+enum RemotePagination {
+  REMOTE_PAGINATION_UNSPECIFIED = 0;
+  REMOTE_PAGINATION_PAGE = 1;
+  REMOTE_PAGINATION_CURSOR = 2;
 }
 
 enum RemoteCapability {
@@ -1205,6 +1221,10 @@ message RemoteItem {
   // Optional picture of the author, as a URL the source plugin supplied.
   // Empty when the source has none; the UI sizes it, not the source.
   string author_avatar_url = 8;
+  // Resource dimensions, not the potentially cropped preview dimensions.
+  // Absent when the search result has no reliable dimensions.
+  optional uint32 width = 9;
+  optional uint32 height = 10;
 }
 
 message RemoteSearchRequest {
@@ -1213,11 +1233,13 @@ message RemoteSearchRequest {
   string sort_key = 3;
   uint32 page = 4;
   repeated string required_tags = 5;
+  string cursor = 6;
 }
 message RemoteSearchResponse {
   repeated RemoteItem items = 1;
   bool   has_more = 2;
   string error = 3;
+  string next_cursor = 4;
 }
 
 message RemoteDownloadRequest {
@@ -1256,6 +1278,16 @@ message RemoteDetailsResponse {
   // Same as RemoteItem.author_avatar_url, for sources that only learn the
   // author from their per-item endpoint.
   string author_avatar_url = 9;
+  repeated RemoteDetailField fields = 10;
+  string author_url = 11;
+}
+
+message RemoteDetailField {
+  string key = 1;
+  string label = 2;
+  string value = 3;
+  string url = 4;
+  PluginMessage label_text = 5;
 }
 
 enum RemoteDownloadState {
@@ -1271,6 +1303,12 @@ message RemoteDownloadProgress {
   string id = 2;
   RemoteDownloadState state = 3;
   string error = 4;
+  RemoteDownloadTransfer transfer = 5;
+}
+
+message RemoteDownloadTransfer {
+  uint64 received_bytes = 1;
+  optional uint64 total_bytes = 2;
 }
 
 enum SubscriptionState {

@@ -4,7 +4,7 @@ use super::*;
 
 /// Upsert tags by name. SQLite `COLLATE NOCASE` makes the unique
 /// index case-insensitive, so differently cased duplicates collapse.
-pub async fn upsert_tags(db: &DatabaseConnection, names: &[String]) -> Result<Vec<tag::Model>> {
+pub async fn upsert_tags(db: &impl ConnectionTrait, names: &[String]) -> Result<Vec<tag::Model>> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut unique_inputs: Vec<&str> = Vec::new();
     for n in names {
@@ -42,7 +42,7 @@ pub async fn upsert_tags(db: &DatabaseConnection, names: &[String]) -> Result<Ve
 /// Replace the complete tag set of an item. DELETE + INSERT in one
 /// transaction.
 pub async fn replace_item_tags(
-    db: &DatabaseConnection,
+    db: &(impl ConnectionTrait + TransactionTrait),
     item_id: i64,
     tag_ids: &[i64],
 ) -> Result<()> {

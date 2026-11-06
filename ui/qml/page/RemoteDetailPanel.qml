@@ -21,11 +21,16 @@ Item {
         const own = String(root.item?.authorAvatarUrl ?? "");
         return own.length > 0 ? own : String(root.details?.authorAvatarUrl ?? "");
     }
+    readonly property string authorUrl: String(root.details?.authorUrl ?? "")
     property int remoteCapability: 0
     property string remoteHint: ""
+    property var downloadAction: null
     property var tagOptions: []
     property var typeLabels: ({})
     property int downloadState: 0
+    property bool downloadTransferActive: false
+    property real downloadReceivedBytes: 0
+    property real downloadTotalBytes: 0
     property int subscriptionState: 0
 
     signal back
@@ -122,6 +127,22 @@ Item {
                     Layout.fillWidth: true
                     spacing: 8
                     visible: root.authorName.length > 0
+                    Accessible.role: root.authorUrl.length > 0 ? Accessible.Link : Accessible.StaticText
+                    Accessible.name: root.authorName
+                    Accessible.onPressAction: {
+                        if (root.authorUrl.length > 0)
+                            MD.Util.openUrlExternally(root.authorUrl);
+                    }
+
+                    TapHandler {
+                        enabled: root.authorUrl.length > 0
+                        onTapped: MD.Util.openUrlExternally(root.authorUrl)
+                    }
+
+                    HoverHandler {
+                        enabled: root.authorUrl.length > 0
+                        cursorShape: Qt.PointingHandCursor
+                    }
 
                     W.ThumbnailImage {
                         Layout.preferredWidth: 32
@@ -138,6 +159,7 @@ Item {
                     MD.Text {
                         Layout.fillWidth: true
                         text: qsTr("by %1").arg(root.authorName)
+                        textFormat: Text.PlainText
                         typescale: MD.Token.typescale.body_medium
                         color: MD.Token.color.on_surface_variant
                         wrapMode: Text.WordWrap
@@ -182,6 +204,12 @@ Item {
                         typescale: MD.Token.typescale.body_medium
                         color: MD.Token.color.on_surface
                     }
+                }
+
+                W.RemoteDetailFields {
+                    Layout.fillWidth: true
+                    fields: root.details?.fields ?? []
+                    labelForField: field => W.I18n.tr(field.labelText) || String(field.label ?? "")
                 }
 
                 Flow {
@@ -232,26 +260,78 @@ Item {
             spacing: 8
             visible: root.remoteCapability === 1 || root.remoteCapability === 2
 
-            MD.Button {
-                visible: root.remoteCapability === 1
+            ColumnLayout {
                 Layout.fillWidth: true
-                mdState.type: root.downloadState === 3 ? MD.Enum.BtFilledTonal : MD.Enum.BtFilled
-                enabled: root.downloadState === 0 || root.downloadState === 3
-                text: {
-                    switch (root.downloadState) {
-                    case 1: return qsTr("Pending");
-                    case 2: return qsTr("Downloading");
-                    case 3: return qsTr("Remove");
-                    case 4:
-                    case 5: return qsTr("Retry");
-                    default: return qsTr("Download");
+                spacing: 4
+                visible: root.remoteCapability === 1 && (root.downloadState === 1 || root.downloadState === 2)
+
+                MD.LinearIndicator {
+                    id: downloadProgress
+                    objectName: "remoteDownloadProgress"
+                    Layout.fillWidth: true
+                    indeterminate: !root.downloadTransferActive || root.downloadTotalBytes <= 0
+                    value: indeterminate ? 0 : Math.max(0, Math.min(1, root.downloadReceivedBytes / root.downloadTotalBytes))
+                    running: visible && indeterminate
+                    completionBehavior: MD.LinearIndicator.Keep
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: root.downloadTransferActive
+
+                    MD.Text {
+                        Layout.fillWidth: true
+                        typescale: MD.Token.typescale.body_small
+                        color: MD.Token.color.on_surface_variant
+                        text: root.downloadTotalBytes > 0
+                            ? W.I18n.formatBytes(root.downloadReceivedBytes) + " / " + W.I18n.formatBytes(root.downloadTotalBytes)
+                            : W.I18n.formatBytes(root.downloadReceivedBytes)
+                    }
+                    MD.Text {
+                        visible: !downloadProgress.indeterminate
+                        typescale: MD.Token.typescale.body_small
+                        color: MD.Token.color.on_surface_variant
+                        text: Math.floor(downloadProgress.value * 100) + "%"
                     }
                 }
-                onClicked: {
-                    if (root.downloadState === 3)
-                        root.removeRequested();
-                    else
-                        root.downloadRequested();
+            }
+
+            Item {
+                id: downloadControl
+                visible: root.remoteCapability === 1
+                Layout.fillWidth: true
+                implicitHeight: downloadButton.implicitHeight
+
+                readonly property string label: W.I18n.tr(root.downloadAction?.labelText ?? "")
+                readonly property string tooltip: root.downloadState === 3 ? "" : W.I18n.tr(root.downloadAction?.tooltipText ?? "")
+
+                HoverHandler {
+                    id: downloadHover
+                }
+                MD.ToolTip.visible: downloadHover.hovered && downloadControl.tooltip.length > 0
+                MD.ToolTip.text: downloadControl.tooltip
+
+                MD.Button {
+                    id: downloadButton
+                    anchors.fill: parent
+                    mdState.type: root.downloadState === 3 ? MD.Enum.BtFilledTonal : MD.Enum.BtFilled
+                    enabled: root.downloadState === 3 || (root.downloadAction?.enabled ?? true) && root.downloadState !== 1 && root.downloadState !== 2
+                    text: {
+                        switch (root.downloadState) {
+                        case 1: return qsTr("Pending");
+                        case 2: return qsTr("Downloading");
+                        case 3: return qsTr("Remove");
+                        }
+                        if (downloadControl.label.length > 0)
+                            return downloadControl.label;
+                        return root.downloadState === 4 || root.downloadState === 5 ? qsTr("Retry") : qsTr("Download");
+                    }
+                    onClicked: {
+                        if (root.downloadState === 3)
+                            root.removeRequested();
+                        else
+                            root.downloadRequested();
+                    }
                 }
             }
 
@@ -278,7 +358,7 @@ Item {
             }
 
             MD.Text {
-                visible: root.remoteCapability === 2 && root.remoteHint.length > 0
+                visible: root.remoteCapability !== 0 && root.remoteHint.length > 0
                 Layout.fillWidth: true
                 wrapMode: Text.WordWrap
                 color: MD.Token.color.on_surface_variant
