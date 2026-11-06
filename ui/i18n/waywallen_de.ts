@@ -2665,6 +2665,18 @@ Ungespeicherter Bildzustand kann verloren gehen.</translation>
         <source>Lower values use less memory but may increase CPU usage when playing animated thumbnails. Set to 0 to disable caching.</source>
         <translation>Kleinere Werte sparen Speicher, können aber bei animierten Vorschaubildern die CPU-Last erhöhen. 0 schaltet den Zwischenspeicher ab.</translation>
     </message>
+    <message>
+        <source>Image GPU cache</source>
+        <translation>GPU-Bildcache</translation>
+    </message>
+    <message>
+        <source>256 MiB</source>
+        <translation>256 MiB</translation>
+    </message>
+    <message>
+        <source>Lower values use less GPU memory but may require more texture uploads. Set to 0 to disable caching unused textures.</source>
+        <translation>Kleinere Werte benötigen weniger GPU-Speicher, können aber häufigere Textur-Uploads verursachen. 0 deaktiviert das Zwischenspeichern ungenutzter Texturen.</translation>
+    </message>
 </context>
 <context>
     <name>WallpaperCard</name>

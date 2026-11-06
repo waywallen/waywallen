@@ -8,6 +8,8 @@ QtObject {
 
     readonly property int imageCacheMiB: W.Global.imageCacheMiB
     readonly property var imageCacheOptions: W.Global.imageCacheOptions
+    readonly property int imageTextureCacheMiB: W.Global.imageTextureCacheMiB
+    readonly property var imageTextureCacheOptions: W.Global.imageTextureCacheOptions
     property real itemAspectRatio: 1
     readonly property real itemHeight: itemSize / Math.max(itemAspectRatio, 0.1)
     property int itemSize: 162
@@ -37,6 +39,9 @@ QtObject {
 
     function setImageCacheMiB(value) {
         W.Global.setImageCacheMiB(value);
+    }
+    function setImageTextureCacheMiB(value) {
+        W.Global.setImageTextureCacheMiB(value);
     }
     function setItemAspectRatio(ratio) {
         const next = Number(ratio);

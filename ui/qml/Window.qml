@@ -7,6 +7,7 @@ import QtQuick.Layouts
 
 import Qcm.Material as MD
 import waywallen.ui as W
+import QExtra as QE
 
 MD.ApplicationWindow {
     id: win
@@ -89,6 +90,13 @@ MD.ApplicationWindow {
         }
     }
 
+    Connections {
+        target: W.Global
+        function onImageTextureCacheMiBChanged() {
+            QE.ImageCache.setTextureCapacityMiB(win, W.Global.imageTextureCacheMiB);
+        }
+    }
+
     property int currentPage: 0
     property string pendingWallpaperId: ""
 
@@ -142,6 +150,7 @@ MD.ApplicationWindow {
     }
 
     Component.onCompleted: {
+        QE.ImageCache.setTextureCapacityMiB(win, W.Global.imageTextureCacheMiB);
         windowState.restore();
         currentPageChanged();
         // Level-check for the case where the daemon is already Ready

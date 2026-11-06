@@ -14,6 +14,8 @@ QtObject {
     property int networkCacheMaximumMiB: 1024
     readonly property var imageCacheOptions: [0, 64, 128, 256, 512]
     property int imageCacheMiB: 64
+    readonly property var imageTextureCacheOptions: [0, 64, 128, 256]
+    property int imageTextureCacheMiB: 0
     property string themeMode: "system"
     readonly property color defaultAccentColor: "#6750A4"
     property string accentMode: "system"
@@ -34,6 +36,7 @@ QtObject {
         setThemeMode(themeMode);
         setAccentMode(accentMode);
         setImageCacheMiB(imageCacheMiB);
+        setImageTextureCacheMiB(imageTextureCacheMiB);
         QE.ImageCache.capacityMiB = imageCacheMiB;
     }
 
@@ -50,6 +53,19 @@ QtObject {
             }
         }
         imageCacheMiB = selected;
+    }
+
+    function setImageTextureCacheMiB(value) {
+        const requested = Number(value);
+        let selected = 0;
+        if (Number.isFinite(requested) && requested > 0) {
+            for (let i = 1; i < imageTextureCacheOptions.length; ++i) {
+                const option = imageTextureCacheOptions[i];
+                if (Math.abs(option - requested) < Math.abs(selected - requested))
+                    selected = option;
+            }
+        }
+        imageTextureCacheMiB = selected;
     }
 
     function setThemeMode(mode) {
@@ -114,6 +130,7 @@ QtObject {
         property alias singleUiEnabled: root.singleUiEnabled
         property alias networkCacheMaximumMiB: root.networkCacheMaximumMiB
         property alias imageCacheMiB: root.imageCacheMiB
+        property alias imageTextureCacheMiB: root.imageTextureCacheMiB
         property alias themeMode: root.themeMode
         property alias accentMode: root.accentMode
         property alias accentColor: root.accentColor

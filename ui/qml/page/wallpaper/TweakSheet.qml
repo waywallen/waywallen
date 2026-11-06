@@ -210,6 +210,35 @@ MD.BottomSheet {
                     wrapMode: Text.WordWrap
                 }
             }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 4
+
+                MD.Text {
+                    color: MD.Token.color.on_surface_variant
+                    text: qsTr("Image GPU cache")
+                    typescale: MD.Token.typescale.label_medium
+                }
+                W.ValueSlider {
+                    Layout.fillWidth: true
+                    from: 0
+                    snapMode: MD.Slider.SnapAlways
+                    stepSize: 1
+                    to: control.tweak.imageTextureCacheOptions.length - 1
+                    value: Math.max(0, control.tweak.imageTextureCacheOptions.indexOf(control.tweak.imageTextureCacheMiB))
+                    valueMaxText: qsTr("256 MiB")
+                    valueText: qsTr("%1 MiB").arg(control.tweak.imageTextureCacheOptions[Math.round(value)])
+
+                    onValueChangeRequested: value => control.tweak.setImageTextureCacheMiB(control.tweak.imageTextureCacheOptions[Math.round(value)])
+                }
+                MD.Text {
+                    Layout.fillWidth: true
+                    color: MD.Token.color.on_surface_variant
+                    text: qsTr("Lower values use less GPU memory but may require more texture uploads. Set to 0 to disable caching unused textures.")
+                    typescale: MD.Token.typescale.body_small
+                    wrapMode: Text.WordWrap
+                }
+            }
         }
     }
 }
