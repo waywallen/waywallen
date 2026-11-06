@@ -226,6 +226,11 @@ MD.Page {
         if (!sameList(searchQuery.tags, nextTags))
             searchQuery.tags = nextTags;
         discoverState.setFilterValuesFor(id, nextTags);
+        const candidateExcluded = sourceChanged ? discoverState.excludedTagsFor(id) : searchQuery.excludedTags;
+        const exclusionFilters = (s.filters ?? []).filter(filter => filter.supportsExclusion);
+        const nextExcluded = pruneTags(candidateExcluded, exclusionFilters).filter(tag => nextTags.indexOf(tag) < 0);
+        searchQuery.excludedTags = nextExcluded;
+        discoverState.setExcludedTagsFor(id, nextExcluded);
         const savedModes = sourceChanged ? discoverState.matchModesFor(id) : searchQuery.filterMatchModes;
         const modes = {};
         for (const filter of s.filters ?? []) {
@@ -628,6 +633,7 @@ MD.Page {
         popupWindow: root.Window.window
         positioningItem: overlayItem
         selectedValues: searchQuery.tags
+        excludedValues: searchQuery.excludedTags
         matchModes: searchQuery.filterMatchModes
         x: (overlayWidth - width) / 2
         y: (overlayHeight - height) / 2
@@ -635,6 +641,12 @@ MD.Page {
         onApply: function (values) {
             searchQuery.tags = values;
             discoverState.setFilterValuesFor(root.sourceId, values);
+        }
+        onApplyBoth: function (values, excluded) {
+            searchQuery.tags = values;
+            searchQuery.excludedTags = excluded;
+            discoverState.setFilterValuesFor(root.sourceId, values);
+            discoverState.setExcludedTagsFor(root.sourceId, excluded);
         }
         onApplyMatchMode: function (filterId, mode) {
             const modes = Object.assign({}, searchQuery.filterMatchModes);

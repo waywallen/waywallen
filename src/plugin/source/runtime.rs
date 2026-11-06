@@ -666,6 +666,7 @@ impl LuaPluginRuntime {
             confirmation: LocalizedText::default(),
             match_modes: Vec::new(),
             default_match_mode: String::new(),
+            supports_exclusion: false,
         }]
     }
 
@@ -796,6 +797,13 @@ impl LuaPluginRuntime {
             let description = Self::optional_localized_text(&filter, "description", &context)?;
             let confirmation = Self::optional_localized_text(&filter, "confirmation", &context)?;
             let match_modes = Self::optional_string_sequence(&filter, "match_modes", &context)?;
+            let supports_exclusion =
+                Self::optional_bool(&filter, "supports_exclusion", &context, false)?;
+            if supports_exclusion && ty != DiscoverFilterType::MultiSelect {
+                return Err(Error::Internal(anyhow!(
+                    "{context}.supports_exclusion requires multi_select"
+                )));
+            }
             let default_match_mode =
                 Self::optional_string(&filter, "default_match_mode", &context)?;
             let mut seen_modes = HashSet::new();
@@ -824,6 +832,7 @@ impl LuaPluginRuntime {
                 confirmation,
                 match_modes,
                 default_match_mode,
+                supports_exclusion,
             });
         }
         Ok(Some(filters))
@@ -2748,6 +2757,21 @@ impl LuaPluginRuntime {
         cursor: &str,
         modes: &HashMap<String, String>,
     ) -> Result<DiscoverSearchResult> {
+        self.call_discover_with_exclusions(plugin_name, query, sort, page, tags, cursor, modes, &[])
+            .await
+    }
+
+    pub async fn call_discover_with_exclusions(
+        &mut self,
+        plugin_name: &str,
+        query: &str,
+        sort: &str,
+        page: u32,
+        tags: &[String],
+        cursor: &str,
+        modes: &HashMap<String, String>,
+        excluded: &[String],
+    ) -> Result<DiscoverSearchResult> {
         let callbacks = self
             .callbacks
             .get(plugin_name)
@@ -2761,6 +2785,20 @@ impl LuaPluginRuntime {
             .as_ref()
             .ok_or_else(|| Error::DiscoverUnsupported(plugin_name.to_string()))?;
         Self::validate_discover_filter_values(plugin_name, discover, tags)?;
+        let mut seen_excluded = HashSet::new();
+        for value in excluded {
+            if !seen_excluded.insert(value)
+                || tags.contains(value)
+                || !discover.filters.iter().any(|filter| {
+                    filter.supports_exclusion
+                        && filter.options.iter().any(|option| option.value == *value)
+                })
+            {
+                return Err(Error::InvalidArgument(format!(
+                    "invalid excluded discover filter value '{value}'"
+                )));
+            }
+        }
         for (id, mode) in modes {
             if !discover
                 .filters
@@ -2814,6 +2852,13 @@ impl LuaPluginRuntime {
             tags_tbl.set(i + 1, t.clone())?;
         }
         params.set("tags", tags_tbl)?;
+        if !excluded.is_empty() {
+            let table = self.lua.create_table()?;
+            for (i, value) in excluded.iter().enumerate() {
+                table.set(i + 1, value.as_str())?;
+            }
+            params.set("excluded_tags", table)?;
+        }
         if !modes.is_empty() {
             let table = self.lua.create_table()?;
             for (id, mode) in modes {

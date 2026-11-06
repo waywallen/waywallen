@@ -2462,6 +2462,14 @@ Unsaved frame state may be lost.</source>
 <context>
     <name>TagPickerDialog</name>
     <message>
+        <source>Include</source>
+        <translation>包含</translation>
+    </message>
+    <message>
+        <source>Exclude</source>
+        <translation>排除</translation>
+    </message>
+    <message>
         <location filename="../qml/component/filter/TagPickerDialog.qml" line="18"/>
         <source>Select tags</source>
         <translation>选择标签</translation>

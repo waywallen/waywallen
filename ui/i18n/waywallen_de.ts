@@ -2573,6 +2573,14 @@ Ungespeicherter Bildzustand kann verloren gehen.</translation>
 <context>
     <name>TagPickerDialog</name>
     <message>
+        <source>Include</source>
+        <translation>Einschließen</translation>
+    </message>
+    <message>
+        <source>Exclude</source>
+        <translation>Ausschließen</translation>
+    </message>
+    <message>
         <location filename="../qml/component/filter/TagPickerDialog.qml" line="17"/>
         <source>Select tags</source>
         <translation>Schlagwörter auswählen</translation>

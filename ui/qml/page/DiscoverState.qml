@@ -12,6 +12,7 @@ QtObject {
         property string selectedSourceId: ""
         property string filtersJson: "{}"
         property string matchModesJson: "{}"
+        property string excludedTagsJson: "{}"
     }
 
     function selectedSourceId() {
@@ -60,6 +61,34 @@ QtObject {
         } catch (error) {
         }
         return {};
+    }
+
+    function excludedTagsFor(sourceId) {
+        try {
+            const state = JSON.parse(settings.excludedTagsJson);
+            const values = state?.[sourceId];
+            return Array.isArray(values) ? normalize(values) : [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    function setExcludedTagsFor(sourceId, values) {
+        if (sourceId.length === 0)
+            return;
+        let state = {};
+        try {
+            const parsed = JSON.parse(settings.excludedTagsJson);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+                state = parsed;
+        } catch (error) {
+        }
+        const normalized = normalize(values);
+        if (normalized.length > 0)
+            state[sourceId] = normalized;
+        else
+            delete state[sourceId];
+        settings.excludedTagsJson = JSON.stringify(state);
     }
 
     function matchModesFor(sourceId) {

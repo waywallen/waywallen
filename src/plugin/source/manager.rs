@@ -696,11 +696,35 @@ impl LuaPluginRegistry {
         cursor: &str,
         modes: &HashMap<String, String>,
     ) -> Result<DiscoverSearchResult> {
+        self.call_discover_with_exclusions(plugin_name, query, sort, page, tags, cursor, modes, &[])
+            .await
+    }
+
+    pub async fn call_discover_with_exclusions(
+        &self,
+        plugin_name: &str,
+        query: &str,
+        sort: &str,
+        page: u32,
+        tags: &[String],
+        cursor: &str,
+        modes: &HashMap<String, String>,
+        excluded: &[String],
+    ) -> Result<DiscoverSearchResult> {
         self.handle(plugin_name)?
             .runtime
             .lock()
             .await
-            .call_discover_with_modes(plugin_name, query, sort, page, tags, cursor, modes)
+            .call_discover_with_exclusions(
+                plugin_name,
+                query,
+                sort,
+                page,
+                tags,
+                cursor,
+                modes,
+                excluded,
+            )
             .await
     }
 

@@ -77,6 +77,7 @@ void RemoteAvailabilityQuery::reload() {
                     fm[u"confirmation"_s] = filter.confirmation();
                     fm[u"matchModes"_s] = filter.matchModes();
                     fm[u"defaultMatchMode"_s] = filter.defaultMatchMode();
+                    fm[u"supportsExclusion"_s] = filter.supportsExclusion();
                     fm[u"titleText"_s]    = pluginMessageFromPb(filter.titleText(), filter.title());
                     fm[u"descriptionText"_s] =
                         pluginMessageFromPb(filter.descriptionText(), filter.description());
@@ -212,6 +213,7 @@ RemoteSearchQuery::RemoteSearchQuery(QObject* parent): QueryList(parent) {
     connect(this, &RemoteSearchQuery::queryChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(this, &RemoteSearchQuery::sortKeyChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(this, &RemoteSearchQuery::tagsChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(this, &RemoteSearchQuery::excludedTagsChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(this, &RemoteSearchQuery::filterMatchModesChanged, this, &RemoteSearchQuery::invalidateSearch);
 }
 
@@ -240,6 +242,12 @@ void RemoteSearchQuery::setSortKey(const QString& v) {
 }
 
 auto RemoteSearchQuery::tags() const -> const QStringList& { return m_tags; }
+auto RemoteSearchQuery::excludedTags() const -> const QStringList& { return m_excluded_tags; }
+void RemoteSearchQuery::setExcludedTags(const QStringList& v) {
+    if (m_excluded_tags == v) return;
+    m_excluded_tags = v;
+    Q_EMIT excludedTagsChanged();
+}
 auto RemoteSearchQuery::filterMatchModes() const -> const QVariantMap& { return m_filter_match_modes; }
 void RemoteSearchQuery::setFilterMatchModes(const QVariantMap& v) {
     if (m_filter_match_modes == v) return;
@@ -342,6 +350,7 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
     inner.setSortKey(m_sort_key);
     inner.setPage(page);
     inner.setRequiredTags(m_tags);
+    inner.setExcludedTags(m_excluded_tags);
     QHash<QString, QString> modes;
     for (auto it = m_filter_match_modes.cbegin(); it != m_filter_match_modes.cend(); ++it)
         modes.insert(it.key(), it.value().toString());

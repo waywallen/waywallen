@@ -45,6 +45,7 @@ export class RemoteSearchQuery : public QueryList,
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged FINAL)
     Q_PROPERTY(QString sortKey READ sortKey WRITE setSortKey NOTIFY sortKeyChanged FINAL)
     Q_PROPERTY(QStringList tags READ tags WRITE setTags NOTIFY tagsChanged FINAL)
+    Q_PROPERTY(QStringList excludedTags READ excludedTags WRITE setExcludedTags NOTIFY excludedTagsChanged FINAL)
     Q_PROPERTY(QVariantMap filterMatchModes READ filterMatchModes WRITE setFilterMatchModes NOTIFY filterMatchModesChanged FINAL)
     Q_PROPERTY(bool browsingEnabled READ browsingEnabled WRITE setBrowsingEnabled NOTIFY
                    browsingEnabledChanged FINAL)
@@ -66,6 +67,8 @@ public:
 
     auto tags() const -> const QStringList&;
     void setTags(const QStringList&);
+    auto excludedTags() const -> const QStringList&;
+    void setExcludedTags(const QStringList&);
     auto filterMatchModes() const -> const QVariantMap&;
     void setFilterMatchModes(const QVariantMap&);
 
@@ -85,6 +88,7 @@ public:
     Q_SIGNAL void queryChanged();
     Q_SIGNAL void sortKeyChanged();
     Q_SIGNAL void tagsChanged();
+    Q_SIGNAL void excludedTagsChanged();
     Q_SIGNAL void filterMatchModesChanged();
     Q_SIGNAL void browsingEnabledChanged();
     Q_SIGNAL void stateChanged();
@@ -98,6 +102,7 @@ private:
     QString     m_query;
     QString     m_sort_key;
     QStringList m_tags;
+    QStringList m_excluded_tags;
     QVariantMap m_filter_match_modes;
     QString     m_next_cursor;
     QStringList m_seen_cursors;

@@ -1354,6 +1354,7 @@ pub(super) async fn dispatch_inner(
                                     confirmation: filter.confirmation.text().to_string(),
                                     match_modes: filter.match_modes,
                                     default_match_mode: filter.default_match_mode,
+                                    supports_exclusion: filter.supports_exclusion,
                                     title_text: crate::control_proto::plugin_message_to_proto(
                                         &filter.title,
                                     ),
@@ -1416,7 +1417,7 @@ pub(super) async fn dispatch_inner(
             };
             let result = state
                 .source_manager
-                .call_discover_with_modes(
+                .call_discover_with_exclusions(
                     &source_id,
                     &r.query,
                     &sort_key,
@@ -1424,6 +1425,7 @@ pub(super) async fn dispatch_inner(
                     &r.required_tags,
                     &r.cursor,
                     &r.filter_match_modes,
+                    &r.excluded_tags,
                 )
                 .await;
             match result {

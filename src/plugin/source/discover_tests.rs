@@ -81,6 +81,60 @@ const RESOLVE_MODEL: &str =
     "return {name='Model',wp_type='gltf',resource='scene.gltf',external_id=params.id}";
 
 #[tokio::test]
+async fn discover_excluded_tags_are_validated_and_forwarded() {
+    let script = r#"
+local M = {}
+function M.info()
+  return { name='test', capabilities={ discover={ search=true, filters={
+    { id='genre', title='Genre', type='multi_select', supports_exclusion=true,
+      options={{value='Anime',label='Anime'},{value='Nature',label='Nature'}} },
+    { id='purity', title='Purity', type='multi_select',
+      options={{value='Everyone',label='Everyone'}} }
+  } } } }
+end
+M.discover = {}
+function M.discover.search(ctx, params)
+  if params.excluded_tags then assert(params.excluded_tags[1] == 'Nature') end
+  return {items={}, has_more=false}
+end
+return M
+"#;
+    let (_directory, manager) = plugin(script, ENTRY_VERSION_V4);
+    let modes = HashMap::new();
+    let anime = vec!["Anime".to_string()];
+    let nature = vec!["Nature".to_string()];
+    manager
+        .call_discover_with_cursor("test", "", "", 1, &anime, "")
+        .await
+        .unwrap();
+    manager
+        .call_discover_with_exclusions("test", "", "", 1, &anime, "", &modes, &nature)
+        .await
+        .unwrap();
+    assert!(manager
+        .call_discover_with_exclusions("test", "", "", 1, &nature, "", &modes, &nature)
+        .await
+        .is_err());
+    assert!(manager
+        .call_discover_with_exclusions("test", "", "", 1, &[], "", &modes, &["Everyone".into()])
+        .await
+        .is_err());
+    assert!(manager
+        .call_discover_with_exclusions(
+            "test",
+            "",
+            "",
+            1,
+            &[],
+            "",
+            &modes,
+            &["Nature".into(), "Nature".into()]
+        )
+        .await
+        .is_err());
+}
+
+#[tokio::test]
 async fn discover_download_preserves_legacy_flat_file_results() {
     for version in [
         ENTRY_VERSION_V3,
