@@ -112,6 +112,48 @@ async fn image_system_auto_detect_honors_xdg_and_preserves_pictures() {
     assert_eq!(manager.auto_detect_all().await.unwrap()["image"], *paths);
 }
 
+#[tokio::test]
+async fn image_system_requires_light_images_and_protects_package_removal() {
+    let root = tempfile::tempdir().unwrap();
+    let wallpapers = root.path().join("wallpapers");
+    let image = wallpapers.join("Night/contents/images_dark/1920x1080.png");
+    file(&image, b"image");
+    file(
+        &wallpapers.join("Night/metadata.json"),
+        r#"{"KPlugin":{"Name":"Night"}}"#,
+    );
+    let (_plugin, manager, _) = manager(serde_json::json!({
+        "XDG_DATA_DIRS": root.path().join("missing"),
+    }));
+    assert!(scan(&manager, &[wallpapers.clone()]).await.is_empty());
+    let light = wallpapers.join("Night/contents/images/1920x1080.png");
+    file(&light, b"image");
+    let entries = scan(&manager, &[wallpapers]).await;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].resource,
+        root.path()
+            .join("wallpapers/Night/contents")
+            .to_str()
+            .unwrap()
+    );
+    assert_eq!(entries[0].preview.as_deref(), light.to_str());
+    assert_eq!(entries[0].name, "Night");
+    assert_eq!(entries[0].can_remove, Some(false));
+    assert!(!manager.supports_entry_remove(&entries[0]));
+    assert!(manager
+        .remove_item("image", &entries[0], &[])
+        .await
+        .is_err());
+    assert!(image.exists());
+    assert!(manager
+        .call_properties("image", &entries[0])
+        .await
+        .unwrap()
+        .unwrap()
+        .contains("waywallen.scheme_color"));
+}
+
 #[test]
 fn image_system_data_dirs_defaults_and_rejects_relative_paths() {
     let lua = Lua::new();
@@ -145,6 +187,81 @@ fn image_system_data_dirs_defaults_and_rejects_relative_paths() {
     assert_eq!(
         data_dirs.call::<Vec<String>>(ctx).unwrap(),
         ["/first", "/second"]
+    );
+}
+
+#[tokio::test]
+async fn image_system_package_library_keeps_one_persistable_item() {
+    let root = tempfile::tempdir().unwrap();
+    file(&root.path().join("contents/images/1920x1080.png"), b"image");
+    file(&root.path().join("contents/images/3840x2160.png"), b"image");
+    file(
+        &root.path().join("contents/images_dark/1920x1080.png"),
+        b"image",
+    );
+    let (_plugin, manager, _) = manager(serde_json::json!({}));
+    let entries = scan(&manager, &[root.path().to_path_buf()]).await;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].resource,
+        root.path().join("contents").to_str().unwrap()
+    );
+    let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
+    let (summary, _) = crate::model::sync::sync_plugin_entries(
+        &db,
+        crate::model::sync::PluginRef {
+            name: "image",
+            version: "0.5.0",
+        },
+        &entries,
+        &[root.path().to_str().unwrap().into()],
+    )
+    .await
+    .unwrap();
+    assert_eq!(summary.dropped, 0);
+    let loaded = crate::model::repo::load_entries(&db).await.unwrap();
+    assert_eq!(loaded.len(), 1);
+    assert_eq!(loaded[0].preview, entries[0].preview);
+    assert_eq!((loaded[0].width, loaded[0].height), (Some(1920), Some(1080)));
+    assert_eq!(loaded[0].can_remove, Some(false));
+}
+
+#[tokio::test]
+async fn image_system_preview_prefers_smallest_closest_widescreen_image() {
+    let root = tempfile::tempdir().unwrap();
+    for name in [
+        "100x100.png",
+        "1920x1080.png",
+        "3840x2160.png",
+        "2560x1600.png",
+        "light.png",
+        "0x100.png",
+        "999999999999x1.png",
+    ] {
+        file(&root.path().join("contents/images").join(name), b"image");
+    }
+    file(
+        &root.path().join("contents/images_dark/320x180.png"),
+        b"image",
+    );
+    let (_plugin, manager, probe) = manager(serde_json::json!({}));
+    let entries = scan(&manager, &[root.path().to_path_buf()]).await;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0].preview.as_deref(),
+        root.path().join("contents/images/1920x1080.png").to_str()
+    );
+    assert_eq!(
+        (entries[0].width, entries[0].height),
+        (Some(1920), Some(1080))
+    );
+    assert_eq!(probe.0.load(Ordering::Relaxed), 0);
+    std::fs::remove_file(root.path().join("contents/images/1920x1080.png")).unwrap();
+    std::fs::remove_file(root.path().join("contents/images/3840x2160.png")).unwrap();
+    let entries = scan(&manager, &[root.path().to_path_buf()]).await;
+    assert_eq!(
+        (entries[0].width, entries[0].height),
+        (Some(2560), Some(1600))
     );
 }
 
@@ -215,20 +332,32 @@ async fn image_system_scans_kde_and_gnome_and_deduplicates_fedora_links() {
     let (_plugin, manager, probe) =
         manager(serde_json::json!({"XDG_DATA_DIRS": root.path(), "LANG": "zh_CN.UTF-8"}));
     let entries = scan(&manager, &[wallpapers.clone(), backgrounds.clone()]).await;
-    assert_eq!(entries.len(), 9, "{entries:#?}");
-    assert_eq!(probe.0.load(Ordering::Relaxed), 9);
+    assert_eq!(entries.len(), 8, "{entries:#?}");
+    assert_eq!(probe.0.load(Ordering::Relaxed), 5);
     assert!(entries
         .iter()
-        .all(|e| e.width == Some(1920) && e.height == Some(1080) && e.size.is_some()));
-    assert!(entries.iter().all(|e| e.can_remove == Some(true)));
+        .all(|e| e.width.is_some() && e.height.is_some() && e.size.is_some()));
+    assert!(entries
+        .iter()
+        .all(|e| e.can_remove == Some(e.preview.is_none())));
     assert!(entries.iter().any(|e| e.name == "桌面 · Dark · 1920×1080"));
-    assert!(entries.iter().any(|e| e.name == "山峰 · Light · 1920×1080"));
     assert!(entries
         .iter()
-        .any(|e| e.name.starts_with("Broken · 1920×1080")));
+        .any(|e| e.name == "山峰" && e.preview.is_some()));
+    let package = entries.iter().find(|e| e.name == "山峰").unwrap();
+    assert_eq!((package.width, package.height), (Some(200), Some(100)));
+    let schema = manager
+        .call_properties("image", package)
+        .await
+        .unwrap()
+        .unwrap();
+    let schema: serde_json::Value = serde_json::from_str(&schema).unwrap();
+    assert_eq!(schema["waywallen.image_variant"]["type"], "combo");
+    assert_eq!(schema["waywallen.image_variant"]["value"], "day-night");
+    assert!(entries.iter().any(|e| e.name == "Broken"));
     assert!(!entries.iter().any(|e| e.resource.contains("screenshot")
         || e.resource.contains("thumbnail")
-        || e.resource.contains("/F43/")));
+        || e.resource.contains("/F43/contents/images")));
     let resources: Vec<_> = entries.iter().map(|e| &e.resource).collect();
     let repeated = scan(&manager, &[backgrounds, wallpapers]).await;
     assert_eq!(
@@ -250,10 +379,10 @@ async fn image_system_scans_kde_and_gnome_and_deduplicates_fedora_links() {
         .await
         .unwrap();
         let loaded = crate::model::repo::load_entries(&db).await.unwrap();
-        assert_eq!(loaded.len(), 9);
-        assert!(loaded
-            .iter()
-            .all(|entry| entry.can_remove == Some(true) && entry.width == Some(1920)));
+        assert_eq!(loaded.len(), 8);
+        assert!(loaded.iter().all(
+            |entry| entry.can_remove == Some(entry.preview.is_none()) && entry.width.is_some()
+        ));
         let ids: Vec<_> = loaded
             .into_iter()
             .map(|entry| (entry.item_id, entry.resource))

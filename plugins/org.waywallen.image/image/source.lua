@@ -1,11 +1,6 @@
 local system = import("image.system")
 local M = {}
 
-local IMAGE_EXTS = {
-    png = true, jpg = true, jpeg = true, webp = true,
-    bmp = true, tiff = true, tif = true, avif = true, gif = true,
-}
-
 local function strip_ext(name)
     return name:match("(.+)%.[^.]+$") or name
 end
@@ -34,6 +29,7 @@ end
 
 function M.remove(ctx, item)
     local path = item.path or item.resource
+    if ctx.fs.is_dir(path) then error("Image wallpaper packages cannot be removed") end
     if ctx.fs.can_remove(path) == false then error("Image cannot be removed: permission denied") end
     ctx.remove_file(path)
 end
@@ -42,20 +38,22 @@ function M.scan(ctx)
     local candidates, skipped, metadata = {}, {}, {}
     for _, root in ipairs(ctx.libraries()) do
         local kind = system.kind(ctx, root)
-        local function collect(path, name)
+        local function collect(path, name, preview, media)
             local ext = (ctx.extension(path) or ""):lower()
-            if not IMAGE_EXTS[ext] then
+            if not preview and not system.supported(ctx, path) then
                 if kind and (ext == "jxl" or ext == "svg") then skipped[ext] = (skipped[ext] or 0) + 1 end
                 return
             end
             local canonical = ctx.fs.canonicalize(path)
-            if not canonical or not ctx.fs.is_file(path) then return end
+            if not canonical or not (preview and ctx.fs.is_dir(path) or ctx.fs.is_file(path)) then return end
             candidates[#candidates + 1] = {
                 resource = path, library_root = root,
                 canonical = canonical, system = kind ~= nil,
                 symlink = ctx.fs.is_symlink(path),
                 name = name or strip_ext(ctx.filename(path) or path),
                 order = #candidates + 1,
+                preview = preview,
+                media = media,
             }
         end
         if kind then
@@ -84,17 +82,20 @@ function M.scan(ctx)
         if not seen_path[candidate.resource] and not (candidate.system and seen_canonical[candidate.canonical]) then
             seen_path[candidate.resource] = true
             seen_canonical[candidate.canonical] = true
-            local media = candidate.system and ctx.probe(candidate.canonical) or nil
+            local media = candidate.media or (candidate.system and ctx.probe(candidate.canonical) or nil)
             local name = candidate.name
-            if media and media.width and media.height then
+            if not candidate.preview and media and media.width and media.height then
                 name = name .. " · " .. media.width .. "×" .. media.height
             end
+            local can_remove = ctx.fs.can_remove(candidate.resource)
+            if candidate.preview then can_remove = false end
             entries[#entries + 1] = {
                 name = name, wp_type = "image",
                 resource = candidate.resource, library_root = candidate.library_root,
-                size = media and media.size or ctx.file_size(candidate.resource),
+                preview = candidate.preview,
+                size = media and media.size or ctx.file_size(candidate.preview or candidate.resource),
                 width = media and media.width, height = media and media.height,
-                can_remove = ctx.fs.can_remove(candidate.resource),
+                can_remove = can_remove,
             }
         end
     end

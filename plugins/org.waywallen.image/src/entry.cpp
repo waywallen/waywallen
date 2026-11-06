@@ -2,11 +2,11 @@ module;
 
 #include <rstd/macro.hpp>
 
-#include "av_image.hpp"
-
+#include <ctype.h>
 #include <errno.h>
 #include <signal.h>
-#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <sys/prctl.h>
 #include <sys/socket.h>
@@ -14,25 +14,28 @@ module;
 
 module waywallen.image.entry;
 
-import rstd.cppstd;
+import rstd;
 import rstd.argparse;
 import rstd.json;
 import rstd.log;
 import wavsen.video;
 import waywallen.bridge;
 import waywallen.plugin.run_loop;
+import waywallen.image.content;
 
 using namespace rstd::prelude;
 using namespace rstd::literals;
 using RunLoop   = waywallen::plugin::RunLoop;
 using LoopStep  = waywallen::plugin::LoopStep;
 using ExitCause = waywallen::plugin::ExitCause;
+using rstd::ffi::CStr;
+using rstd::ffi::CString;
 
 namespace
 {
 struct Options {
-    std::string ipc_path;
-    std::string image_path;
+    String ipc_path;
+    String image_path;
     /* Final decoded extent, set by `decode_to_rgba`. */
     uint32_t width { 0 };
     uint32_t height { 0 };
@@ -41,8 +44,8 @@ struct Options {
     bool    decode_only { false };
     bool    vulkan_probe { false };
     // Test hook
-    bool        print_caps { false };
-    std::string render_node;
+    bool   print_caps { false };
+    String render_node;
 };
 
 struct ParseArgsResult {
@@ -60,30 +63,34 @@ struct ClearColor {
 
 constexpr const char* kSchemeColorKey = "waywallen.scheme_color";
 
-[[noreturn]] void die(const std::string& msg) {
+[[noreturn]] void die(ref<str> msg) {
     rstd_error("waywallen-image-renderer: {}", msg);
-    std::exit(1);
+    rstd::process::exit(i32(1));
 }
 
-std::string to_std_string(const rstd::string::String& value) {
-    return rstd::cppstd::to_string(value);
+auto text(const char* value) -> ref<str> {
+    return value ? CStr::from_ptr(value).to_str().unwrap_or(""_str) : ""_str;
 }
 
-auto as_rstd_str(std::string_view value) -> rstd::ref<rstd::str> {
-    return rstd::move(rstd::cppstd::as_str(value)).unwrap();
+auto terminated(ref<str> value) -> CString {
+    return CString::make(Vec<u8>::from(value.as_bytes())).unwrap();
 }
 
-void write_cli_output(rstd::ref<rstd::str> text, rstd::argparse::OutputTarget::Tag target) {
-    FILE* stream = target == rstd::argparse::OutputTarget::Tag::Stderr ? stderr : stdout;
-    std::fwrite(text.data(), 1, text.size().to_primitive(), stream);
+void write_cli_output(ref<str> text, rstd::argparse::OutputTarget::Tag target) {
+    if (target == rstd::argparse::OutputTarget::Tag::Stderr) {
+        auto stream = rstd::io::stderr();
+        (void)rstd::io::write_all(stream, text.as_bytes());
+    } else {
+        auto stream = rstd::io::stdout();
+        (void)rstd::io::write_all(stream, text.as_bytes());
+    }
 }
 
-rstd::prelude::Vec<rstd::ffi::OsString> cli_argv(int argc, char** argv) {
-    auto values =
-        rstd::prelude::Vec<rstd::ffi::OsString>::with_capacity(static_cast<rstd::usize>(argc));
+Vec<rstd::ffi::OsString> cli_argv(int argc, char** argv) {
+    auto values = Vec<rstd::ffi::OsString>::with_capacity(static_cast<usize>(argc));
     for (int i = 0; i < argc; ++i) {
-        auto bytes = rstd::slice<rstd::u8>::from_raw_parts(
-            reinterpret_cast<const rstd::byte*>(argv[i]), rstd::usize(std::strlen(argv[i])));
+        auto bytes = slice<u8>::from_raw_parts(reinterpret_cast<const rstd::byte*>(argv[i]),
+                                               usize(::strlen(argv[i])));
         values.push(rstd::ffi::OsString::from(
             rstd::ref<rstd::ffi::OsStr>::from_encoded_bytes_unchecked(bytes)));
     }
@@ -92,14 +99,14 @@ rstd::prelude::Vec<rstd::ffi::OsString> cli_argv(int argc, char** argv) {
 
 template<typename T>
 auto get_arg(const rstd::argparse::Matches& matches, const rstd::argparse::ArgKey<T>& key)
-    -> rstd::Option<rstd::ref<T>> {
+    -> Option<ref<T>> {
     auto value = matches.get_one(key);
     if (value.is_err()) {
         rstd_error("waywallen-image-renderer: argparse match access failed: {}",
-                   std::move(value).unwrap_err());
-        std::exit(1);
+                   rstd::move(value).unwrap_err());
+        rstd::process::exit(i32(1));
     }
-    return std::move(value).unwrap();
+    return rstd::move(value).unwrap();
 }
 
 float clamp01(float v) {
@@ -110,24 +117,20 @@ float clamp01(float v) {
 
 bool parse_color_wire(const char* raw, ClearColor& out) {
     if (! raw || ! *raw) return false;
-    std::string s = raw;
-    for (char& ch : s) {
-        if (ch == ',') ch = ' ';
-    }
-
     float       values[4] = {};
     int         count     = 0;
-    const char* p         = s.c_str();
+    const char* p         = raw;
     while (*p) {
-        while (*p && std::isspace(static_cast<unsigned char>(*p))) ++p;
+        while (*p && (*p == ',' || ::isspace(static_cast<unsigned char>(*p)))) ++p;
         if (! *p) break;
         if (count >= 4) return false;
-        errno     = 0;
-        char* end = nullptr;
-        float v   = std::strtof(p, &end);
-        if (end == p || errno == ERANGE || ! std::isfinite(v)) return false;
-        values[count++] = clamp01(v);
-        p               = end;
+        const char* start = p;
+        while (*p && *p != ',' && ! ::isspace(static_cast<unsigned char>(*p))) ++p;
+        auto token = ref<str>::from_raw_parts_unchecked(reinterpret_cast<const rstd::byte*>(start),
+                                                        usize(p - start));
+        auto value = rstd::from_str<f32>(token);
+        if (value.is_err() || ! value->is_finite()) return false;
+        values[count++] = clamp01(value->to_primitive());
     }
     if (count < 3) return false;
     out = ClearColor {
@@ -148,11 +151,11 @@ ParseArgsResult parse_args(int argc, char** argv) {
 
     auto command = Command::make("waywallen-image-renderer"_str);
     command.about("Render image wallpapers for waywallen"_str);
-    auto ipc  = command.add_arg(Arg<rstd::string::String>::value("ipc"_str, string_parser())
+    auto ipc  = command.add_arg(Arg<String>::value("ipc"_str, string_parser())
                                     .long_name("ipc"_str)
                                     .value_name("SOCKET"_str)
                                     .help("Connect to the renderer IPC socket"_str));
-    auto path = command.add_arg(Arg<rstd::string::String>::value("path"_str, string_parser())
+    auto path = command.add_arg(Arg<String>::value("path"_str, string_parser())
                                     .long_name("path"_str)
                                     .value_name("IMAGE"_str)
                                     .help("Image wallpaper path"_str));
@@ -165,57 +168,56 @@ ParseArgsResult parse_args(int argc, char** argv) {
     command.add_arg(Arg<bool>::flag("print-caps"_str)
                         .long_name("print-caps"_str)
                         .help("Print renderer capabilities as JSON"_str));
-    auto render_node =
-        command.add_arg(Arg<rstd::string::String>::value("render-node"_str, string_parser())
-                            .long_name("render-node"_str)
-                            .value_name("DEVICE"_str)
-                            .help("Use a specific DRM render node"_str));
+    auto render_node = command.add_arg(Arg<String>::value("render-node"_str, string_parser())
+                                           .long_name("render-node"_str)
+                                           .value_name("DEVICE"_str)
+                                           .help("Use a specific DRM render node"_str));
 
-    auto built = std::move(command).build();
+    auto built = rstd::move(command).build();
     if (built.is_err()) {
         rstd_error("waywallen-image-renderer: invalid CLI definition: {}",
-                   std::move(built).unwrap_err());
+                   rstd::move(built).unwrap_err());
         return { .exit_code = 1 };
     }
-    auto parser = std::move(built).unwrap();
+    auto parser = rstd::move(built).unwrap();
     auto parsed = parser.parse_known_from(cli_argv(argc, argv));
     if (parsed.is_err()) {
-        auto error  = std::move(parsed).unwrap_err();
+        auto error  = rstd::move(parsed).unwrap_err();
         auto report = parser.render_error(error);
         write_cli_output(report.text(), report.target());
         return { .exit_code = report.exit_code().to_primitive() };
     }
 
-    auto outcome = std::move(parsed).unwrap();
+    auto outcome = rstd::move(parsed).unwrap();
     if (outcome.is_Display()) {
         const auto& request = outcome.as_Display().request;
         write_cli_output(request.text(), request.target());
         return { .exit_code = request.exit_code().to_primitive() };
     }
 
-    auto    known   = std::move(outcome).as_Parsed().value;
+    auto    known   = rstd::move(outcome).as_Parsed().value;
     auto    matches = known.matches();
     Options options;
     if (auto value = get_arg(*matches, ipc); value.is_some()) {
-        options.ipc_path = to_std_string(**value);
+        options.ipc_path = (**value).clone();
     }
     if (auto value = get_arg(*matches, path); value.is_some()) {
-        options.image_path = to_std_string(**value);
+        options.image_path = (**value).clone();
     }
     if (auto value = get_arg(*matches, render_node); value.is_some()) {
-        options.render_node = to_std_string(**value);
+        options.render_node = (**value).clone();
     }
     options.decode_only  = matches->contains("decode-only"_str);
     options.vulkan_probe = matches->contains("vulkan-probe"_str);
     options.print_caps   = matches->contains("print-caps"_str);
-    return { .options = std::move(options), .should_run = true };
+    return { .options = rstd::move(options), .should_run = true };
 }
 
 struct HostState {
-    int               sock { -1 };
-    ww_pool_t*        pool { nullptr };
-    std::atomic<bool> negotiated { false };
-    Option<RunLoop>   events;
+    int                              sock { -1 };
+    ww_pool_t*                       pool { nullptr };
+    rstd::sync::atomic::Atomic<bool> negotiated { false };
+    Option<RunLoop>                  events;
 
     bool                                   neg_pending { false };
     bool                                   frame_request_pending { false };
@@ -224,94 +226,60 @@ struct HostState {
     waywallen_render_target_config_t       target_config {};
     waywallen_render_target_capabilities_t target_caps {};
     uint64_t                               target_revision {};
+    ww_pool_directive_t                    active_directive {};
+    uint32_t                               active_width {}, active_height {};
+    String                                 variant = String::make("day-night"_str);
+    bool                                   variant_pending { false };
 
     ClearColor scheme_color {};
 };
 
 void apply_control(HostState& host, ww_bridge_control_t& control);
 
-// Test hook: when WAYWALLEN_IMAGE_DUMP_DIR is set, write the RGBA8
-// bytes the renderer is about to upload to the GPU to a file the
-// orchestrator can compare against the consumer-side dump. The dump
-// captures the *input* (post-decode, pre-staging) so it's always
-// linear regardless of the picked DRM modifier — the consumer also
-// dumps post-readback linear bytes, so byte-equality is meaningful.
-//
-// Filename: producer-{seq:06}-0x{fourcc:08x}-0x{modifier:016x}.bin
-// Sidecar:  same name with .json — width/height/stride/fourcc/modifier.
+// Dumps contain tightly-packed upload pixels, not the DMA-BUF's destination layout.
 static void maybe_dump_producer_frame(const ww_image::RgbaBuf& rgba, const ww_pool_directive_t& d,
                                       const ww_pool_slot_t& s, uint64_t seq) {
-    const char* dir = std::getenv("WAYWALLEN_IMAGE_DUMP_DIR");
-    if (! dir || ! *dir) return;
-    if (rgba.data.empty()) return;
-
-    char path[512];
-    std::snprintf(path,
-                  sizeof(path),
-                  "%s/producer-%06llu-0x%08x-0x%016llx.bin",
-                  dir,
-                  static_cast<unsigned long long>(seq),
-                  d.format.fourcc,
-                  static_cast<unsigned long long>(d.format.modifier));
-    FILE* f = std::fopen(path, "wb");
-    if (! f) {
-        rstd_warn("waywallen-image-renderer: dump open {}: {}",
-                  static_cast<const char*>(path),
-                  static_cast<const char*>(std::strerror(errno)));
+    auto dir = rstd::env::var(rstd::ref<rstd::ffi::OsStr>("WAYWALLEN_IMAGE_DUMP_DIR"_str));
+    if (dir.is_err() || dir->is_empty() || rgba.data.is_empty()) return;
+    auto stem = rstd::format(
+        "{}/producer-{:06}-0x{:08x}-0x{:016x}", *dir, seq, d.format.fourcc, d.format.modifier);
+    auto path    = rstd::format("{}.bin", stem);
+    auto bytes   = slice<u8>::from_raw_parts(reinterpret_cast<const rstd::byte*>(rgba.data.data()),
+                                             rgba.data.len());
+    auto written = rstd::fs::write(ref<rstd::path::Path>(path.as_str()), bytes);
+    if (written.is_err()) {
+        rstd_warn("waywallen-image-renderer: dump {}: {}", path, written.unwrap_err());
         return;
     }
-    size_t w = std::fwrite(rgba.data.data(), 1, rgba.data.size(), f);
-    std::fclose(f);
-    if (w != rgba.data.size()) {
-        rstd_warn("waywallen-image-renderer: dump short write {}/{} to {}",
-                  w,
-                  rgba.data.size(),
-                  static_cast<const char*>(path));
-        return;
-    }
-
-    char sidecar[520];
-    std::snprintf(sidecar,
-                  sizeof(sidecar),
-                  "%s/producer-%06llu-0x%08x-0x%016llx.json",
-                  dir,
-                  static_cast<unsigned long long>(seq),
-                  d.format.fourcc,
-                  static_cast<unsigned long long>(d.format.modifier));
-    FILE* sf = std::fopen(sidecar, "w");
-    if (! sf) return;
-    // Note: the dump is always tightly-packed RGBA8 (`width*height*4`
-    // bytes) — that's the input format `decode_to_rgba` produces and
-    // what `upload_into` accepts. The DMA-BUF stride/plane_offset are
-    // the *destination* layout in the GPU buffer, which the consumer
-    // reads back into the same tightly-packed shape; both sides' dumps
-    // are therefore directly comparable.
-    std::fprintf(sf,
-                 "{\n"
-                 "  \"kind\": \"producer\",\n"
-                 "  \"seq\": %llu,\n"
-                 "  \"fourcc\": \"0x%08x\",\n"
-                 "  \"modifier\": \"0x%016llx\",\n"
-                 "  \"width\": %u,\n"
-                 "  \"height\": %u,\n"
-                 "  \"stride\": %u,\n"
-                 "  \"plane_offset\": %u,\n"
-                 "  \"size\": %u,\n"
-                 "  \"row_bytes\": %u,\n"
-                 "  \"row_count\": %u,\n"
-                 "  \"dump_layout\": \"tightly_packed_rgba8\"\n"
-                 "}\n",
-                 static_cast<unsigned long long>(seq),
-                 d.format.fourcc,
-                 static_cast<unsigned long long>(d.format.modifier),
-                 s.width,
-                 s.height,
-                 s.stride,
-                 s.plane_offset,
-                 s.size,
-                 s.width * 4u,
-                 s.height);
-    std::fclose(sf);
+    auto sidecar  = rstd::format("{}.json", stem);
+    auto metadata = rstd::format("{{\n"
+                                 "  \"kind\": \"producer\",\n"
+                                 "  \"seq\": {},\n"
+                                 "  \"fourcc\": \"0x{:08x}\",\n"
+                                 "  \"modifier\": \"0x{:016x}\",\n"
+                                 "  \"width\": {},\n"
+                                 "  \"height\": {},\n"
+                                 "  \"stride\": {},\n"
+                                 "  \"plane_offset\": {},\n"
+                                 "  \"size\": {},\n"
+                                 "  \"row_bytes\": {},\n"
+                                 "  \"row_count\": {},\n"
+                                 "  \"dump_layout\": \"tightly_packed_rgba8\"\n"
+                                 "}}\n",
+                                 seq,
+                                 d.format.fourcc,
+                                 d.format.modifier,
+                                 s.width,
+                                 s.height,
+                                 s.stride,
+                                 s.plane_offset,
+                                 s.size,
+                                 s.width * 4u,
+                                 s.height);
+    auto saved =
+        rstd::fs::write(ref<rstd::path::Path>(sidecar.as_str()), metadata.as_str().as_bytes());
+    if (saved.is_err())
+        rstd_warn("waywallen-image-renderer: dump {}: {}", sidecar, saved.unwrap_err());
 }
 
 enum class UploadStatus
@@ -327,7 +295,7 @@ int cancel_slot_wait(void* userdata) {
         apply_control(host, control);
     });
     if (! host.events->running()) return 1;
-    return host.neg_pending || host.target_pending ? 1 : 0;
+    return host.neg_pending || host.target_pending || host.variant_pending ? 1 : 0;
 }
 
 enum class RepublishStatus
@@ -395,22 +363,22 @@ UploadStatus upload_to_slot(HostState& host, wavsen::video::Producer& producer,
         return UploadStatus::Failed;
     }
 
-    static std::atomic<uint64_t> g_dump_seq { 0 };
+    static rstd::sync::atomic::Atomic<uint64_t> g_dump_seq { 0 };
     maybe_dump_producer_frame(
-        rgba, directive, s, g_dump_seq.fetch_add(1, std::memory_order_relaxed));
+        rgba, directive, s, g_dump_seq.fetch_add(1, rstd::sync::atomic::Ordering::Relaxed));
 
     auto upload_res = producer.upload_into(reinterpret_cast<VkImage>(s.vk_image),
-                                           rstd::u32(s.width),
-                                           rstd::u32(s.height),
-                                           rgba.data.data(),
-                                           rstd::usize(rgba.data.size()));
+                                           u32(s.width),
+                                           u32(s.height),
+                                           reinterpret_cast<const uint8_t*>(rgba.data.data()),
+                                           usize(rgba.data.len().to_primitive()));
     if (upload_res.is_err()) {
         ww_bridge_pool_abort_acquired_slot(host.pool, &acquired.identity);
         rstd_error("waywallen-image-renderer: upload_into failed: {}",
-                   std::move(upload_res).unwrap_err().message.as_str());
+                   rstd::move(upload_res).unwrap_err().message.as_str());
         return UploadStatus::Failed;
     }
-    int                          sync_fd = std::move(upload_res).unwrap();
+    int                          sync_fd = rstd::move(upload_res).unwrap();
     ww_pool_slot_submit_result_t submitted {};
     int                          rc = ww_bridge_pool_submit_acquired_slot(
         host.pool, host.sock, &acquired.identity, sync_fd, &submitted);
@@ -424,13 +392,13 @@ UploadStatus upload_to_slot(HostState& host, wavsen::video::Producer& producer,
     return UploadStatus::Submitted;
 }
 
-bool prepare_decoded_rgba(const Options& opt, ww_image::ImageSession& session,
+bool prepare_decoded_rgba(const Options& opt, ww_image::ImageContent& session,
                           ww_image::RgbaBuf& rgba) {
-    if (! rgba.data.empty()) return true;
+    if (! rgba.data.is_empty()) return true;
 
     ww_image::DecodeError error;
     auto                  decoded = session.decode(opt.width, opt.height, &error);
-    if (decoded.data.empty()) {
+    if (decoded.data.is_empty()) {
         rstd_error("waywallen-image-renderer: decode {}: {}", opt.image_path, error.message);
         return false;
     }
@@ -442,11 +410,11 @@ bool prepare_decoded_rgba(const Options& opt, ww_image::ImageSession& session,
                    decoded.height);
         return false;
     }
-    rgba = std::move(decoded);
+    rgba = rstd::move(decoded);
     return true;
 }
 
-void release_decoded_rgba(ww_image::RgbaBuf& rgba) { std::vector<uint8_t>().swap(rgba.data); }
+void release_decoded_rgba(ww_image::RgbaBuf& rgba) { rgba.data = {}; }
 
 void publish_clear_color(HostState& host, const ClearColor& c) {
     if (int rc = ww_bridge_send_report_state_clear_color(host.sock, c.r, c.g, c.b, c.a); rc != 0) {
@@ -468,8 +436,8 @@ void set_scheme_color(HostState& host, const char* value, bool publish) {
 
 void apply_user_properties(HostState& host, const char* json) {
     if (! json || ! *json) return;
-    auto bytes = rstd::slice<rstd::u8>::from_raw_parts(reinterpret_cast<const rstd::byte*>(json),
-                                                       rstd::usize(std::strlen(json)));
+    auto bytes =
+        slice<u8>::from_raw_parts(reinterpret_cast<const rstd::byte*>(json), usize(::strlen(json)));
     auto parsed_result =
         rstd::json::from_slice(bytes, rstd::json::ParseOptions { .allow_comments = true });
     if (parsed_result.is_err()) return;
@@ -479,21 +447,25 @@ void apply_user_properties(HostState& host, const char* json) {
         return;
     }
     auto value = parsed.get("waywallen.scheme_color"_str);
-    if (value.is_none()) return;
-    if ((**value).is_string()) {
-        const auto text = rstd::cppstd::to_string(*(**value).as_str());
-        set_scheme_color(host, text.c_str(), false);
-    } else {
+    if (value && (**value).is_string()) {
+        auto wire = CString::make(Vec<u8>::from((**value).as_str().unwrap().as_bytes()));
+        if (wire.is_ok())
+            set_scheme_color(host, wire->as_ptr(), false);
+        else
+            rstd_warn("waywallen-image-renderer: invalid {} value; ignored", kSchemeColorKey);
+    } else if (value) {
         rstd_warn("waywallen-image-renderer: {} is not a string; ignored",
                   static_cast<const char*>(kSchemeColorKey));
     }
+    auto variant = parsed.get("waywallen.image_variant"_str);
+    if (variant && (**variant).is_string()) host.variant = String::make(*(**variant).as_str());
 }
 
 /* Apply a directive received from the daemon. After bridge brings the
  * slots up, upload RGBA into slot 0 and submit one frame. Static images
  * discard decode and upload storage after each negotiation. */
 void apply_negotiate_request(HostState& host, wavsen::video::Producer& producer, const Options& opt,
-                             ww_image::ImageSession& session, ww_image::RgbaBuf& rgba,
+                             ww_image::ImageContent& session, ww_image::RgbaBuf& rgba,
                              const ww_pool_directive_t& d) {
     if (! prepare_decoded_rgba(opt, session, rgba)) {
         host.events->request_stop(ExitCause::Failure);
@@ -517,11 +489,14 @@ void apply_negotiate_request(HostState& host, wavsen::video::Producer& producer,
     auto release = producer.release_upload_buffer();
     if (release.is_err()) {
         rstd_error("waywallen-image-renderer: release upload buffer failed: {}",
-                   std::move(release).unwrap_err().message.as_str());
+                   rstd::move(release).unwrap_err().message.as_str());
         host.events->request_stop(ExitCause::Failure);
         return;
     }
-    host.negotiated.store(true, std::memory_order_release);
+    host.negotiated.store(true, rstd::sync::atomic::Ordering::Release);
+    host.active_directive = d;
+    host.active_width     = opt.width;
+    host.active_height    = opt.height;
     rstd_info("waywallen-image-renderer: NegotiateBuffers honored "
               "(path={} mem_source={} modifier=0x{:016x}) — bind+frame emitted",
               static_cast<uint32_t>(d.path),
@@ -529,80 +504,90 @@ void apply_negotiate_request(HostState& host, wavsen::video::Producer& producer,
               static_cast<unsigned long long>(d.format.modifier));
 }
 
-void apply_render_target(HostState& host, wavsen::video::Producer& producer,
-                         ww_image::ImageSession&                 session,
+int replace_content(HostState& host, wavsen::video::Producer& producer,
+                    const ww_pool_directive_t& directive, const ww_image::RgbaBuf& rgba,
+                    uint64_t& generation) {
+    int rc = ww_bridge_pool_prepare_target(host.pool, &directive, rgba.width, rgba.height);
+    if (rc != 0) return rc;
+    ww_pool_slot_t slot {};
+    rc = ww_bridge_pool_candidate_slot(host.pool, 0, &slot);
+    if (rc == 0) {
+        auto uploaded = producer.upload_into(reinterpret_cast<VkImage>(slot.vk_image),
+                                             u32(slot.width),
+                                             u32(slot.height),
+                                             reinterpret_cast<const uint8_t*>(rgba.data.data()),
+                                             usize(rgba.data.len().to_primitive()));
+        if (uploaded.is_err())
+            rc = -EIO;
+        else {
+            int sync_fd = rstd::move(uploaded).unwrap();
+            if (producer.release_upload_buffer().is_err())
+                rc = -EIO;
+            else
+                rc = ww_bridge_pool_commit_target(host.pool, host.sock, &generation);
+            if (rc == 0) {
+                ww_pool_slot_acquire_result_t acquired {};
+                rc = ww_bridge_pool_try_acquire_any_for_render(host.pool, &acquired);
+                if (rc == 0 && acquired.status == WW_POOL_SLOT_ACQUIRE_READY_UNUSED &&
+                    acquired.slot.index == 0) {
+                    ww_pool_slot_submit_result_t submitted {};
+                    rc = ww_bridge_pool_submit_acquired_slot(
+                        host.pool, host.sock, &acquired.identity, sync_fd, &submitted);
+                    sync_fd = -1;
+                    if (rc == 0 && submitted.status != WW_POOL_SLOT_SUBMIT_SUBMITTED) rc = -EIO;
+                } else if (rc == 0)
+                    rc = -EIO;
+                if (rc != 0) host.events->request_stop(ExitCause::Failure);
+            }
+            if (sync_fd >= 0) ::close(sync_fd);
+        }
+    }
+    ww_bridge_pool_abort_target(host.pool);
+    if (rc == 0) {
+        host.active_directive = directive;
+        host.active_width     = rgba.width;
+        host.active_height    = rgba.height;
+        host.negotiated.store(true, rstd::sync::atomic::Ordering::Release);
+    }
+    return rc;
+}
+
+bool apply_render_target(HostState& host, wavsen::video::Producer& producer,
+                         ww_image::ImageContent&                 session,
                          const waywallen_render_target_config_t& config) {
     waywallen_render_target_outcome_t result {};
     result.revision = config.revision;
     result.status   = 1;
-    std::string         message;
+    String              message;
     ww_pool_directive_t directive {};
     int rc = ww_bridge_render_target_directive(&host.target_caps, &config, &directive);
     if (rc == 0 && config.revision <= host.target_revision) rc = -ESTALE;
     if (rc != 0) {
-        message = "invalid or stale render target";
+        message = String::make("invalid or stale render target"_str);
     } else {
         host.target_revision = config.revision;
         result.status        = 2;
         ww_image::DecodeError error;
         auto                  rgba = session.decode(config.width, config.height, &error);
-        if (rgba.data.empty())
-            message = error.message;
-        else if ((rc = ww_bridge_pool_prepare_target(
-                      host.pool, &directive, config.width, config.height)) != 0) {
+        if (rgba.data.is_empty())
+            message = error.message.clone();
+        else if ((rc = replace_content(host, producer, directive, rgba, result.pool_generation)) !=
+                 0) {
             if (rc != -ENOMEM && rc != -EBUSY && rc != -EPIPE) result.status = 3;
-            message = "prepare render target: " + std::to_string(rc);
+            message = rstd::format("replace render target: {}", rc);
         } else {
-            ww_pool_slot_t slot {};
-            rc            = ww_bridge_pool_candidate_slot(host.pool, 0, &slot);
-            auto uploaded = producer.upload_into(reinterpret_cast<VkImage>(slot.vk_image),
-                                                 rstd::u32(slot.width),
-                                                 rstd::u32(slot.height),
-                                                 rgba.data.data(),
-                                                 rstd::usize(rgba.data.size()));
-            if (rc != 0 || uploaded.is_err())
-                message = "upload render target failed";
-            else {
-                int  sync_fd  = std::move(uploaded).unwrap();
-                auto released = producer.release_upload_buffer();
-                if (released.is_err()) {
-                    ::close(sync_fd);
-                    message = "drain upload failed";
-                } else {
-                    rc =
-                        ww_bridge_pool_commit_target(host.pool, host.sock, &result.pool_generation);
-                    if (rc == 0) {
-                        ww_pool_slot_acquire_result_t acquired {};
-                        rc = ww_bridge_pool_try_acquire_any_for_render(host.pool, &acquired);
-                        if (rc == 0 && acquired.status == WW_POOL_SLOT_ACQUIRE_READY_UNUSED &&
-                            acquired.slot.index == 0) {
-                            ww_pool_slot_submit_result_t submitted {};
-                            rc = ww_bridge_pool_submit_acquired_slot(
-                                host.pool, host.sock, &acquired.identity, sync_fd, &submitted);
-                            sync_fd = -1;
-                            if (rc == 0 && submitted.status == WW_POOL_SLOT_SUBMIT_SUBMITTED) {
-                                result.status = 0;
-                                result.width  = config.width;
-                                result.height = config.height;
-                                host.negotiated.store(true, std::memory_order_release);
-                            }
-                        }
-                    }
-                    if (sync_fd >= 0) ::close(sync_fd);
-                    if (result.status != 0) {
-                        message = "publish render target failed";
-                        host.events->request_stop(ExitCause::Failure);
-                    }
-                }
-            }
-            ww_bridge_pool_abort_target(host.pool);
+            result.status = 0;
+            result.width  = config.width;
+            result.height = config.height;
         }
         release_decoded_rgba(rgba);
         (void)producer.release_upload_buffer();
     }
-    result.message = message.data();
+    auto wire      = terminated(message);
+    result.message = const_cast<char*>(wire.as_ptr());
     if (ww_bridge_send_render_target_result(host.sock, &result) != 0)
         host.events->request_stop(ExitCause::Failure);
+    return result.status == 0;
 }
 
 void apply_control(HostState& host, ww_bridge_control_t& c) {
@@ -626,8 +611,14 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
                 const char* key = settings.data[i].key;
                 const char* val = settings.data[i].value;
                 if (! key || ! val) continue;
-                if (std::strcmp(key, kSchemeColorKey) == 0) {
+                if (::strcmp(key, kSchemeColorKey) == 0) {
                     set_scheme_color(host, val, true);
+                } else if (::strcmp(key, "waywallen.image_variant") == 0) {
+                    if (::strcmp(val, "day-night") == 0 || ::strcmp(val, "light") == 0 ||
+                        ::strcmp(val, "dark") == 0) {
+                        host.variant         = String::make(text(val));
+                        host.variant_pending = true;
+                    }
                 } else {
                     rstd_warn("waywallen-image-renderer: ApplySettings: unknown key '{}'; "
                               "ignoring",
@@ -679,19 +670,18 @@ constexpr uint32_t kProbeHeight = 1080;
 // a `socketpair(AF_UNIX)`, ask it to advertise, then drain the
 // `format_caps` message on the other end and decode it.
 static int print_caps_json() {
-    auto producer_res =
-        wavsen::video::Producer::create(rstd::u32(kProbeWidth), rstd::u32(kProbeHeight));
+    auto producer_res = wavsen::video::Producer::create(u32(kProbeWidth), u32(kProbeHeight));
     if (producer_res.is_err()) {
         rstd_error("waywallen-image-renderer: vk_producer: {}",
-                   std::move(producer_res).unwrap_err().message.as_str());
+                   rstd::move(producer_res).unwrap_err().message.as_str());
         return 1;
     }
-    auto producer = std::move(producer_res).unwrap();
+    auto producer = rstd::move(producer_res).unwrap();
 
     int sv[2] = { -1, -1 };
     if (::socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0) {
         rstd_error("waywallen-image-renderer: socketpair: {}",
-                   static_cast<const char*>(std::strerror(errno)));
+                   static_cast<const char*>(::strerror(errno)));
         return 1;
     }
 
@@ -782,7 +772,7 @@ static int print_caps_json() {
     }
     const auto& capabilities = caps.capabilities;
 
-    auto put_uuid = [](const ww_array_u32_t& a) -> std::string {
+    auto put_uuid = [](const ww_array_u32_t& a) -> String {
         // device_uuid / driver_uuid are 16 bytes packed as 4×u32 LE on
         // the wire. Unpack back to 16 bytes for the JSON output.
         uint8_t bytes[16] = { 0 };
@@ -793,44 +783,41 @@ static int print_caps_json() {
             bytes[i * 4 + 2] = static_cast<uint8_t>((v >> 16) & 0xff);
             bytes[i * 4 + 3] = static_cast<uint8_t>((v >> 24) & 0xff);
         }
-        std::string s = "[";
+        String s = String::make("["_str);
         for (int i = 0; i < 16; ++i) {
-            char buf[8];
-            std::snprintf(buf, sizeof(buf), "%s%u", i ? "," : "", bytes[i]);
-            s += buf;
+            if (i) s.push_ascii(',');
+            s.push_str(rstd::format("{}", bytes[i]));
         }
-        s += "]";
+        s.push_ascii(']');
         return s;
     };
 
-    std::printf("{\n");
-    std::printf("  \"by_fourcc\": {\n");
+    rstd::io::print("{{\n  \"by_fourcc\": {{\n");
     size_t cursor = 0;
     for (uint32_t i = 0; i < capabilities.fourccs.count; ++i) {
         const uint32_t fc = capabilities.fourccs.data[i];
         const uint32_t n  = capabilities.mod_counts.data[i];
-        std::printf("    \"0x%08x\": [", fc);
+        rstd::io::print("    \"0x{:08x}\": [", fc);
         for (uint32_t j = 0; j < n; ++j) {
-            std::printf("%s\n      {\"modifier\": %llu, \"plane_count\": %u}",
-                        j ? "," : "",
-                        static_cast<unsigned long long>(capabilities.modifiers.data[cursor + j]),
-                        capabilities.plane_counts.data[cursor + j]);
+            rstd::io::print("{}\n      {{\"modifier\": {}, \"plane_count\": {}}}",
+                            j ? ","_str : ""_str,
+                            capabilities.modifiers.data[cursor + j],
+                            capabilities.plane_counts.data[cursor + j]);
         }
         cursor += n;
-        std::printf("\n    ]%s\n", (i + 1 < capabilities.fourccs.count) ? "," : "");
+        rstd::io::print("\n    ]{}\n", (i + 1 < capabilities.fourccs.count) ? ","_str : ""_str);
     }
-    std::printf("  },\n");
-    std::printf("  \"device_uuid\": %s,\n", put_uuid(capabilities.device_uuid).c_str());
-    std::printf("  \"driver_uuid\": %s,\n", put_uuid(capabilities.driver_uuid).c_str());
-    std::printf("  \"drm_render_major\": %u,\n", capabilities.drm_node.major);
-    std::printf("  \"drm_render_minor\": %u,\n", capabilities.drm_node.minor);
-    std::printf("  \"sync\": %u,\n", capabilities.sync_caps);
-    std::printf("  \"color\": %u,\n", capabilities.color_caps);
-    std::printf("  \"mem_hint\": %u,\n", capabilities.mem_hints);
-    std::printf("  \"extent_max_w\": %u,\n", capabilities.max_extent.width);
-    std::printf("  \"extent_max_h\": %u\n", capabilities.max_extent.height);
-    std::printf("}\n");
-    std::fflush(stdout);
+    rstd::io::print("  }},\n");
+    rstd::io::print("  \"device_uuid\": {},\n", put_uuid(capabilities.device_uuid));
+    rstd::io::print("  \"driver_uuid\": {},\n", put_uuid(capabilities.driver_uuid));
+    rstd::io::print("  \"drm_render_major\": {},\n", capabilities.drm_node.major);
+    rstd::io::print("  \"drm_render_minor\": {},\n", capabilities.drm_node.minor);
+    rstd::io::print("  \"sync\": {},\n", capabilities.sync_caps);
+    rstd::io::print("  \"color\": {},\n", capabilities.color_caps);
+    rstd::io::print("  \"mem_hint\": {},\n", capabilities.mem_hints);
+    rstd::io::print("  \"extent_max_w\": {},\n", capabilities.max_extent.width);
+    rstd::io::print("  \"extent_max_h\": {}\n", capabilities.max_extent.height);
+    rstd::io::print("}}\n");
     ww_evt_format_caps_free(&caps);
     return 0;
 }
@@ -845,21 +832,20 @@ int run(int argc, char** argv) {
 
     auto parsed_args = parse_args(argc, argv);
     if (! parsed_args.should_run) return parsed_args.exit_code;
-    Options opt = std::move(parsed_args.options);
+    Options opt = rstd::move(parsed_args.options);
 
     if (opt.print_caps) {
         return print_caps_json();
     }
 
     if (opt.vulkan_probe) {
-        auto prod_res =
-            wavsen::video::Producer::create(rstd::u32(kProbeWidth), rstd::u32(kProbeHeight));
+        auto prod_res = wavsen::video::Producer::create(u32(kProbeWidth), u32(kProbeHeight));
         if (prod_res.is_err()) {
             rstd_error("waywallen-image-renderer: vk_producer: {}",
-                       std::move(prod_res).unwrap_err().message.as_str());
+                       rstd::move(prod_res).unwrap_err().message.as_str());
             return 1;
         }
-        auto prod = std::move(prod_res).unwrap();
+        auto prod = rstd::move(prod_res).unwrap();
         rstd_info("waywallen-image-renderer: vulkan_probe ok drm_render={}:{}",
                   prod->drm_render_major(),
                   prod->drm_render_minor());
@@ -867,41 +853,36 @@ int run(int argc, char** argv) {
     }
 
     if (opt.decode_only) {
-        if (opt.image_path.empty()) die("--decode-only requires --path");
+        if (opt.image_path.is_empty()) die("--decode-only requires --path"_str);
         ww_image::DecodeError derr;
-        ww_image::RgbaBuf     buf = ww_image::decode_to_rgba(opt.image_path,
-                                                             /* resolution = */ 0,
-                                                             &derr);
-        if (buf.data.empty()) {
+        auto                  content = ww_image::ImageContent::open(opt.image_path, &derr);
+        ww_image::RgbaBuf     buf;
+        if (content) buf = content->decode(content->width(), content->height(), &derr);
+        if (buf.data.is_empty()) {
             rstd_error("waywallen-image-renderer: decode failed: {}", derr.message);
             return 1;
         }
-        uint64_t sum = 0;
-        for (uint8_t b : buf.data) sum += b;
+        uint64_t    sum    = 0;
+        const auto* pixels = reinterpret_cast<const uint8_t*>(buf.data.data());
+        for (size_t i = 0; i < buf.data.len().to_primitive(); ++i) sum += pixels[i];
         rstd_info("waywallen-image-renderer: decoded {}x{} stride={} "
                   "bytes={} pixel_sum={}",
                   buf.width,
                   buf.height,
                   buf.stride,
-                  buf.data.size(),
+                  buf.data.len().to_primitive(),
                   static_cast<unsigned long long>(sum));
         return 0;
     }
 
-    if (opt.ipc_path.empty()) die("--ipc <socket_path> is required");
+    if (opt.ipc_path.is_empty()) die("--ipc <socket_path> is required"_str);
 
     ::prctl(PR_SET_PDEATHSIG, SIGTERM);
 
-    /* --- Connect first, then read the Init message ---
-     *
-     * Step 3: connect() moved to before any decode / Vulkan init so
-     * the daemon's typed Init payload (extent + image path) drives
-     * the GPU pipeline rather than CLI argv. The legacy `--image`/
-     * `--width`/`--height` argv is still emitted by the daemon
-     * double-send but we ignore it here. */
+    // Read resolved settings before decoding or initializing Vulkan.
     HostState host;
-    host.sock = ww_bridge_connect(opt.ipc_path.c_str());
-    if (host.sock < 0) die("ww_bridge_connect: " + std::string(std::strerror(-host.sock)));
+    host.sock = ww_bridge_connect(terminated(opt.ipc_path).as_ptr());
+    if (host.sock < 0) die(rstd::format("ww_bridge_connect: {}", text(::strerror(-host.sock))));
 
     waywallen_renderer_init_t init {};
     if (int rc = ww_bridge_recv_init(host.sock, &init); rc < 0) {
@@ -919,7 +900,7 @@ int run(int argc, char** argv) {
         };
         ww_bridge_send_init_nack(host.sock, &rejection);
         waywallen_renderer_init_free(&init);
-        die(std::string(reason) + " rc=" + std::to_string(rc));
+        die(rstd::format("{} rc={}", reason, rc));
     }
 
     uint32_t custom_extent = 1080;
@@ -928,18 +909,16 @@ int run(int argc, char** argv) {
     for (size_t i = 0; i < init.settings.count; ++i) {
         const ww_kv_t& kv = init.settings.data[i];
         if (! kv.key || ! kv.value) continue;
-        if (opt.render_node.empty() && std::strcmp(kv.key, "render_node") == 0 && *kv.value) {
-            opt.render_node = kv.value;
-        } else if (std::strcmp(kv.key, "resolution") == 0 && *kv.value) {
-            char* end      = nullptr;
-            long  n        = std::strtol(kv.value, &end, 10);
-            opt.resolution = (end != kv.value) ? ww_resolution_sanitize(static_cast<int32_t>(n))
-                                               : static_cast<int32_t>(WW_RESOLUTION_1080P);
-        } else if (std::strcmp(kv.key, "custom_extent") == 0 && *kv.value) {
-            char* end = nullptr;
-            long  n   = std::strtol(kv.value, &end, 10);
-            if (end != kv.value && *end == '\0' && n >= 1 && n <= 8192)
-                custom_extent = static_cast<uint32_t>(n);
+        if (opt.render_node.is_empty() && ::strcmp(kv.key, "render_node") == 0 && *kv.value) {
+            opt.render_node = String::make(text(kv.value));
+        } else if (::strcmp(kv.key, "resolution") == 0 && *kv.value) {
+            auto value     = rstd::from_str<i32>(text(kv.value));
+            opt.resolution = value.is_ok() ? ww_resolution_sanitize(value->to_primitive())
+                                           : static_cast<int32_t>(WW_RESOLUTION_1080P);
+        } else if (::strcmp(kv.key, "custom_extent") == 0 && *kv.value) {
+            auto value = rstd::from_str<u32>(text(kv.value));
+            if (value.is_ok() && *value >= u32(1) && *value <= u32(8192))
+                custom_extent = value->to_primitive();
         }
     }
     apply_user_properties(host, init.user_properties);
@@ -953,10 +932,11 @@ int run(int argc, char** argv) {
     host.events = Some(rstd::move(events).unwrap());
 
     /* --- Decode + Vulkan setup --- */
-    if (opt.image_path.empty()) die("--path <image-file> is required");
+    if (opt.image_path.is_empty()) die("--path <image-file> is required"_str);
     ww_image::DecodeError derr;
-    auto                  session = ww_image::ImageSession::open(opt.image_path, &derr);
-    if (! session) die("open " + opt.image_path + ": " + derr.message);
+    auto                  session = ww_image::ImageContent::open(opt.image_path, &derr);
+    if (! session) die(rstd::format("open {}: {}", opt.image_path, derr.message));
+    session->set_mode(host.variant);
     opt.width  = session->width();
     opt.height = session->height();
     ww_resolution_apply_short_edge(opt.resolution == WW_RESOLUTION_CUSTOM
@@ -968,7 +948,8 @@ int run(int argc, char** argv) {
     ww_image::RgbaBuf rgba_buf;
     if (opt.resolution != WW_RESOLUTION_AUTO) {
         rgba_buf = session->decode(opt.width, opt.height, &derr);
-        if (rgba_buf.data.empty()) die("decode " + opt.image_path + ": " + derr.message);
+        if (rgba_buf.data.is_empty())
+            die(rstd::format("decode {}: {}", opt.image_path, derr.message));
     } else {
         host.target_caps = { .revision         = 1,
                              .reference_width  = opt.width,
@@ -982,15 +963,14 @@ int run(int argc, char** argv) {
                              .height_alignment = 1 };
     }
 
-    auto producer_res =
-        opt.render_node.empty()
-            ? wavsen::video::Producer::create(rstd::u32(opt.width), rstd::u32(opt.height))
-            : wavsen::video::Producer::create_with_render_node(
-                  rstd::u32(opt.width), rstd::u32(opt.height), as_rstd_str(opt.render_node));
+    auto producer_res = opt.render_node.is_empty()
+                            ? wavsen::video::Producer::create(u32(opt.width), u32(opt.height))
+                            : wavsen::video::Producer::create_with_render_node(
+                                  u32(opt.width), u32(opt.height), opt.render_node.as_str());
     if (producer_res.is_err()) {
-        die("vk_producer: " + to_std_string(std::move(producer_res).unwrap_err().message));
+        die(rstd::format("vk_producer: {}", rstd::move(producer_res).unwrap_err().message));
     }
-    auto producer = std::move(producer_res).unwrap();
+    auto producer = rstd::move(producer_res).unwrap();
 
     /* GPU info diagnostic (uses bridge probe_vk dispatch table). */
     ww_bridge_vk_dt_t vdt {};
@@ -1026,7 +1006,7 @@ int run(int argc, char** argv) {
     pool_init.format_feature_flags = VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
 
     if (int rc = ww_bridge_pool_create(WW_POOL_BACKEND_VULKAN, &pool_init, &host.pool); rc != 0)
-        die("ww_bridge_pool_create failed: " + std::to_string(rc));
+        die(rstd::format("ww_bridge_pool_create failed: {}", rc));
 
     /* Bridge sends ready + release_syncobj + format_caps in one go. */
     if (int rc = ww_bridge_pool_advertise_caps(host.pool,
@@ -1035,37 +1015,73 @@ int run(int argc, char** argv) {
                                                opt.height,
                                                WW_MEM_HINT_DEVICE_LOCAL | WW_MEM_HINT_HOST_VISIBLE);
         rc != 0)
-        die("ww_bridge_pool_advertise_caps failed: " + std::to_string(rc));
+        die(rstd::format("ww_bridge_pool_advertise_caps failed: {}", rc));
 
     publish_clear_color(host, host.scheme_color);
     if (opt.resolution == WW_RESOLUTION_AUTO &&
         ww_bridge_send_render_target_capabilities(host.sock, &host.target_caps) != 0)
-        die("send render target capabilities failed");
+        die("send render target capabilities failed"_str);
     rstd_info("waywallen-image-renderer: ready, advertised caps, "
               "waiting for allocation configuration");
 
     /* Main loop: negotiation publishes new content; request_frame only
      * republishes the latest released slot. */
-    const auto exit = host.events->run(
+    bool       content_dirty = false;
+    auto       next_update   = rstd::time::Instant::now();
+    const auto exit          = host.events->run(
         [&](auto& control) {
             apply_control(host, control);
         },
         [&]() -> LoopStep {
+            if (host.variant_pending) {
+                host.variant_pending = false;
+                content_dirty        = session->set_mode(host.variant) || content_dirty;
+                next_update          = rstd::time::Instant::now();
+            }
             if (host.target_pending) {
-                auto config                = host.target_config;
+                content_dirty = session->update(rstd::time::SystemTime::now()) || content_dirty;
+                auto config   = host.target_config;
                 host.target_pending        = false;
                 host.frame_request_pending = false;
-                apply_render_target(host, *producer, *session, config);
+                if (apply_render_target(host, *producer, *session, config)) content_dirty = false;
                 return LoopStep::again();
             }
             if (host.neg_pending) {
+                if (session->update(rstd::time::SystemTime::now())) {
+                    content_dirty = true;
+                    release_decoded_rgba(rgba_buf);
+                }
                 ww_pool_directive_t d      = host.neg_directive;
                 host.neg_pending           = false;
                 host.frame_request_pending = false;
                 apply_negotiate_request(host, *producer, opt, *session, rgba_buf, d);
                 return LoopStep::again();
             }
-            if (host.frame_request_pending && host.negotiated.load(std::memory_order_acquire)) {
+            if ((session->dynamic() || content_dirty) &&
+                rstd::time::Instant::now() >= next_update) {
+                next_update = rstd::time::Instant::now() + rstd::time::Duration::from_secs(u64(30));
+                content_dirty = session->update(rstd::time::SystemTime::now()) || content_dirty;
+                if (content_dirty && host.negotiated.load(rstd::sync::atomic::Ordering::Acquire)) {
+                    auto     rgba = session->decode(host.active_width, host.active_height, &derr);
+                    uint64_t generation {};
+                    if (rgba.data.is_empty())
+                        rstd_warn("image package: retaining previous content: {}", derr.message);
+                    else {
+                        const int rc = replace_content(
+                            host, *producer, host.active_directive, rgba, generation);
+                        if (rc == 0) {
+                            content_dirty              = false;
+                            host.frame_request_pending = false;
+                        } else
+                            rstd_warn(
+                                "image package: retaining previous content, replacement failed: {}",
+                                rc);
+                    }
+                    (void)producer->release_upload_buffer();
+                }
+            }
+            if (host.frame_request_pending &&
+                host.negotiated.load(rstd::sync::atomic::Ordering::Acquire)) {
                 host.frame_request_pending = false;
                 const auto status          = republish_latest(host);
                 if (status == RepublishStatus::Failed) {
@@ -1073,7 +1089,8 @@ int run(int argc, char** argv) {
                 }
                 return LoopStep::again();
             }
-            return LoopStep::wait();
+            return session->dynamic() || content_dirty ? LoopStep::wait_until(next_update)
+                                                       : LoopStep::wait();
         });
     if (exit.cause == ExitCause::Transport)
         rstd_error("waywallen-image-renderer: recv_control failed: {}", exit.code);

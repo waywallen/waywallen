@@ -1,4 +1,21 @@
 local M = {}
+local IMAGE_EXTS = {
+    png = true, jpg = true, jpeg = true, webp = true,
+    bmp = true, tiff = true, tif = true, avif = true, gif = true,
+}
+
+function M.supported(ctx, path)
+    return IMAGE_EXTS[(ctx.extension(path) or ""):lower()] == true
+end
+
+function M.resolution(ctx, path)
+    local base = (ctx.filename(path) or ""):match("^([^.]*)")
+    local width, height = (base or ""):match("^(%d+)x(%d+)$")
+    width, height = tonumber(width), tonumber(height)
+    if width and height and width > 0 and height > 0 and width <= 2147483647 and height <= 2147483647 then
+        return {width = width, height = height}
+    end
+end
 
 local function trim(value)
     return (value or ""):match("^%s*(.-)%s*$")
@@ -67,7 +84,7 @@ function M.kind(ctx, root)
     end
     if ctx.filename(path) == "wallpapers" then
         for _, dir in ipairs(ctx.list_dirs(root)) do
-            if ctx.fs.is_dir(dir .. "/contents/images") then return "wallpapers" end
+            if ctx.fs.is_dir(dir .. "/contents/images") or ctx.fs.is_dir(dir .. "/contents/images_dark") then return "wallpapers" end
         end
     end
     if ctx.filename(path) == "backgrounds"
@@ -107,15 +124,22 @@ local function kde_package(ctx, root, emit, cache)
     local name = plugin["Name[" .. lang .. "]"]
         or plugin["Name[" .. lang:match("^[^_]*") .. "]"] or plugin.Name
     if type(name) ~= "string" or name == "" then name = ctx.filename(root) end
-    local has_dark = ctx.fs.is_dir(root .. "/contents/images_dark")
-    for _, variant in ipairs({ "images", "images_dark" }) do
-        local dir = root .. "/contents/" .. variant
-        if ctx.fs.is_dir(dir) then
-            local label = name
-            if has_dark then label = label .. (variant == "images" and " · Light" or " · Dark") end
-            walk(ctx, dir, 0, function(path) emit(path, label) end)
+    local preview, dimensions, distance, area
+    local dir = root .. "/contents/images"
+    if ctx.fs.is_dir(dir) then
+        for _, path in ipairs(sorted(ctx.fs.list_files(dir))) do
+            local size = M.resolution(ctx, path)
+            if size and M.supported(ctx, path) and ctx.fs.is_file(path) then
+                local candidate_distance = math.abs(size.width / size.height - 16 / 9)
+                local candidate_area = size.width * size.height
+                if not preview or candidate_distance < distance
+                    or (candidate_distance == distance and candidate_area < area) then
+                    preview, dimensions, distance, area = path, size, candidate_distance, candidate_area
+                end
+            end
         end
     end
+    if preview then emit(root .. "/contents", name, preview, dimensions) end
 end
 
 local function children(node, tag)

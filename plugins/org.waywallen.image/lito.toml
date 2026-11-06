@@ -9,11 +9,22 @@ sources = [
   "src/main.cpp",
   "src/entry.cppm",
   "src/entry.cpp",
+  "src/av_image.cppm",
   "src/av_image.cpp",
+  "src/image_content.cppm",
+  "src/image_content.cpp",
 ]
 
 [usage]
 threads = true
+
+[[test]]
+name = "image-content"
+module = "waywallen.image.tests"
+sources = ["tests/main.cppm", "tests/image_content.cpp", "src/image_content.cppm", "src/image_content.cpp", "src/av_image.cppm", "src/av_image.cpp"]
+
+[dev-dependencies.rstd-test]
+version = "0.1.9"
 
 [dependencies.waywallen-plugin-common]
 workspace = true
@@ -21,7 +32,7 @@ workspace = true
 [dependencies.wavsen]
 workspace = true
 
-[dependencies.rstd-cppstd]
+[dependencies.rstd-std]
 workspace = true
 
 [dependencies.rstd-json]
@@ -34,16 +45,4 @@ workspace = true
 workspace = true
 
 [runtime-dependencies.waywallen-bridge]
-workspace = true
-
-[external-dependencies.pkg-config.libavformat]
-workspace = true
-
-[external-dependencies.pkg-config.libavcodec]
-workspace = true
-
-[external-dependencies.pkg-config.libavutil]
-workspace = true
-
-[external-dependencies.pkg-config.libswscale]
 workspace = true

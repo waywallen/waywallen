@@ -500,6 +500,51 @@ impl NativeSession {
 }
 
 #[test]
+fn image_package_replaces_single_buffer_while_old_content_is_held() {
+    if std::env::var("WAYWALLEN_IMAGE_PACKAGE_TEST").as_deref() != Ok("1") {
+        eprintln!("skip: set WAYWALLEN_IMAGE_PACKAGE_TEST=1 with a two-variant image package");
+        return;
+    }
+    let Some(mut session) = NativeSession::start(r#"{"waywallen.image_variant":"light"}"#.into())
+    else {
+        return;
+    };
+    let (pool, buffer, _first, first_fence) = session.configure_paused();
+    assert!(readable(first_fence.as_raw_fd(), Duration::from_secs(10)));
+    let light_hash = pixel_hash(&pool, &buffer);
+    session.send(ControlMsg::RequestFrame);
+    session.send(ControlMsg::SettingChanged {
+        settings: vec![("waywallen.image_variant".into(), "dark".into())],
+    });
+    let (replacement, replacement_buffer) = loop {
+        let (event, mut fds) = session.receive();
+        match event {
+            EventMsg::BindBuffers { pool: replacement } => {
+                assert_eq!(replacement.count, 1);
+                assert_eq!(fds.len(), 1);
+                break (replacement, fds.remove(0));
+            }
+            EventMsg::ReportState { .. } => {}
+            _ => panic!("expected replacement bind: {event:?}"),
+        }
+    };
+    let (dark, dark_fence) = session.frame();
+    assert!(readable(dark_fence.as_raw_fd(), Duration::from_secs(10)));
+    assert_ne!(pixel_hash(&replacement, &replacement_buffer), light_hash);
+    assert_eq!(
+        pixel_hash(&pool, &buffer),
+        light_hash,
+        "old backing storage was overwritten"
+    );
+    session.release(&dark, &dark_fence);
+    session.no_frames(Duration::from_millis(100));
+    session.send(ControlMsg::RequestFrame);
+    let (repeated, repeated_fence) = session.frame();
+    session.release(&repeated, &repeated_fence);
+    session.shutdown(Duration::from_secs(1));
+}
+
+#[test]
 fn blocked_republish_handles_controls_without_losing_the_request() {
     let Some(mut session) = NativeSession::start(String::new()) else {
         return;

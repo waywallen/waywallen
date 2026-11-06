@@ -1,13 +1,25 @@
 local M = {}
 
-function M.properties()
-    return {
+function M.properties(entry, ctx)
+    local properties = {
         ["waywallen.scheme_color"] = {
             text = tr("Scheme color"),
             type = "color",
             value = {0.0, 0.0, 0.0, 1.0},
         },
     }
+    if entry and ctx and ctx.fs.is_dir(entry.resource .. "/images")
+        and ctx.fs.is_dir(entry.resource .. "/images_dark") then
+        properties["waywallen.image_variant"] = {
+            text = tr("Wallpaper variant"), type = "combo", value = "day-night",
+            options = {
+                {label = tr("Simulated day and night"), value = "day-night"},
+                {label = tr("Always light"), value = "light"},
+                {label = tr("Always dark"), value = "dark"},
+            },
+        }
+    end
+    return properties
 end
 
 function M.apply(entry)

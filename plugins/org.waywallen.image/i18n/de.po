@@ -1,6 +1,22 @@
 msgid ""
 msgstr "Project-Id-Version: org.waywallen.image 0.5.0\nLanguage: de\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
+#: image/wallpaper.lua
+msgid "Wallpaper variant"
+msgstr "Hintergrundbildvariante"
+
+#: image/wallpaper.lua
+msgid "Simulated day and night"
+msgstr "Simulierter Tag-Nacht-Wechsel"
+
+#: image/wallpaper.lua
+msgid "Always light"
+msgstr "Immer hell"
+
+#: image/wallpaper.lua
+msgid "Always dark"
+msgstr "Immer dunkel"
+
 #: main.lua:15
 msgid "A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Auto-detect also finds installed KDE and GNOME system wallpapers."
 msgstr "Ein Ordner mit Bilddateien. Unterordner bis zu zwei Ebenen tief werden ebenfalls durchsucht. Unterstützte Formate: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Die automatische Erkennung findet auch installierte KDE- und GNOME-Systemhintergrundbilder."
