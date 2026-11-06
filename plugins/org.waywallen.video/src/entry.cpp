@@ -1,6 +1,7 @@
 module;
 
 #include <rstd/macro.hpp>
+#include "frame_rate_limit.hpp"
 
 #include <errno.h>
 #include <signal.h>
@@ -312,7 +313,18 @@ struct HostState {
     std::atomic<uint32_t> mute_fade_ms { 0 };
     std::atomic<uint32_t> pause_fade_ms { 0 };
     ClearColor            scheme_color {};
+    uint32_t              fps { 30 };
 };
+
+void set_fps(HostState& host, const char* value) {
+    char* end = nullptr;
+    long  fps = std::strtol(value, &end, 10);
+    if (end != value && *end == '\0' && fps >= 1 && fps <= 240) {
+        host.fps = static_cast<uint32_t>(fps);
+    } else {
+        rstd_warn("waywallen-video-renderer: invalid fps value '{}'; ignoring", value);
+    }
+}
 
 bool effective_audio_enabled(const HostState& host) {
     return host.settings_enable_audio.load(std::memory_order_acquire) &&
@@ -529,7 +541,9 @@ void apply_control(HostState& host, ww_bridge_control_t& c) {
             const char* key = settings.data[i].key;
             const char* val = settings.data[i].value;
             if (! key || ! val) continue;
-            if (std::strcmp(key, "loop_file") == 0) {
+            if (std::strcmp(key, "fps") == 0) {
+                set_fps(host, val);
+            } else if (std::strcmp(key, "loop_file") == 0) {
                 bool enabled = ! (std::strcmp(val, "no") == 0);
                 host.loop_value.store(enabled, std::memory_order_release);
                 host.loop_pending.store(true, std::memory_order_release);
@@ -1220,6 +1234,7 @@ int run(int argc, char** argv) {
     }
     // Video path arrives via CLI argv `--path` (already in
     // opt.video_path). Init carries only the resolved settings kv.
+    if (const char* v = kv_get(init.settings, "fps")) set_fps(host, v);
     if (const char* v = kv_get(init.settings, "loop_file")) {
         opt.loop_file = ! (std::strcmp(v, "no") == 0);
     }
@@ -1513,6 +1528,7 @@ int run(int argc, char** argv) {
     uint32_t                 stall_warn_counter = 0; // throttle ETIME log spam during backpressure
     bool                     submitted_since_negotiate = false;
     RetainedFrame            retained;
+    waywallen::video::FrameRateLimit frame_rate_limit;
 
     const auto exit = host.events->run(
         [&](auto& event) {
@@ -1570,6 +1586,7 @@ int run(int argc, char** argv) {
                 }
             }
             if (host.playback_rate_pending.exchange(false, std::memory_order_acq_rel)) {
+                frame_rate_limit.reset();
                 const auto rate  = host.playback_rate.load(std::memory_order_acquire);
                 const auto value = rstd::f64(static_cast<double>(rate));
                 if (auto* player = current_av_player();
@@ -1609,6 +1626,7 @@ int run(int argc, char** argv) {
                              host.mute_fade_ms.load(std::memory_order_acquire),
                              Instant::now());
             if (resumed_now) {
+                frame_rate_limit.reset();
                 pause_resume_pts = rstd::f64(-1.0);
                 presenter.reset();
             }
@@ -1659,7 +1677,8 @@ int run(int argc, char** argv) {
                         }
                         decoder  = rstd::Some(std::move(re_res).unwrap());
                         retained = RetainedFrame {};
-                        hwaccel  = new_h;
+                        frame_rate_limit.reset();
+                        hwaccel = new_h;
                         presenter.reset();
                         // Video reopened at PTS 0 — keep audio aligned.
                         if (auto* player = current_av_player()) player->seek_to_start();
@@ -1765,6 +1784,7 @@ int run(int argc, char** argv) {
             const bool pts_regressed = frame_pts >= rstd::f64() && prev_pts >= rstd::f64() &&
                                        frame_pts + rstd::f64(0.5) < prev_pts;
             if (decoder_looped || pts_regressed) {
+                frame_rate_limit.reset();
                 if (auto* player = current_av_player()) player->seek_to_start();
                 presenter.reset();
             }
@@ -1772,6 +1792,14 @@ int run(int argc, char** argv) {
 
             const auto presentation = presenter.schedule_frame(frame_pts);
             if (! presentation.present) return LoopStep::again();
+
+            // Keep PTS pacing even for skipped frames so decoding cannot run ahead of audio.
+            if (! frame_rate_limit.accept(frame_pts.to_primitive(),
+                                          host.fps,
+                                          host.playback_rate.load(std::memory_order_acquire))) {
+                (void)wait_for_presentation(host, presentation);
+                return LoopStep::again();
+            }
 
             ww_pool_slot_acquire_result_t acquired {};
             int acquire_rc = ww_bridge_pool_try_acquire_any_for_render(host.pool, &acquired);
