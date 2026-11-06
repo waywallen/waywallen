@@ -97,6 +97,7 @@ MD.BottomSheet {
             enabled: !control.sheetState.playbackQuerying
             targetState: control.sheetState.targetState
             allToolTip: qsTr("Includes displays connected later")
+            allRequiresTargets: false
         }
 
         MD.LinearIndicator {

@@ -7,12 +7,13 @@ Flow {
 
     required property var targetState
     property string allToolTip: ""
+    property bool allRequiresTargets: true
 
     spacing: 6
 
     MD.FilterChip {
         text: qsTr("All")
-        enabled: control.enabled && control.targetState.hasTargets
+        enabled: control.enabled && (control.targetState.hasTargets || !control.allRequiresTargets)
         selected: control.targetState.allTargets
         onSelectionRequested: control.targetState.selectAll()
 
