@@ -75,6 +75,8 @@ void RemoteAvailabilityQuery::reload() {
                     fm[u"options"_s]      = options;
                     fm[u"description"_s]  = filter.description();
                     fm[u"confirmation"_s] = filter.confirmation();
+                    fm[u"matchModes"_s] = filter.matchModes();
+                    fm[u"defaultMatchMode"_s] = filter.defaultMatchMode();
                     fm[u"titleText"_s]    = pluginMessageFromPb(filter.titleText(), filter.title());
                     fm[u"descriptionText"_s] =
                         pluginMessageFromPb(filter.descriptionText(), filter.description());
@@ -210,6 +212,7 @@ RemoteSearchQuery::RemoteSearchQuery(QObject* parent): QueryList(parent) {
     connect(this, &RemoteSearchQuery::queryChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(this, &RemoteSearchQuery::sortKeyChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(this, &RemoteSearchQuery::tagsChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(this, &RemoteSearchQuery::filterMatchModesChanged, this, &RemoteSearchQuery::invalidateSearch);
 }
 
 auto RemoteSearchQuery::sourceId() const -> const QString& { return m_source_id; }
@@ -237,6 +240,12 @@ void RemoteSearchQuery::setSortKey(const QString& v) {
 }
 
 auto RemoteSearchQuery::tags() const -> const QStringList& { return m_tags; }
+auto RemoteSearchQuery::filterMatchModes() const -> const QVariantMap& { return m_filter_match_modes; }
+void RemoteSearchQuery::setFilterMatchModes(const QVariantMap& v) {
+    if (m_filter_match_modes == v) return;
+    m_filter_match_modes = v;
+    Q_EMIT filterMatchModesChanged();
+}
 void RemoteSearchQuery::setTags(const QStringList& v) {
     if (m_tags != v) {
         m_tags = v;
@@ -333,6 +342,10 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
     inner.setSortKey(m_sort_key);
     inner.setPage(page);
     inner.setRequiredTags(m_tags);
+    QHash<QString, QString> modes;
+    for (auto it = m_filter_match_modes.cbegin(); it != m_filter_match_modes.cend(); ++it)
+        modes.insert(it.key(), it.value().toString());
+    inner.setFilterMatchModes(modes);
     if (append) inner.setCursor(m_next_cursor);
     req.setRemoteSearch(std::move(inner));
 

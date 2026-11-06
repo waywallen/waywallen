@@ -1465,6 +1465,10 @@
 <context>
     <name>RemoteFilterDialog</name>
     <message>
+        <source>All</source>
+        <translation>Все</translation>
+    </message>
+    <message>
         <location filename="../qml/dialog/RemoteFilterDialog.qml" line="10"/>
         <source>Filters</source>
         <translation>Фильтры</translation>

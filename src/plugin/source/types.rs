@@ -179,6 +179,8 @@ pub struct DiscoverFilter {
     pub options: Vec<DiscoverFilterOption>,
     pub description: LocalizedText,
     pub confirmation: LocalizedText,
+    pub match_modes: Vec<String>,
+    pub default_match_mode: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]

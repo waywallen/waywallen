@@ -226,6 +226,17 @@ MD.Page {
         if (!sameList(searchQuery.tags, nextTags))
             searchQuery.tags = nextTags;
         discoverState.setFilterValuesFor(id, nextTags);
+        const savedModes = sourceChanged ? discoverState.matchModesFor(id) : searchQuery.filterMatchModes;
+        const modes = {};
+        for (const filter of s.filters ?? []) {
+            const allowed = filter.matchModes ?? [];
+            if (allowed.length > 0) {
+                const saved = savedModes[filter.id];
+                modes[filter.id] = allowed.indexOf(saved) >= 0 ? saved : filter.defaultMatchMode;
+            }
+        }
+        searchQuery.filterMatchModes = modes;
+        discoverState.setMatchModesFor(id, modes);
         searchQuery.sourceId = id;
         detailsQuery.sourceId = id;
         searchQuery.sortKey = sortOptions.length > 0 ? sortOptions[sortIndex].key : "";
@@ -617,12 +628,19 @@ MD.Page {
         popupWindow: root.Window.window
         positioningItem: overlayItem
         selectedValues: searchQuery.tags
+        matchModes: searchQuery.filterMatchModes
         x: (overlayWidth - width) / 2
         y: (overlayHeight - height) / 2
 
         onApply: function (values) {
             searchQuery.tags = values;
             discoverState.setFilterValuesFor(root.sourceId, values);
+        }
+        onApplyMatchMode: function (filterId, mode) {
+            const modes = Object.assign({}, searchQuery.filterMatchModes);
+            modes[filterId] = mode;
+            searchQuery.filterMatchModes = modes;
+            discoverState.setMatchModesFor(root.sourceId, modes);
         }
     }
     W.RemoteDetailsQuery {

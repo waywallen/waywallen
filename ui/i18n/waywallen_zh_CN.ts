@@ -1451,6 +1451,10 @@
 <context>
     <name>RemoteFilterDialog</name>
     <message>
+        <source>All</source>
+        <translation>全部</translation>
+    </message>
+    <message>
         <location filename="../qml/dialog/RemoteFilterDialog.qml" line="10"/>
         <source>Filters</source>
         <translation>筛选</translation>

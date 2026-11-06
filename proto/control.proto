@@ -1084,6 +1084,8 @@ message RemoteFilterDef {
   PluginMessage title_text = 7;
   PluginMessage description_text = 8;
   PluginMessage confirmation_text = 9;
+  repeated string match_modes = 10;
+  string default_match_mode = 11;
 }
 
 message RemoteSourceInfo {
@@ -1234,6 +1236,7 @@ message RemoteSearchRequest {
   uint32 page = 4;
   repeated string required_tags = 5;
   string cursor = 6;
+  map<string, string> filter_match_modes = 7;
 }
 message RemoteSearchResponse {
   repeated RemoteItem items = 1;

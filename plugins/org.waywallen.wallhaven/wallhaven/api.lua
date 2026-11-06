@@ -66,6 +66,8 @@ M.filters = {
         id = "topics",
         title = tr("Topics"),
         type = "multi_select",
+        match_modes = { "any", "all" },
+        default_match_mode = "any",
         options = {
             { value = "Abstract", label = tr("Abstract") },
             { value = "Animal", label = tr("Animal") },
@@ -147,6 +149,8 @@ function M.search(ctx, params)
     local category_selected = false
     local sfw, sketchy, nsfw = false, false, false
     local purity_selected = false
+    local topic_mode = params.filter_match_modes and params.filter_match_modes.topics
+    local topics = {}
 
     for _, tag in ipairs(params.tags or {}) do
         if tag == "SFW" then
@@ -158,13 +162,13 @@ function M.search(ctx, params)
         elseif tag == "NSFW" then
             nsfw = true
             purity_selected = true
-        elseif tag == "Anime" then
+        elseif not topic_mode and tag == "Anime" then
             if not category_selected then
                 general, anime, people = false, false, false
                 category_selected = true
             end
             anime = true
-        elseif tag == "Girls" or tag == "Guys" then
+        elseif not topic_mode and (tag == "Girls" or tag == "Guys") then
             if not category_selected then
                 general, anime, people = false, false, false
                 category_selected = true
@@ -175,7 +179,23 @@ function M.search(ctx, params)
         if resolution then
             table.insert(resolutions, resolution)
         end
-        query = append_query(query, QUERY_TAGS[tag])
+        local topic = QUERY_TAGS[tag]
+        if topic and topic_mode then
+            if topic:find("%s") then
+                topic = '"' .. topic:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
+            end
+            table.insert(topics, "+" .. topic)
+        else
+            query = append_query(query, topic)
+        end
+    end
+
+    if #topics > 0 then
+        if query:match("%f[%w]id:%d+") then
+            error("Wallhaven exact tag searches cannot be combined with Topics")
+        end
+        local expression = "(" .. table.concat(topics, topic_mode == "any" and " | " or " ") .. ")"
+        query = query == "" and expression or "(" .. query .. ") " .. expression
     end
 
     if not purity_selected then

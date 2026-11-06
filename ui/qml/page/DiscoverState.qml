@@ -11,6 +11,7 @@ QtObject {
         category: root.settingsCategory
         property string selectedSourceId: ""
         property string filtersJson: "{}"
+        property string matchModesJson: "{}"
     }
 
     function selectedSourceId() {
@@ -49,6 +50,31 @@ QtObject {
     function filterValuesFor(sourceId) {
         const values = readFilters()[sourceId];
         return Array.isArray(values) ? normalize(values) : [];
+    }
+
+    function readMatchModes() {
+        try {
+            const state = JSON.parse(settings.matchModesJson);
+            if (state && typeof state === "object" && !Array.isArray(state))
+                return state;
+        } catch (error) {
+        }
+        return {};
+    }
+
+    function matchModesFor(sourceId) {
+        const value = readMatchModes()[sourceId];
+        return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    }
+
+    function setMatchModesFor(sourceId, modes) {
+        if (sourceId.length === 0)
+            return;
+        const state = readMatchModes();
+        state[sourceId] = modes;
+        const next = JSON.stringify(state);
+        if (settings.matchModesJson !== next)
+            settings.matchModesJson = next;
     }
 
     function setFilterValuesFor(sourceId, values) {

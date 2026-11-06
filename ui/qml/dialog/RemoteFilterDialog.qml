@@ -14,11 +14,13 @@ MD.Dialog {
 
     property var filters: []
     property var selectedValues: []
+    property var matchModes: ({})
     property var valuePresentation: null
     property var activeFilter: null
     property var confirmationFilter: null
 
     signal apply(var values)
+    signal applyMatchMode(string filterId, string mode)
 
     function sanitize(values) {
         let out = [];
@@ -218,8 +220,27 @@ MD.Dialog {
                             Layout.fillWidth: true
                             MD.Label {
                                 Layout.fillWidth: true
+                                Layout.minimumWidth: 0
                                 text: W.I18n.tr(filterRow.modelData.titleText)
                                 typescale: MD.Token.typescale.title_small
+                                elide: Text.ElideRight
+                            }
+                            MD.SegmentedButtonGroup {
+                                size: MD.Enum.XS
+                                visible: (filterRow.modelData.matchModes ?? []).length > 1
+
+                                MD.SegmentedButton {
+                                    text: qsTr("Any")
+                                    visible: (filterRow.modelData.matchModes ?? []).indexOf("any") >= 0
+                                    checked: root.matchModes[filterRow.modelData.id] === "any"
+                                    onCheckedChangeRequested: root.applyMatchMode(filterRow.modelData.id, "any")
+                                }
+                                MD.SegmentedButton {
+                                    text: qsTr("All")
+                                    visible: (filterRow.modelData.matchModes ?? []).indexOf("all") >= 0
+                                    checked: root.matchModes[filterRow.modelData.id] === "all"
+                                    onCheckedChangeRequested: root.applyMatchMode(filterRow.modelData.id, "all")
+                                }
                             }
                             MD.IconButton {
                                 icon.name: MD.Token.icon.edit

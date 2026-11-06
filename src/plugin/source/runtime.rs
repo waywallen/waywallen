@@ -664,6 +664,8 @@ impl LuaPluginRuntime {
                 .collect(),
             description: LocalizedText::default(),
             confirmation: LocalizedText::default(),
+            match_modes: Vec::new(),
+            default_match_mode: String::new(),
         }]
     }
 
@@ -793,6 +795,21 @@ impl LuaPluginRuntime {
 
             let description = Self::optional_localized_text(&filter, "description", &context)?;
             let confirmation = Self::optional_localized_text(&filter, "confirmation", &context)?;
+            let match_modes = Self::optional_string_sequence(&filter, "match_modes", &context)?;
+            let default_match_mode =
+                Self::optional_string(&filter, "default_match_mode", &context)?;
+            let mut seen_modes = HashSet::new();
+            if (!match_modes.is_empty() && ty != DiscoverFilterType::MultiSelect)
+                || match_modes
+                    .iter()
+                    .any(|mode| !matches!(mode.as_str(), "any" | "all") || !seen_modes.insert(mode))
+                || (!match_modes.is_empty() && !match_modes.contains(&default_match_mode))
+                || (match_modes.is_empty() && !default_match_mode.is_empty())
+            {
+                return Err(Error::Internal(anyhow!(
+                    "{context} has invalid match modes or default"
+                )));
+            }
             if !confirmation.text().is_empty() && ty != DiscoverFilterType::Toggle {
                 return Err(Error::Internal(anyhow!(
                     "{context}.confirmation is only supported for toggle filters"
@@ -805,6 +822,8 @@ impl LuaPluginRuntime {
                 options,
                 description,
                 confirmation,
+                match_modes,
+                default_match_mode,
             });
         }
         Ok(Some(filters))
@@ -2707,6 +2726,28 @@ impl LuaPluginRuntime {
         tags: &[String],
         cursor: &str,
     ) -> Result<DiscoverSearchResult> {
+        self.call_discover_with_modes(
+            plugin_name,
+            query,
+            sort,
+            page,
+            tags,
+            cursor,
+            &HashMap::new(),
+        )
+        .await
+    }
+
+    pub async fn call_discover_with_modes(
+        &mut self,
+        plugin_name: &str,
+        query: &str,
+        sort: &str,
+        page: u32,
+        tags: &[String],
+        cursor: &str,
+        modes: &HashMap<String, String>,
+    ) -> Result<DiscoverSearchResult> {
         let callbacks = self
             .callbacks
             .get(plugin_name)
@@ -2720,6 +2761,17 @@ impl LuaPluginRuntime {
             .as_ref()
             .ok_or_else(|| Error::DiscoverUnsupported(plugin_name.to_string()))?;
         Self::validate_discover_filter_values(plugin_name, discover, tags)?;
+        for (id, mode) in modes {
+            if !discover
+                .filters
+                .iter()
+                .any(|filter| filter.id == *id && filter.match_modes.contains(mode))
+            {
+                return Err(Error::InvalidArgument(format!(
+                    "unsupported match mode '{mode}' for filter '{id}'"
+                )));
+            }
+        }
         Self::validate_discover_cursor(cursor)?;
         match discover.pagination {
             DiscoverPagination::Page if !cursor.is_empty() => {
@@ -2762,6 +2814,13 @@ impl LuaPluginRuntime {
             tags_tbl.set(i + 1, t.clone())?;
         }
         params.set("tags", tags_tbl)?;
+        if !modes.is_empty() {
+            let table = self.lua.create_table()?;
+            for (id, mode) in modes {
+                table.set(id.as_str(), mode.as_str())?;
+            }
+            params.set("filter_match_modes", table)?;
+        }
 
         let ctx = self.build_remote_ctx(plugin_name)?;
         let result: LuaTable = self

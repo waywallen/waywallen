@@ -1352,6 +1352,8 @@ pub(super) async fn dispatch_inner(
                                         .collect(),
                                     description: filter.description.text().to_string(),
                                     confirmation: filter.confirmation.text().to_string(),
+                                    match_modes: filter.match_modes,
+                                    default_match_mode: filter.default_match_mode,
                                     title_text: crate::control_proto::plugin_message_to_proto(
                                         &filter.title,
                                     ),
@@ -1414,13 +1416,14 @@ pub(super) async fn dispatch_inner(
             };
             let result = state
                 .source_manager
-                .call_discover_with_cursor(
+                .call_discover_with_modes(
                     &source_id,
                     &r.query,
                     &sort_key,
                     r.page,
                     &r.required_tags,
                     &r.cursor,
+                    &r.filter_match_modes,
                 )
                 .await;
             match result {
