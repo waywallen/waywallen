@@ -94,6 +94,7 @@ MD.Page {
     }
 
     contentItem: MD.VerticalFlickable {
+        MD.NestedScroll.smoothWheelEnabled: W.Global.smoothScrolling
         id: m_flick
         leftMargin: 16
         rightMargin: 16

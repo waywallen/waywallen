@@ -64,6 +64,7 @@ MD.Page {
     }
 
     contentItem: MD.Flickable {
+        MD.NestedScroll.smoothWheelEnabled: W.Global.smoothScrolling
         implicitHeight: contentHeight
         contentHeight: contentCol.implicitHeight
         leftMargin: 12

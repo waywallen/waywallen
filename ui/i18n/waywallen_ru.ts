@@ -1742,6 +1742,16 @@ Related display: #%1</source>
 </context>
 <context>
     <name>SettingsPage</name>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="553"/>
+        <source>Smooth scrolling</source>
+        <translation>Плавная прокрутка</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="556"/>
+        <source>Ease mouse wheel scrolling instead of moving immediately.</source>
+        <translation>Плавно прокручивать колесом мыши вместо мгновенного перемещения.</translation>
+    </message>
     <message><source>Current display</source><translation>Текущий дисплей</translation></message>
     <message><source>All displays</source><translation>Все дисплеи</translation></message>
     <message><source>Applies to</source><translation>Область действия</translation></message>

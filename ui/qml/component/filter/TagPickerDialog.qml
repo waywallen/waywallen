@@ -109,6 +109,7 @@ MD.Dialog {
     }
 
     contentItem: MD.VerticalFlickable {
+        MD.NestedScroll.smoothWheelEnabled: W.Global.smoothScrolling
         id: tagFlick
         contentWidth: width
         contentHeight: m_col.implicitHeight
