@@ -27,6 +27,7 @@ class Library : public QObject {
     QML_ELEMENT
     QML_UNCREATABLE("Library instances are owned by LibraryManager")
 
+    Q_PROPERTY(QVariantMap settings READ settings NOTIFY settingsChanged FINAL)
     Q_PROPERTY(qint64 id READ id CONSTANT FINAL)
     Q_PROPERTY(QString name READ name NOTIFY nameChanged FINAL)
     Q_PROPERTY(QString path READ path NOTIFY pathChanged FINAL)
@@ -35,6 +36,7 @@ class Library : public QObject {
 public:
     explicit Library(const proto::LibraryInstance& info, QObject* parent = nullptr);
 
+    auto settings() const -> QVariantMap;
     auto id() const -> qint64 { return m_id; }
     auto name() const -> const QString& { return m_name; }
     auto path() const -> const QString& { return m_path; }
@@ -44,15 +46,17 @@ public:
     /// the signals for properties that actually changed.
     void updateFrom(const proto::LibraryInstance& info);
 
+    Q_SIGNAL void settingsChanged();
     Q_SIGNAL void pathChanged();
     Q_SIGNAL void nameChanged();
     Q_SIGNAL void pluginNameChanged();
 
 private:
-    qint64  m_id;
-    QString m_name;
-    QString m_path;
-    QString m_plugin_name;
+    QHash<QString, QString> m_settings;
+    qint64                  m_id;
+    QString                 m_name;
+    QString                 m_path;
+    QString                 m_plugin_name;
 };
 
 /// Singleton model for all currently-registered libraries. Fed by:

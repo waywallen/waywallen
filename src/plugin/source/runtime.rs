@@ -17,6 +17,7 @@ pub(super) struct SourceCapability {
     pub(super) library_label: LocalizedText,
     pub(super) library_hint: LocalizedText,
     pub(super) auto_detect: bool,
+    pub(super) settings: Vec<SourceSetting>,
 }
 
 #[derive(Debug, Clone)]
@@ -1025,6 +1026,7 @@ impl LuaPluginRuntime {
                     )));
                 }
                 Some(SourceCapability {
+                    settings: Self::parse_source_settings(&source_tbl)?,
                     types,
                     library_label: Self::optional_localized_text(
                         &source_tbl,
@@ -1619,7 +1621,19 @@ impl LuaPluginRuntime {
                     .map_err(|e| Error::Internal(anyhow!("info().settings.choices: {e}")))?,
                 _ => Vec::new(),
             };
+            let mut choice_labels = Vec::new();
+            if let Some(labels) = Self::optional_table(&s, "choice_labels", "settings")? {
+                for value in labels.sequence_values::<LuaValue>() {
+                    choice_labels.push(Self::localized_text(value?, "choice_labels", "settings")?);
+                }
+                if choice_labels.len() != choices.len() {
+                    return Err(Error::SettingsValidationFailed(
+                        "choice_labels must match choices".into(),
+                    ));
+                }
+            }
             out.push(SourceSetting {
+                choice_labels,
                 key,
                 ty,
                 default,
@@ -1830,7 +1844,7 @@ impl LuaPluginRuntime {
     }
 
     /// Run `scan(ctx)` on a single plugin by name with the supplied
-    /// library list exposed as `ctx.libraries()`.
+    /// library paths exposed as `ctx.libraries()`.
     async fn scan_plugin(&mut self, name: &str, libraries: &[String]) -> Result<()> {
         let callbacks = self
             .callbacks
@@ -1866,6 +1880,17 @@ impl LuaPluginRuntime {
             let entry_name = Self::require_string(&tbl, "name", "module.source.scan result")?;
             let wp_type = Self::require_string(&tbl, "wp_type", "module.source.scan result")?;
             let resource = Self::require_string(&tbl, "resource", "module.source.scan result")?;
+            let sub_type = Self::optional_string(&tbl, "sub_type", "module.source.scan result")?;
+            let preview = match tbl.get::<LuaValue>("preview")? {
+                LuaValue::Nil => None,
+                LuaValue::String(value) => Some(value.to_str()?.to_owned()),
+                _ => return Err(Error::InvalidArgument("preview must be a string".into())),
+            };
+            if !sub_type.is_empty() && (wp_type != "image" || sub_type != "timeline") {
+                return Err(Error::InvalidArgument(format!(
+                    "unsupported wallpaper sub_type '{sub_type}'"
+                )));
+            }
             let entry = WallpaperEntry {
                 // Identity comes from the DB item.id, assigned after
                 // sync; plugins don't supply it.
@@ -1873,7 +1898,8 @@ impl LuaPluginRuntime {
                 name: entry_name,
                 wp_type,
                 resource,
-                preview: tbl.get::<String>("preview").ok(),
+                sub_type,
+                preview,
                 plugin_name: name.to_owned(),
                 library_root: tbl.get("library_root").unwrap_or_default(),
                 description: tbl.get::<String>("description").ok(),
@@ -2034,17 +2060,46 @@ impl LuaPluginRuntime {
         config.set("get", plugin_config_fn)?;
         ctx.set("config", config)?;
 
-        // ctx.libraries() -> list of absolute library paths registered
-        // for this plugin in the daemon DB.
+        // Keep the path-only API synchronous for existing plugins.
         let libs_for_closure: Vec<String> = libraries.to_vec();
-        let libraries_fn = self.lua.create_function(move |lua, ()| {
-            let tbl = lua.create_table()?;
-            for (i, lib) in libs_for_closure.iter().enumerate() {
-                tbl.set(i + 1, lib.clone())?;
-            }
-            Ok(tbl)
-        })?;
+        let libraries_fn = self
+            .lua
+            .create_function(move |lua, ()| lua.create_sequence_from(libs_for_closure.clone()))?;
         ctx.set("libraries", libraries_fn)?;
+
+        let db = self.db.clone();
+        let name = plugin_name.map(str::to_owned);
+        let schema = plugin_name
+            .and_then(|name| self.plugin_infos.get(name))
+            .and_then(|info| info.capabilities.source.as_ref())
+            .map(|source| source.settings.clone())
+            .unwrap_or_default();
+        let library_settings_fn = self.lua.create_async_function(move |lua, path: String| {
+            let db = db.clone();
+            let name = name.clone();
+            let schema = schema.clone();
+            async move {
+                let mut settings = HashMap::new();
+                if let (Some(db), Some(name)) = (&db, &name) {
+                    let plugin = repo::find_plugin_by_name(db, name)
+                        .await
+                        .map_err(mlua::Error::external)?;
+                    if let Some(plugin) = plugin {
+                        if let Some(library) = repo::find_library(db, plugin.id, &path)
+                            .await
+                            .map_err(mlua::Error::external)?
+                        {
+                            settings =
+                                repo::library_settings(&library).map_err(mlua::Error::external)?;
+                        }
+                    }
+                }
+                let settings =
+                    validate_library_settings(&schema, settings).map_err(mlua::Error::external)?;
+                lua.create_table_from(settings)
+            }
+        })?;
+        ctx.set("library_settings", library_settings_fn)?;
 
         self.install_json_context(&ctx)?;
 
@@ -2358,6 +2413,7 @@ impl LuaPluginRuntime {
         entry_tbl.set("item_id", entry.item_id)?;
         entry_tbl.set("name", entry.name.clone())?;
         entry_tbl.set("wp_type", entry.wp_type.clone())?;
+        entry_tbl.set("sub_type", entry.sub_type.clone())?;
         entry_tbl.set("path", entry.resource.clone())?;
         entry_tbl.set("resource", entry.resource.clone())?;
         entry_tbl.set("can_remove", entry.can_remove)?;
@@ -2525,8 +2581,8 @@ impl LuaPluginRuntime {
 
     /// Ask every plugin that exports `auto_detect(ctx)` to probe
     /// well-known filesystem locations and report any that exist.
-    pub async fn auto_detect_all(&mut self) -> Result<HashMap<String, Vec<String>>> {
-        let mut out: HashMap<String, Vec<String>> = HashMap::new();
+    pub async fn auto_detect_all(&mut self) -> Result<HashMap<String, Vec<SourceLibrary>>> {
+        let mut out: HashMap<String, Vec<SourceLibrary>> = HashMap::new();
         let empty: [String; 0] = [];
         let mut plugin_names: Vec<String> = self.plugin_infos.keys().cloned().collect();
         plugin_names.sort();
@@ -2537,6 +2593,7 @@ impl LuaPluginRuntime {
             let Some(source) = &info.capabilities.source else {
                 continue;
             };
+            let schema = source.settings.clone();
             if !source.auto_detect {
                 continue;
             }
@@ -2561,10 +2618,25 @@ impl LuaPluginRuntime {
                         continue;
                     }
                 };
-            let paths: Vec<String> = results
-                .sequence_values::<String>()
-                .filter_map(|v| v.ok())
-                .collect();
+            let mut paths = Vec::new();
+            for result in results.sequence_values::<LuaValue>() {
+                let (path, settings) = match result? {
+                    LuaValue::String(path) => (path.to_str()?.to_owned(), HashMap::new()),
+                    LuaValue::Table(row) => (
+                        Self::require_string(&row, "path", "source.auto_detect")?,
+                        parse_lua_string_map(&row, "settings", "source.auto_detect")?,
+                    ),
+                    _ => {
+                        return Err(Error::InvalidArgument(
+                            "source.auto_detect entries must be paths or library records".into(),
+                        ))
+                    }
+                };
+                paths.push(SourceLibrary {
+                    path,
+                    settings: validate_library_settings(&schema, settings)?,
+                });
+            }
             self.persist_state(&name)?;
             if !paths.is_empty() {
                 out.insert(name, paths);
@@ -3872,6 +3944,7 @@ impl LuaPluginRuntime {
                 library_label: source.library_label.clone(),
                 library_hint: source.library_hint.clone(),
                 settings: info.settings.clone(),
+                library_settings: source.settings.clone(),
             });
         }
         out.sort_by(|a, b| a.name.cmp(&b.name));

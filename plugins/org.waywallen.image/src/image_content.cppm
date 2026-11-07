@@ -7,7 +7,7 @@ using namespace rstd::prelude;
 export namespace ww_image
 {
 
-// KDE package resources and ordinary files share the renderer's decode interface.
+// Wallpaper definitions and ordinary files share the decode interface.
 class ImageContent {
 public:
     static auto open(ref<str> path, DecodeError* error) -> Option<ImageContent>;
@@ -17,6 +17,7 @@ public:
     rstd::uint32_t width() const;
     rstd::uint32_t height() const;
     bool           dynamic() const;
+    rstd::uint32_t update_interval_ms() const;
     bool           set_mode(ref<str> mode);
     bool           update(rstd::time::SystemTime now);
     RgbaBuf        decode(rstd::uint32_t width, rstd::uint32_t height, DecodeError* error);

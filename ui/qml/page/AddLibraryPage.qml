@@ -8,8 +8,9 @@ MD.Page {
     id: root
     title: qsTr("Add Library")
     property string pathError: ""
+    property var librarySettings: ({})
     property string selectedPlugin: ""
-    onSelectedPluginChanged: root.pathError = ""
+    onSelectedPluginChanged: { root.pathError = ""; root.librarySettings = ({}); }
 
     W.SourceListQuery {
         id: sourceQuery
@@ -132,6 +133,18 @@ MD.Page {
                 color: MD.Token.color.on_surface_variant
             }
 
+            W.LibrarySettingsFields {
+                Layout.fillWidth: true
+                schemas: root.selectedSource ? root.selectedSource.librarySettings : []
+                values: root.librarySettings
+                enabled: !addQuery.querying
+                onCommitted: (key, value) => {
+                    const values = Object.assign({}, root.librarySettings);
+                    values[key] = value;
+                    root.librarySettings = values;
+                }
+            }
+
             MD.TextField {
                 id: nameInput
                 Layout.fillWidth: true
@@ -156,6 +169,7 @@ MD.Page {
                     addQuery.pluginName = root.selectedPlugin;
                     addQuery.path = pathInput.text;
                     addQuery.name = nameInput.text;
+                    addQuery.settings = root.librarySettings;
                     addQuery.reload();
                 }
             }

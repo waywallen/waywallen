@@ -268,6 +268,7 @@ mod tests {
                 library_id: library.id,
                 path: "preview.png",
                 ty: "image",
+                sub_type: "",
                 display_name: "preview",
                 preview_path: None,
                 description: None,

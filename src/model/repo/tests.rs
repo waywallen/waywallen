@@ -32,6 +32,82 @@ async fn mem_db() -> DatabaseConnection {
 }
 
 #[tokio::test]
+async fn library_settings_are_persisted_separately_from_plugin_metadata() {
+    let db = mem_db().await;
+    let plugin = upsert_plugin(&db, "image", "1").await.unwrap();
+    let settings = HashMap::from([("scan_mode".to_owned(), "wallpapers".to_owned())]);
+    let library = add_configured_library(&db, plugin.id, "/system/wallpapers", None, &settings)
+        .await
+        .unwrap();
+    assert_eq!(library_settings(&library).unwrap(), settings);
+    set_library_metadata_value(&db, library.id, "plugin-state", Some("saved"))
+        .await
+        .unwrap();
+    let settings = HashMap::from([("scan_mode".to_owned(), "files".to_owned())]);
+    let updated = set_library_settings(&db, library.id, &settings)
+        .await
+        .unwrap();
+    assert_eq!(library_settings(&updated).unwrap(), settings);
+    assert_eq!(
+        get_library_metadata_value(&db, library.id, "plugin-state")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("saved")
+    );
+}
+
+#[tokio::test]
+async fn library_edit_saves_name_and_settings_without_changing_plugin_state() {
+    let db = mem_db().await;
+    let plugin = upsert_plugin(&db, "image", "1").await.unwrap();
+    let library = add_library(&db, plugin.id, "/wallpapers").await.unwrap();
+    set_library_metadata_value(&db, library.id, "plugin-state", Some("saved"))
+        .await
+        .unwrap();
+    let settings = HashMap::from([("scan_mode".to_owned(), "wallpapers".to_owned())]);
+    let updated = edit_library(&db, library.id, " Desktop wallpapers ", Some(&settings))
+        .await
+        .unwrap();
+    assert_eq!(updated.name, "Desktop wallpapers");
+    assert_eq!(updated.id, library.id);
+    assert_eq!(updated.path, library.path);
+    assert_eq!(updated.plugin_id, plugin.id);
+    assert_eq!(library_settings(&updated).unwrap(), settings);
+    assert_eq!(
+        get_library_metadata_value(&db, library.id, "plugin-state")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("saved")
+    );
+    let saved = find_library_by_id(&db, library.id).await.unwrap().unwrap();
+    assert_eq!(saved, updated);
+    let renamed = rename_library(&db, library.id, "Renamed").await.unwrap();
+    assert_eq!(library_settings(&renamed).unwrap(), settings);
+}
+
+#[tokio::test]
+async fn library_edit_rejects_empty_name_without_changing_settings() {
+    let db = mem_db().await;
+    let plugin = upsert_plugin(&db, "image", "1").await.unwrap();
+    let library = add_library(&db, plugin.id, "/wallpapers").await.unwrap();
+    let settings = HashMap::from([("scan_mode".to_owned(), "wallpapers".to_owned())]);
+    assert!(matches!(
+        edit_library(&db, library.id, " \n", Some(&settings)).await,
+        Err(Error::InvalidArgument(_))
+    ));
+    assert_eq!(
+        find_library_by_id(&db, library.id).await.unwrap().unwrap(),
+        library
+    );
+    assert!(matches!(
+        edit_library(&db, 999, "Missing", Some(&settings)).await,
+        Err(Error::LibraryNotFound(999))
+    ));
+}
+
+#[tokio::test]
 async fn library_names_default_and_allow_duplicates() {
     let db = mem_db().await;
     let plugin = upsert_plugin(&db, "names", "1").await.unwrap();
@@ -198,6 +274,7 @@ fn minimal_args<'a>(
         library_id,
         path,
         ty,
+        sub_type: "",
         display_name: "",
         preview_path: None,
         description: None,
@@ -481,6 +558,7 @@ async fn upsert_item_refreshes_every_column_on_conflict() {
             library_id: lib.id,
             path: "a.png",
             ty: "image",
+            sub_type: "",
             display_name: "Old",
             preview_path: None,
             description: None,
@@ -503,6 +581,7 @@ async fn upsert_item_refreshes_every_column_on_conflict() {
             library_id: lib.id,
             path: "a.png",
             ty: "GIF",
+            sub_type: "",
             display_name: "New",
             preview_path: Some("new/preview.png"),
             description: Some("now animated"),
@@ -541,6 +620,7 @@ async fn upsert_item_persists_media_meta() {
             library_id: lib.id,
             path: "video.mkv",
             ty: "video",
+            sub_type: "",
             display_name: "v",
             preview_path: None,
             description: None,
@@ -570,6 +650,7 @@ async fn upsert_item_persists_media_meta() {
             library_id: lib.id,
             path: "video.mkv",
             ty: "video",
+            sub_type: "",
             display_name: "v",
             preview_path: None,
             description: None,
@@ -607,6 +688,7 @@ async fn item_stat_preserves_supplied_size_and_fills_missing_size() {
                 library_id: library.id,
                 path,
                 ty,
+                sub_type: "",
                 display_name: "item",
                 preview_path: None,
                 description: None,

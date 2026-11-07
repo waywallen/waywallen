@@ -30,6 +30,8 @@ mod gltf_tests;
 #[cfg(test)]
 mod image_tests;
 #[cfg(test)]
+mod library_tests;
+#[cfg(test)]
 mod prepare_tests;
 #[cfg(test)]
 mod sketchfab_tests;

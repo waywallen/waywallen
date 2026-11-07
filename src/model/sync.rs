@@ -100,8 +100,8 @@ pub async fn sync_plugin_entries(
             let preview_rel = entry
                 .preview
                 .as_deref()
-                .and_then(|abs| relative_under_root(lib_path, abs))
-                .filter(|s| !s.is_empty());
+                .and_then(|path| relative_under_root(lib_path, path))
+                .filter(|path| !path.is_empty());
 
             // Sync only persists what the plugin emitted. Missing
             // media metadata stays NULL — the daemon's scheduled
@@ -117,6 +117,7 @@ pub async fn sync_plugin_entries(
                     library_id: lib_model.id,
                     path: rel,
                     ty: &entry.wp_type,
+                    sub_type: &entry.sub_type,
                     display_name: &entry.name,
                     preview_path: preview_rel.as_deref(),
                     description: entry.description.as_deref(),
@@ -171,6 +172,7 @@ mod tests {
             item_id: 0,
             name: resource.to_owned(),
             wp_type: wp_type.to_owned(),
+            sub_type: String::new(),
             resource: resource.to_owned(),
             preview: None,
             plugin_name: plugin_name.to_owned(),
@@ -335,6 +337,7 @@ mod tests {
             item_id: 0,
             name: "Forest River".to_owned(),
             wp_type: "scene".to_owned(),
+            sub_type: String::new(),
             resource: "/ws/12345/scene.pkg".to_owned(),
             preview: Some("/ws/12345/preview.gif".to_owned()),
             plugin_name: "wallpaper_engine".to_owned(),

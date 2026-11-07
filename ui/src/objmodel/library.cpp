@@ -23,12 +23,24 @@ namespace waywallen
 
 Library::Library(const proto::LibraryInstance& info, QObject* parent)
     : QObject(parent),
+      m_settings(info.settings()),
       m_id(info.id_proto()),
       m_name(info.name()),
       m_path(info.path()),
       m_plugin_name(info.pluginName()) {}
 
+auto Library::settings() const -> QVariantMap {
+    QVariantMap result;
+    for (auto it = m_settings.cbegin(); it != m_settings.cend(); ++it)
+        result.insert(it.key(), it.value());
+    return result;
+}
+
 void Library::updateFrom(const proto::LibraryInstance& info) {
+    if (m_settings != info.settings()) {
+        m_settings = info.settings();
+        Q_EMIT settingsChanged();
+    }
     rstd_assert(info.id_proto() == m_id, "Library::updateFrom id mismatch");
 
     if (m_name != info.name()) {

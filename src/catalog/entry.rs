@@ -14,6 +14,8 @@ pub struct WallpaperEntry {
     pub name: String,
     /// The wallpaper type string (e.g. "scene", "image", "video").
     pub wp_type: WallpaperType,
+    #[serde(default)]
+    pub sub_type: String,
     /// Filesystem path or URI to the wallpaper resource.
     pub resource: String,
     /// Optional path to a preview/thumbnail image.

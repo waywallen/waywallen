@@ -63,6 +63,7 @@ Item {
                 shimmer: root.shimmer
                 source: root.wallpaper?.preview ?? ""
                 wpType: root.wallpaper?.wpType ?? ""
+                timeline: (root.wallpaper?.subType ?? 0) === 1
             }
 
             // Scrim aligns to the image control's bounds; spans the

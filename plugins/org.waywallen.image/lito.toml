@@ -35,6 +35,9 @@ workspace = true
 [dependencies.rstd-std]
 workspace = true
 
+[dependencies.waywallen-image-definition]
+workspace = true
+
 [dependencies.rstd-json]
 workspace = true
 

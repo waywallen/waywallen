@@ -678,6 +678,7 @@ MD.Page {
                         source: wallpaperDelegate.model.preview || ""
                         resource: wallpaperDelegate.model.resource || ""
                         wpType: wallpaperDelegate.model.wpType || ""
+                        timeline: (wallpaperDelegate.model.subType || 0) === 1
                         fillMode: Image.PreserveAspectCrop
                     }
 

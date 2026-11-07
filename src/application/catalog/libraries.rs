@@ -6,7 +6,7 @@ use crate::model::repo;
 use crate::wallframe::routing::LibrarySnapshot;
 use crate::DaemonContext;
 
-async fn library_directory(path: &str) -> Result<String> {
+pub(super) async fn library_directory(path: &str) -> Result<String> {
     let path = repo::expand_home_path(path);
     let metadata = tokio::fs::metadata(&path).await.map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
@@ -28,15 +28,18 @@ pub async fn add_library(
     plugin_name: &str,
     path: &str,
     name: Option<&str>,
+    settings: std::collections::HashMap<String, String>,
 ) -> Result<()> {
     let _invalidate =
         crate::application::wallpaper_query::InvalidateOnDrop(app.wallpaper_changes.clone());
     let plugin = repo::find_plugin_by_name(&app.db, plugin_name)
         .await?
         .ok_or_else(|| Error::SourcePluginNotFound(plugin_name.to_owned()))?;
+    let settings = app.source_manager.library_settings(plugin_name, settings)?;
     let path = library_directory(path).await?;
-    let lib = repo::add_named_library(&app.db, plugin.id, &path, name).await?;
+    let lib = repo::add_configured_library(&app.db, plugin.id, &path, name, &settings).await?;
     app.router.upsert_library(LibrarySnapshot {
+        settings,
         id: lib.id,
         name: lib.name,
         path: lib.path.clone(),
@@ -62,15 +65,61 @@ pub async fn add_library(
 
 pub async fn rename_library(app: &Arc<DaemonContext>, id: i64, name: &str) -> Result<()> {
     let lib = repo::rename_library(&app.db, id, name).await?;
+    let settings = repo::library_settings(&lib)?;
     let plugin = repo::find_plugin_by_id(&app.db, lib.plugin_id)
         .await?
         .ok_or_else(|| Error::SourcePluginNotFound(lib.plugin_id.to_string()))?;
     app.router.upsert_library(LibrarySnapshot {
+        settings,
         id: lib.id,
         name: lib.name,
         path: lib.path,
         plugin_name: plugin.name,
     });
+    Ok(())
+}
+
+pub async fn edit_library(
+    app: &Arc<DaemonContext>,
+    id: i64,
+    name: &str,
+    values: std::collections::HashMap<String, String>,
+) -> Result<()> {
+    let lib = repo::find_library_by_id(&app.db, id)
+        .await?
+        .ok_or(Error::LibraryNotFound(id))?;
+    let plugin = repo::find_plugin_by_id(&app.db, lib.plugin_id)
+        .await?
+        .ok_or_else(|| Error::SourcePluginNotFound(lib.plugin_id.to_string()))?;
+    let settings = app.source_manager.library_settings(&plugin.name, values)?;
+    let settings_changed = app
+        .source_manager
+        .library_settings(&plugin.name, repo::library_settings(&lib)?)
+        .map_or(true, |previous| previous != settings);
+    let lib = repo::edit_library(&app.db, id, name, Some(&settings)).await?;
+    app.router.upsert_library(LibrarySnapshot {
+        id,
+        settings,
+        name: lib.name,
+        path: lib.path,
+        plugin_name: plugin.name.clone(),
+    });
+    if !settings_changed {
+        return Ok(());
+    }
+    let source = plugin.name;
+    let app = app.clone();
+    app.clone().tasks.spawn_async_unique(
+        crate::tasks::TaskKind::Generic,
+        "scan/refresh",
+        "scan/library-edit",
+        async move {
+            super::refresh_source(&app, &source)
+                .await
+                .map(|_| ())
+                .map_err(anyhow::Error::from)
+        },
+    );
     Ok(())
 }
 

@@ -216,6 +216,7 @@ mod tests {
             item_id: 0,
             name: name.to_string(),
             wp_type: "image".to_string(),
+            sub_type: String::new(),
             resource: name.to_string(),
             preview: None,
             description: None,

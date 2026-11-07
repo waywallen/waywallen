@@ -839,6 +839,11 @@ pub(super) async fn dispatch_inner(
                         .iter()
                         .map(crate::control_proto::source_setting_to_proto)
                         .collect(),
+                    library_settings: p
+                        .library_settings
+                        .iter()
+                        .map(crate::control_proto::source_setting_to_proto)
+                        .collect(),
                     library_label_text: crate::control_proto::plugin_message_to_proto(
                         &p.library_label,
                     ),
@@ -2162,8 +2167,20 @@ pub(super) async fn dispatch_inner(
         }
 
         Req::LibraryAdd(r) => {
-            application::add_library(&state, &r.plugin_name, &r.path, r.name.as_deref()).await?;
+            application::add_library(
+                &state,
+                &r.plugin_name,
+                &r.path,
+                r.name.as_deref(),
+                r.settings,
+            )
+            .await?;
             Res::LibraryAdd(pb::Empty {})
+        }
+
+        Req::LibraryEdit(r) => {
+            application::edit_library(&state, r.id, &r.name, r.settings).await?;
+            Res::LibraryEdit(pb::Empty {})
         }
 
         Req::LibraryRename(r) => {

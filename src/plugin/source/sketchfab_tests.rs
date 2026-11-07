@@ -1682,6 +1682,7 @@ async fn sketchfab_saved_presentation_artifact_exports_render_profile() {
         item_id: 1,
         name: metadata.title.clone(),
         wp_type: metadata.wp_type.clone(),
+        sub_type: String::new(),
         resource: installed.resource().to_str().unwrap().into(),
         preview: installed
             .preview()

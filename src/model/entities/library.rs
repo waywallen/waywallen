@@ -8,6 +8,7 @@ pub struct Model {
     pub plugin_id: i64,
     pub path: String,
     pub name: String,
+    pub settings: String,
     /// JSON-encoded `{string -> string}` map. Free-form per-plugin
     /// scratch space exposed to source plugins via `ctx.library_meta_*`.
     pub metadata: String,

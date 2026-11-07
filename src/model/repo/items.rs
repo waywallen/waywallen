@@ -11,6 +11,7 @@ pub struct ItemUpsertArgs<'a> {
     /// Stored lowercase by [`upsert_item`] so `"Scene"` and `"scene"`
     /// don't split on reads.
     pub ty: &'a str,
+    pub sub_type: &'a str,
     pub display_name: &'a str,
     pub preview_path: Option<&'a str>,
     pub description: Option<&'a str>,
@@ -37,6 +38,7 @@ pub async fn upsert_item(
         library_id: Set(args.library_id),
         path: Set(args.path.to_owned()),
         ty: Set(ty_norm),
+        sub_type: Set(args.sub_type.to_owned()),
         display_name: Set(args.display_name.to_owned()),
         preview_path: Set(args.preview_path.map(str::to_owned)),
         description: Set(args.description.map(str::to_owned)),
@@ -60,6 +62,7 @@ pub async fn upsert_item(
             OnConflict::columns([item::Column::LibraryId, item::Column::Path])
                 .update_columns([
                     item::Column::Ty,
+                    item::Column::SubType,
                     item::Column::PluginId,
                     item::Column::DisplayName,
                     item::Column::PreviewPath,
@@ -134,9 +137,9 @@ fn entry_from_item(
         .join(&it.path)
         .to_string_lossy()
         .into_owned();
-    let preview = it.preview_path.as_deref().map(|rel| {
+    let preview = it.preview_path.as_deref().map(|path| {
         Path::new(library_path)
-            .join(rel)
+            .join(path)
             .to_string_lossy()
             .into_owned()
     });
@@ -144,6 +147,7 @@ fn entry_from_item(
         item_id: it.id,
         name: it.display_name,
         wp_type: it.ty,
+        sub_type: it.sub_type,
         resource,
         preview,
         description: it.description,

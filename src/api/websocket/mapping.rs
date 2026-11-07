@@ -1185,6 +1185,7 @@ pub(super) fn renderers_replace_event(
 
 pub(super) fn library_instance_to_pb(s: LibrarySnapshot) -> pb::LibraryInstance {
     pb::LibraryInstance {
+        settings: s.settings,
         id: s.id,
         name: s.name,
         path: s.path,

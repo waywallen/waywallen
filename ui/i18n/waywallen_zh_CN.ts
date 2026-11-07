@@ -2191,6 +2191,10 @@ Related display: #%1</source>
 <context>
     <name>SourceManagePage</name>
     <message>
+        <source>Apply</source>
+        <translation>应用</translation>
+    </message>
+    <message>
         <source>Auto detect libraries</source>
         <translation>自动检测库</translation>
     </message>
@@ -2199,8 +2203,8 @@ Related display: #%1</source>
         <translation>未发现新的库</translation>
     </message>
     <message>
-        <source>Rename library</source>
-        <translation>重命名库</translation>
+        <source>Edit library</source>
+        <translation>编辑库</translation>
     </message>
     <message>
         <source>Library name</source>

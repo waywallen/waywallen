@@ -11,6 +11,8 @@ mod m20261015_000001_smart_playlists;
 mod m20261015_000002_library_name;
 mod m20261019_000001_item_update_available;
 mod m20261024_000001_item_can_remove;
+mod m20261107_000001_item_sub_type;
+mod m20261107_000002_library_settings;
 
 pub struct Migrator;
 
@@ -29,6 +31,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261015_000002_library_name::Migration),
             Box::new(m20261019_000001_item_update_available::Migration),
             Box::new(m20261024_000001_item_can_remove::Migration),
+            Box::new(m20261107_000001_item_sub_type::Migration),
+            Box::new(m20261107_000002_library_settings::Migration),
         ]
     }
 }
@@ -38,10 +42,21 @@ mod tests {
     use super::*;
     use sea_orm::{ConnectionTrait, Statement};
 
+    async fn downgrade_before(db: &sea_orm::DatabaseConnection, migration: impl MigrationTrait) {
+        let migrations = Migrator::migrations();
+        let position = migrations
+            .iter()
+            .position(|current| current.name() == migration.name())
+            .unwrap();
+        Migrator::down(db, Some((migrations.len() - position) as u32))
+            .await
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn library_names_migrate_existing_rows() {
         let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
-        Migrator::down(&db, Some(3)).await.unwrap();
+        downgrade_before(&db, m20261015_000002_library_name::Migration).await;
         db.execute_unprepared("INSERT INTO source_plugin (id, name) VALUES (1, 'image')")
             .await
             .unwrap();
@@ -71,7 +86,7 @@ mod tests {
     #[tokio::test]
     async fn item_can_remove_migrates_existing_items_as_unknown() {
         let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
-        Migrator::down(&db, Some(1)).await.unwrap();
+        downgrade_before(&db, m20261024_000001_item_can_remove::Migration).await;
         db.execute_unprepared("INSERT INTO source_plugin (id, name) VALUES (1, 'image')")
             .await
             .unwrap();

@@ -13,7 +13,7 @@ mod query;
 mod remote;
 mod watch;
 
-pub use libraries::{add_library, rename_library};
+pub use libraries::{add_library, edit_library, rename_library};
 pub use query::ordered_entry_ids;
 pub use remote::{
     download_remote, publish_remote_download_progress, remote_capability,
@@ -46,7 +46,14 @@ pub async fn auto_detect_libraries(
                 continue;
             }
         };
-        for path in paths {
+        for candidate in paths {
+            let path = match libraries::library_directory(&candidate.path).await {
+                Ok(path) => path,
+                Err(error) => {
+                    log::warn!("auto_detect: {error}");
+                    continue;
+                }
+            };
             match repo::find_library(&app.db, plugin.id, &path).await {
                 Ok(Some(_)) => continue,
                 Ok(None) => {}
@@ -55,9 +62,12 @@ pub async fn auto_detect_libraries(
                     continue;
                 }
             }
-            match repo::add_library(&app.db, plugin.id, &path).await {
+            match repo::add_configured_library(&app.db, plugin.id, &path, None, &candidate.settings)
+                .await
+            {
                 Ok(lib) => {
                     let snap = LibrarySnapshot {
+                        settings: candidate.settings,
                         id: lib.id,
                         name: lib.name,
                         path: lib.path,
@@ -124,7 +134,9 @@ pub async fn list_library_snapshots(
             .flatten()
             .map(|p| p.name)
             .unwrap_or_default();
+        let settings = repo::library_settings(&lib).unwrap_or_default();
         out.push(crate::wallframe::routing::LibrarySnapshot {
+            settings,
             id: lib.id,
             name: lib.name,
             path: lib.path,
@@ -184,6 +196,17 @@ pub async fn refresh_source_plugins(app: &Arc<DaemonContext>) {
 }
 
 pub async fn refresh_sources(app: &Arc<DaemonContext>) -> Result<usize> {
+    refresh_selected_sources(app, None).await
+}
+
+async fn refresh_source(app: &Arc<DaemonContext>, name: &str) -> Result<usize> {
+    refresh_selected_sources(app, Some(name)).await
+}
+
+async fn refresh_selected_sources(
+    app: &Arc<DaemonContext>,
+    selected: Option<&str>,
+) -> Result<usize> {
     let _invalidate = super::wallpaper_query::InvalidateOnDrop(app.wallpaper_changes.clone());
     use std::sync::atomic::Ordering;
     app.scan_in_progress.store(true, Ordering::SeqCst);
@@ -191,7 +214,7 @@ pub async fn refresh_sources(app: &Arc<DaemonContext>) -> Result<usize> {
     app.events
         .publish(crate::events::GlobalEvent::StatusChanged);
 
-    let result = refresh_sources_inner(app).await;
+    let result = refresh_sources_inner(app, selected).await;
 
     app.scan_in_progress.store(false, Ordering::SeqCst);
     match &result {
@@ -231,7 +254,7 @@ pub async fn notify_wallpaper_db_changed(app: &Arc<DaemonContext>, count: usize)
         .publish(crate::events::GlobalEvent::SyncFinished { count });
 }
 
-async fn refresh_sources_inner(app: &Arc<DaemonContext>) -> Result<usize> {
+async fn refresh_sources_inner(app: &Arc<DaemonContext>, selected: Option<&str>) -> Result<usize> {
     let libs_by_plugin = libraries_by_plugin_name(&app.db).await?;
 
     let source_mgr = app.source_manager.clone();
@@ -247,9 +270,24 @@ async fn refresh_sources_inner(app: &Arc<DaemonContext>) -> Result<usize> {
     // A failing source plugin must not discard what the others found, so the
     // scan error is carried alongside the snapshot and only surfaced once the
     // successful entries have been synced.
+    let selected_owned = selected.map(str::to_owned);
     let (snapshot, scan_error): (Vec<WallpaperEntry>, Option<Error>) =
         tokio::task::spawn_blocking(move || {
-            let scan_error = handle.block_on(source_mgr.scan_all(&libs_for_scan)).err();
+            let scan_error = if let Some(name) = selected_owned {
+                handle
+                    .block_on(
+                        source_mgr.scan_source(
+                            &name,
+                            libs_for_scan
+                                .get(&name)
+                                .map(Vec::as_slice)
+                                .unwrap_or_default(),
+                        ),
+                    )
+                    .err()
+            } else {
+                handle.block_on(source_mgr.scan_all(&libs_for_scan)).err()
+            };
             (source_mgr.list(), scan_error)
         })
         .await
@@ -265,7 +303,10 @@ async fn refresh_sources_inner(app: &Arc<DaemonContext>) -> Result<usize> {
 
     // Sync to the DB first so every entry gets its canonical item id before
     // readers observe the refreshed source-plugin list.
-    for info in &plugins {
+    for info in plugins
+        .iter()
+        .filter(|info| selected.is_none_or(|name| name == info.name))
+    {
         let entries: Vec<_> = snapshot
             .iter()
             .filter(|e| e.plugin_name == info.name)

@@ -441,6 +441,7 @@ Item {
                     source: root.wp?.preview ?? ""
                     resource: root.wp?.resource ?? ""
                     wpType: root.wp?.wpType ?? ""
+                    timeline: (root.wp?.subType ?? 0) === 1
                     fillMode: Image.PreserveAspectFit
                 }
 

@@ -1,56 +1,28 @@
 local M = {}
-local IMAGE_EXTS = {
-    png = true, jpg = true, jpeg = true, webp = true,
-    bmp = true, tiff = true, tif = true, avif = true, gif = true,
-}
+local IMAGE_EXTS = {png=true, jpg=true, jpeg=true, webp=true, bmp=true, tiff=true, tif=true, avif=true, gif=true}
 
 function M.supported(ctx, path)
     return IMAGE_EXTS[(ctx.extension(path) or ""):lower()] == true
 end
 
 function M.resolution(ctx, path)
-    local base = (ctx.filename(path) or ""):match("^([^.]*)")
-    local width, height = (base or ""):match("^(%d+)x(%d+)$")
+    local name = (ctx.filename(path) or ""):match("^([^.]*)")
+    local width, height = (name or ""):match("^(%d+)x(%d+)$")
     width, height = tonumber(width), tonumber(height)
     if width and height and width > 0 and height > 0 and width <= 2147483647 and height <= 2147483647 then
-        return {width = width, height = height}
+        return {width=width, height=height}
     end
-end
-
-local function trim(value)
-    return (value or ""):match("^%s*(.-)%s*$")
-end
-
-local function clean(path)
-    return path == "/" and path or path:gsub("/+$", "")
-end
-
-local function within(path, root)
-    return path == root or path:sub(1, #root + 1) == root .. "/"
-end
-
-local function sorted(values)
-    table.sort(values)
-    return values
-end
-
-local function locale(ctx)
-    for _, key in ipairs({ "LC_ALL", "LC_MESSAGES", "LANG" }) do
-        local value = ctx.env(key)
-        if value and value ~= "" then return value:gsub("[.@].*$", ""):gsub("-", "_") end
-    end
-    return ""
 end
 
 function M.data_dirs(ctx)
     local value = ctx.env("XDG_DATA_DIRS")
     if not value or value == "" then value = "/usr/local/share:/usr/share" end
     local result, seen = {}, {}
-    for dir in value:gmatch("[^:]+") do
-        dir = clean(dir)
-        if dir:sub(1, 1) == "/" and not seen[dir] then
-            result[#result + 1] = dir
-            seen[dir] = true
+    for directory in value:gmatch("[^:]+") do
+        directory = directory:gsub("/+$", "")
+        if directory:sub(1, 1) == "/" and not seen[directory] then
+            seen[directory] = true
+            result[#result+1] = directory
         end
     end
     return result
@@ -58,208 +30,91 @@ end
 
 function M.auto_detect(ctx)
     local result = {}
-    for _, dir in ipairs(M.data_dirs(ctx)) do
-        for _, name in ipairs({ "backgrounds", "wallpapers" }) do
-            local path = dir .. "/" .. name
-            if ctx.fs.readable_dir(path) then result[#result + 1] = path end
-        end
-    end
-    return result
-end
-
-function M.kind(ctx, root)
-    local path = clean(ctx.fs.canonicalize(root) or root)
-    local data_dirs = M.data_dirs(ctx)
-    data_dirs[#data_dirs + 1] = "/usr/share"
-    data_dirs[#data_dirs + 1] = "/usr/local/share"
-    for _, dir in ipairs(data_dirs) do
-        for _, name in ipairs({ "wallpapers", "backgrounds" }) do
-            local base = dir .. "/" .. name
-            base = clean(ctx.fs.canonicalize(base) or base)
-            if within(path, base) then return name end
-        end
-    end
-    if ctx.fs.is_dir(root .. "/contents/images") or ctx.fs.is_dir(root .. "/contents/images_dark") then
-        return "wallpapers"
-    end
-    if ctx.filename(path) == "wallpapers" then
-        for _, dir in ipairs(ctx.list_dirs(root)) do
-            if ctx.fs.is_dir(dir .. "/contents/images") or ctx.fs.is_dir(dir .. "/contents/images_dark") then return "wallpapers" end
-        end
-    end
-    if ctx.filename(path) == "backgrounds"
-        and ctx.fs.is_dir(ctx.fs.parent(path) .. "/gnome-background-properties") then
-        return "backgrounds"
-    end
-end
-
-local function read(ctx, path, parse, cache)
-    cache.documents = cache.documents or {}
-    local key = ctx.fs.canonicalize(path) or path
-    if cache.documents[key] ~= nil then return cache.documents[key] or nil end
-    local content = ctx.read_file(path)
-    if not content then cache.documents[key] = false; return nil end
-    local ok, result = pcall(parse, content)
-    cache.documents[key] = ok and result or false
-    if ok then return result end
-    ctx.log("image: invalid wallpaper metadata " .. path .. ": " .. tostring(result))
-end
-
-local function walk(ctx, root, depth, emit)
-    if not ctx.fs.readable_dir(root) then
-        ctx.log("image: cannot read wallpaper directory " .. root)
-        return
-    end
-    for _, path in ipairs(ctx.fs.list_files(root)) do emit(path) end
-    if depth > 0 then
-        for _, dir in ipairs(sorted(ctx.list_dirs(root))) do walk(ctx, dir, depth - 1, emit) end
-    end
-end
-
-local function kde_package(ctx, root, emit, cache)
-    local metadata = read(ctx, root .. "/metadata.json", ctx.json.parse, cache)
-    local plugin = type(metadata) == "table" and metadata.KPlugin or nil
-    if type(plugin) ~= "table" then plugin = {} end
-    local lang = locale(ctx)
-    local name = plugin["Name[" .. lang .. "]"]
-        or plugin["Name[" .. lang:match("^[^_]*") .. "]"] or plugin.Name
-    if type(name) ~= "string" or name == "" then name = ctx.filename(root) end
-    local preview, dimensions, distance, area
-    local dir = root .. "/contents/images"
-    if ctx.fs.is_dir(dir) then
-        for _, path in ipairs(sorted(ctx.fs.list_files(dir))) do
-            local size = M.resolution(ctx, path)
-            if size and M.supported(ctx, path) and ctx.fs.is_file(path) then
-                local candidate_distance = math.abs(size.width / size.height - 16 / 9)
-                local candidate_area = size.width * size.height
-                if not preview or candidate_distance < distance
-                    or (candidate_distance == distance and candidate_area < area) then
-                    preview, dimensions, distance, area = path, size, candidate_distance, candidate_area
-                end
-            end
-        end
-    end
-    if preview then emit(root .. "/contents", name, preview, dimensions) end
-end
-
-local function children(node, tag)
-    local result = {}
-    for _, child in ipairs(node.children) do
-        if child.tag == tag then result[#result + 1] = child end
-    end
-    return result
-end
-
-local function title(ctx, node)
-    local fallback, language
-    local lang = locale(ctx)
-    for _, name in ipairs(children(node, "name")) do
-        local value = trim(name.text)
-        local code = (name.attrs["xml:lang"] or ""):gsub("-", "_")
-        if code == lang and value ~= "" then return value end
-        if code == lang:match("^[^_]*") and value ~= "" then language = value end
-        if code == "" and value ~= "" then fallback = value end
-    end
-    return language or fallback
-end
-
-local function file_path(ctx, node, owner)
-    local path = trim(node.text)
-    if path == "" then return nil end
-    if path:sub(1, 1) ~= "/" then path = ctx.fs.parent(owner) .. "/" .. path end
-    return path
-end
-
-local function static_files(ctx, path, cache)
-    local document = read(ctx, path, ctx.xml.parse, cache)
-    local result = {}
-    if not document or document.tag ~= "background" then return result end
-    for _, static in ipairs(children(document, "static")) do
-        for _, file in ipairs(children(static, "file")) do
-            local image = file_path(ctx, file, path)
-            if image then result[#result + 1] = image end
-            for _, size in ipairs(children(file, "size")) do
-                image = file_path(ctx, size, path)
-                if image then result[#result + 1] = image end
+    for _, directory in ipairs(M.data_dirs(ctx)) do
+        for _, suffix in ipairs({"wallpapers", "gnome-background-properties"}) do
+            local path = directory .. "/" .. suffix
+            if ctx.fs.readable_dir(path) then
+                result[#result+1] = {path=path, settings={scan_mode="wallpapers"}}
             end
         end
     end
     return result
 end
 
-local function gnome_metadata(ctx, directory, cache)
-    if cache[directory] then return cache[directory] end
-    local index = { names = {}, excluded = {} }
-    cache[directory] = index
-    for _, path in ipairs(ctx.fs.list_files(directory)) do
-        if (ctx.extension(path) or ""):lower() == "xml" then
-            local document = read(ctx, path, ctx.xml.parse, cache)
-            if document and document.tag == "wallpapers" then
-                for _, item in ipairs(children(document, "wallpaper")) do
-                    local name = title(ctx, item)
-                    for _, child in ipairs(item.children) do
-                        if child.tag == "filename" or child.tag == "filename-dark" or child.tag == "thumbnail" then
-                            local image = file_path(ctx, child, path)
-                            if image then
-                                local files = { image }
-                                if (ctx.extension(image) or ""):lower() == "xml" then
-                                    files = static_files(ctx, image, cache)
-                                end
-                                for _, resource in ipairs(files) do
-                                    local key = ctx.fs.canonicalize(resource) or resource
-                                    if child.tag == "thumbnail" or item.attrs.deleted == "true" then
-                                        index.excluded[key] = true
-                                    elseif name then
-                                        local label = name
-                                        if #files > 1 then
-                                            label = label .. " · " .. ctx.filename(resource)
-                                        elseif child.tag == "filename-dark" then
-                                            label = label .. " · Dark"
-                                        elseif #children(item, "filename-dark") > 0 then
-                                            label = label .. " · Light"
-                                        end
-                                        index.names[key] = index.names[key] or label
-                                    end
-                                end
-                            end
-                        end
+local function locale(ctx)
+    for _, key in ipairs({"LC_ALL", "LC_MESSAGES", "LANG"}) do
+        local value = ctx.env(key)
+        if value and value ~= "" then return (value:gsub("[.@].*$", ""):gsub("-", "_")) end
+    end
+    return ""
+end
+
+local function document(ctx, path, parse)
+    local bytes = ctx.read_file(path)
+    if not bytes then return nil end
+    local ok, value = pcall(parse, bytes)
+    return ok and value or nil
+end
+
+local function kde(ctx, root, emit)
+    local path = root .. "/metadata.json"
+    if not ctx.fs.is_file(path) or not ctx.fs.is_dir(root .. "/contents/images") then return false end
+    local value = document(ctx, path, ctx.json.parse)
+    local plugin = value and type(value.KPlugin) == "table" and value.KPlugin or {}
+    local lang = locale(ctx)
+    local name = plugin["Name[" .. lang .. "]"] or plugin["Name[" .. lang:match("^[^_]*") .. "]"] or plugin.Name
+    local media, distance, area
+    for _, image in ipairs(ctx.fs.list_files(root .. "/contents/images")) do
+        local size = M.resolution(ctx, image)
+        if size and M.supported(ctx, image) then
+            local d, a = math.abs(size.width / size.height - 16/9), size.width * size.height
+            if not media or d < distance or (d == distance and a < area) then
+                media, distance, area = size, d, a
+                media.size = ctx.file_size(image)
+            end
+        end
+    end
+    emit(path, type(name) == "string" and name or ctx.filename(root), media)
+    return true
+end
+
+local function xml_name(ctx, path)
+    local value = document(ctx, path, ctx.xml.parse)
+    local lang, fallback, language = locale(ctx)
+    if value and value.tag == "wallpapers" then
+        for _, child in ipairs(value.children or {}) do
+            if child.tag == "wallpaper" then
+                for _, field in ipairs(child.children or {}) do
+                    if field.tag == "name" and (field.text or "") ~= "" then
+                        local code = (field.attrs["xml:lang"] or ""):gsub("-", "_")
+                        if code == lang then return field.text end
+                        if code == lang:match("^[^_]*") then language = field.text end
+                        if code == "" then fallback = field.text end
                     end
                 end
+                if fallback or language then return language or fallback end
             end
         end
     end
-    return index
 end
 
-function M.collect(ctx, root, kind, emit, cache)
-    if kind == "wallpapers" then
-        if ctx.fs.is_dir(root .. "/contents/images") or ctx.fs.is_dir(root .. "/contents/images_dark") then
-            kde_package(ctx, root, emit, cache)
-        else
-            for _, path in ipairs(ctx.fs.list_files(root)) do emit(path) end
-            for _, dir in ipairs(sorted(ctx.list_dirs(root))) do
-                if ctx.fs.is_file(dir .. "/metadata.json") or ctx.fs.is_dir(dir .. "/contents/images")
-                    or ctx.fs.is_dir(dir .. "/contents/images_dark") then
-                    kde_package(ctx, dir, emit, cache)
-                else
-                    walk(ctx, dir, 1, emit)
-                end
-            end
+function M.collect(ctx, root, emit)
+    local seen = {}
+    local function walk(directory, depth)
+        local key = ctx.fs.canonicalize(directory)
+        if not key or seen[key] or not ctx.fs.readable_dir(directory) then return end
+        seen[key] = true
+        if kde(ctx, directory, emit) then return end
+        for _, path in ipairs(ctx.fs.list_files(directory)) do
+            if (ctx.extension(path) or ""):lower() == "xml" then emit(path, xml_name(ctx, path)) end
         end
-        return
+        if depth > 0 then
+            local directories = ctx.list_dirs(directory)
+            table.sort(directories)
+            for _, child in ipairs(directories) do walk(child, depth - 1) end
+        end
     end
-    local base = clean(ctx.fs.canonicalize(root) or root)
-    while base ~= "/" and ctx.filename(base) ~= "backgrounds" do
-        base = ctx.fs.parent(base) or "/"
-    end
-    local index = { names = {}, excluded = {} }
-    if ctx.filename(base) == "backgrounds" then
-        index = gnome_metadata(ctx, ctx.fs.parent(base) .. "/gnome-background-properties", cache)
-    end
-    walk(ctx, root, 6, function(path)
-        local key = ctx.fs.canonicalize(path) or path
-        if not index.excluded[key] then emit(path, index.names[key]) end
-    end)
+    walk(root, 6)
 end
 
 return M

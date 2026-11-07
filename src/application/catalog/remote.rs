@@ -324,6 +324,7 @@ async fn upsert_remote_download(
             library_id: library.id,
             path: relative_path,
             ty: &info.wp_type,
+            sub_type: "",
             display_name: title,
             preview_path: preview.as_deref(),
             description: (!info.description.trim().is_empty()).then_some(info.description.as_str()),

@@ -337,6 +337,7 @@ pub struct WallpaperPresentationInfo {
 /// Read-only view of a registered library.
 #[derive(Debug, Clone)]
 pub struct LibrarySnapshot {
+    pub settings: HashMap<String, String>,
     pub id: i64,
     pub name: String,
     pub path: String,

@@ -1,0 +1,18 @@
+[package]
+name = "waywallen-image-definition"
+version.workspace = true
+
+[lib]
+name = "waywallen-image-definition"
+module = "waywallen.image.definition"
+archive = "waywallen-image-definition"
+sources = ["definition.cppm", "definition.cpp"]
+
+[dependencies.rstd-std]
+workspace = true
+
+[dependencies.rstd-json]
+workspace = true
+
+[external-dependencies.pkg-config.libxml2]
+workspace = true

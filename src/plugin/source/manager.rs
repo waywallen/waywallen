@@ -112,6 +112,7 @@ impl DownloadSession {
 /// held while cloning handles or replacing snapshots, so callbacks belonging to
 /// different plugins can make progress concurrently.
 pub struct LuaPluginRegistry {
+    scan_lock: tokio::sync::Mutex<()>,
     plugins: StdRwLock<HashMap<String, Arc<PluginHandle>>>,
     catalog: StdRwLock<SourceCatalog>,
     probe: Arc<dyn MediaProbe>,
@@ -139,6 +140,7 @@ impl LuaPluginRegistry {
         state_store: crate::plugin::state_store::PluginStateStore,
     ) -> Result<Self> {
         Ok(Self {
+            scan_lock: Default::default(),
             plugins: StdRwLock::new(HashMap::new()),
             catalog: StdRwLock::new(SourceCatalog::default()),
             probe,
@@ -339,6 +341,7 @@ impl LuaPluginRegistry {
     }
 
     pub async fn scan_all(&self, libs_by_plugin: &HashMap<String, Vec<String>>) -> Result<()> {
+        let _scan = self.scan_lock.lock().await;
         let scans = self.handles().into_iter().filter_map(|(name, handle)| {
             let has_source = handle
                 .info
@@ -389,6 +392,23 @@ impl LuaPluginRegistry {
                 failures.join("; ")
             )));
         }
+        Ok(())
+    }
+
+    pub async fn scan_source(&self, name: &str, paths: &[String]) -> Result<()> {
+        let _scan = self.scan_lock.lock().await;
+        let handle = self.handle(name)?;
+        let mut runtime = handle.runtime.lock().await;
+        runtime
+            .scan_all(&HashMap::from([(name.to_owned(), paths.to_vec())]))
+            .await?;
+        let mut entries = self.list();
+        entries.retain(|entry| entry.plugin_name != name);
+        entries.extend(runtime.list().iter().cloned());
+        self.catalog
+            .write()
+            .expect("source state lock poisoned")
+            .replace(entries);
         Ok(())
     }
 
@@ -540,7 +560,7 @@ impl LuaPluginRegistry {
             .await
     }
 
-    pub async fn auto_detect_all(&self) -> Result<HashMap<String, Vec<String>>> {
+    pub async fn auto_detect_all(&self) -> Result<HashMap<String, Vec<SourceLibrary>>> {
         let calls = self
             .handles()
             .into_iter()
@@ -824,10 +844,26 @@ impl LuaPluginRegistry {
                 library_label: source.library_label.clone(),
                 library_hint: source.library_hint.clone(),
                 settings: info.settings.clone(),
+                library_settings: source.settings.clone(),
             });
         }
         out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
+    }
+
+    pub fn library_settings(
+        &self,
+        name: &str,
+        values: HashMap<String, String>,
+    ) -> Result<HashMap<String, String>> {
+        let handle = self.handle(name)?;
+        let info = handle.info.read().expect("plugin info lock poisoned");
+        let source = info
+            .capabilities
+            .source
+            .as_ref()
+            .ok_or_else(|| Error::SourcePluginNotFound(name.into()))?;
+        validate_library_settings(&source.settings, values)
     }
 
     pub fn supports_item_remove(&self, plugin_name: &str) -> bool {
