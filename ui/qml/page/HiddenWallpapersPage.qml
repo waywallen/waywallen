@@ -1,5 +1,6 @@
 pragma ComponentBehavior: Bound
 import QtQuick
+import QExtra as QE
 import Qcm.Material as MD
 import waywallen.control as WC
 import waywallen.ui as W
@@ -62,23 +63,33 @@ MD.Page {
         implicitWidth: root.implicitWidth
         implicitHeight: root.implicitHeight
 
-        MD.VerticalListView {
+        MD.VerticalLazyList {
             id: wallpaperList
 
             anchors.fill: parent
             clip: true
-            model: hiddenQuery.data
+            source: MD.ItemModelSource {
+                id: wallpaperSource
+                model: hiddenQuery.data
+                keyRole: "itemKey"
+            }
+            Connections {
+                target: hiddenQuery.data
+                function onHasMoreChanged() {
+                    wallpaperSource.notifyFetchStateChanged();
+                }
+            }
             busy: hiddenQuery.querying && count > 0
             spacing: 6
-            topMargin: 8
-            bottomMargin: 16
-            leftMargin: 16
-            rightMargin: 16
+            extraTopMargin: 8
+            extraBottomMargin: 16
+            extraLeftMargin: 16
+            extraRightMargin: 16
 
             delegate: MD.ListItem {
                 id: wallpaperItem
-                required property int index
-                required property var model
+                required property MD.LazyRow row
+                itemRow: row
 
                 width: wallpaperList.contentWidth
                 radius: 10
@@ -90,6 +101,8 @@ MD.Page {
                 mdState.backgroundColor: MD.Token.color.surface_container
 
                 leader: W.ThumbnailImage {
+                    loadingMode: !wallpaperItem.row.active || wallpaperItem.row.usage === MD.LazyRow.Pooled ? QE.Image.Suspended : wallpaperItem.row.usage === MD.LazyRow.Cached ? QE.Image.Prefetch : QE.Image.Automatic
+                    preparationScope: wallpaperItem.row.view
                     implicitWidth: 72
                     implicitHeight: 48
                     source: wallpaperItem.model.preview || ""

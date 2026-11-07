@@ -8,7 +8,9 @@ import Qcm.Material as MD
 MD.ItemDelegate {
     id: root
     required property var model
-    required property int index
+    required property MD.LazyRow row
+    required property var ruleModel
+    readonly property int index: row.index
     required property var popupWindow
     property var supportedTypes: []
     property var typeLabels: ({})
@@ -193,25 +195,22 @@ MD.ItemDelegate {
             mdState.size: MD.Enum.XS
             icon.name: MD.Token.icon.close
             onClicked: {
-                const view = root.ListView.view;
-                if (!view || !view.model)
+                if (!root.ruleModel || root.index < 0)
                     return;
-                if (view.model.rowCountInGroupOf(root.index) === 1)
-                    view.model.deleteGroup(root.model.group);
+                if (root.ruleModel.rowCountInGroupOf(root.index) === 1)
+                    root.ruleModel.deleteGroup(root.model.group);
                 else
-                    view.model.removeRow(root.index);
+                    root.ruleModel.removeRow(root.index);
             }
         }
     }
 
     background: MD.Rectangle {
         corners: {
-            const view = root.ListView.view;
-            if (!view || !view.model)
-                return 0;
-            const model = view.model;
-            void (view.count);
-            return MD.Util.listCorners(model.rowIndexInGroup(root.index), model.rowCountInGroupOf(root.index), 12);
+            void (root.row.revision);
+            if (!root.ruleModel || root.index < 0)
+                return MD.Util.corners(0);
+            return MD.Util.listCorners(root.ruleModel.rowIndexInGroup(root.index), root.ruleModel.rowCountInGroupOf(root.index), 12);
         }
         color: root.backgroundColor
     }

@@ -82,13 +82,13 @@ MD.Dialog {
         allTags: tagListQuery.tags
         valueLabels: root.valueLabels
         allContentRatings: ratingListQuery.ratings
-        implicitHeight: Math.min(contentHeight, 480)
+        implicitHeight: Math.min(contentHeight + topMargin + bottomMargin, 480)
         spacing: 2
 
         // Quick filters (Types / Tags) ride in the list header so they
         // scroll together with the structured rules.
         header: ColumnLayout {
-            width: rulesView.width
+            width: rulesView.contentWidth
             spacing: 8
 
             ColumnLayout {

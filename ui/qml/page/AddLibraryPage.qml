@@ -10,7 +10,10 @@ MD.Page {
     property string pathError: ""
     property var librarySettings: ({})
     property string selectedPlugin: ""
-    onSelectedPluginChanged: { root.pathError = ""; root.librarySettings = ({}); }
+    onSelectedPluginChanged: {
+        root.pathError = "";
+        root.librarySettings = ({});
+    }
 
     W.SourceListQuery {
         id: sourceQuery
@@ -64,8 +67,7 @@ MD.Page {
         }
     }
 
-    contentItem: MD.Flickable {
-        implicitHeight: contentHeight
+    contentItem: MD.VerticalFlickable {
         contentHeight: contentCol.implicitHeight
         leftMargin: 12
         rightMargin: 12

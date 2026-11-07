@@ -47,12 +47,18 @@ MD.Page {
         id: removeQuery
     }
 
-    W.SourceListQuery { id: sourceQuery }
+    W.SourceListQuery {
+        id: sourceQuery
+    }
     Component.onCompleted: sourceQuery.reload()
     Connections {
         target: W.Notify
-        function onDaemonReady() { sourceQuery.reload(); }
-        function onPluginChanged() { sourceQuery.reload(); }
+        function onDaemonReady() {
+            sourceQuery.reload();
+        }
+        function onPluginChanged() {
+            sourceQuery.reload();
+        }
     }
 
     W.LibraryEditQuery {
@@ -74,13 +80,12 @@ MD.Page {
         readonly property var schemas: {
             const sources = sourceQuery.sources || [];
             for (const source of sources)
-                if (source.name === pluginName) return source.librarySettings;
+                if (source.name === pluginName)
+                    return source.librarySettings;
             return [];
         }
-        readonly property bool hasChanges: nameField.text.trim() !== originalName
-            || Object.keys(values).some(key => values[key] !== originalValues[key])
-        readonly property bool canApply: !editQuery.querying
-            && nameField.text.trim().length > 0 && hasChanges
+        readonly property bool hasChanges: nameField.text.trim() !== originalName || Object.keys(values).some(key => values[key] !== originalValues[key])
+        readonly property bool canApply: !editQuery.querying && nameField.text.trim().length > 0 && hasChanges
 
         title: qsTr("Edit library")
         parent: MD.Overlay.overlay
@@ -104,7 +109,8 @@ MD.Page {
         }
 
         function submit() {
-            if (!canApply) return;
+            if (!canApply)
+                return;
             errorText = "";
             editQuery.name = nameField.text.trim();
             editQuery.settings = values;
@@ -115,7 +121,9 @@ MD.Page {
             const apply = standardButton(MD.Dialog.Apply);
             if (apply) {
                 apply.text = qsTr("Apply");
-                apply.enabled = Qt.binding(function () { return editDialog.canApply; });
+                apply.enabled = Qt.binding(function () {
+                    return editDialog.canApply;
+                });
             }
         }
         onOpened: nameField.forceActiveFocus()
@@ -155,20 +163,22 @@ MD.Page {
     }
 
     contentItem: Item {
-        implicitHeight: Math.max(m_view.contentHeight, emptyLabel.implicitHeight) + 16
+        implicitHeight: Math.max(m_view.contentHeight + m_view.topMargin + m_view.bottomMargin, emptyLabel.implicitHeight + 16)
         implicitWidth: m_view.implicitWidth
 
-        MD.VerticalListView {
+        MD.VerticalLazyList {
             id: m_view
             width: parent.width
             height: parent.height
-            model: W.App.libraryManager.libraries
+            source: MD.ListSnapshotSource {
+                items: W.App.libraryManager.libraries
+            }
             spacing: 8
 
-            topMargin: 8
-            bottomMargin: 8
-            leftMargin: 12
-            rightMargin: 12
+            extraTopMargin: 8
+            extraBottomMargin: 8
+            extraLeftMargin: 12
+            extraRightMargin: 12
 
             footer: Column {
                 width: m_view.contentWidth
@@ -194,7 +204,9 @@ MD.Page {
 
             delegate: MD.ListItem {
                 id: sourceItem
-                required property var modelData
+                required property MD.LazyRow row
+                readonly property var modelData: row.value
+                itemRow: row
                 readonly property string fullPath: String(modelData.path || "")
 
                 width: m_view.contentWidth

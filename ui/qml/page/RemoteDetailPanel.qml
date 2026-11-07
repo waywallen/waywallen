@@ -69,20 +69,18 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        MD.VerticalListView {
+        MD.VerticalFlickable {
             id: detailView
             MD.NestedScroll.enabled: root.nestedScrollEnabled
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            model: []
-            spacing: 8
             leftMargin: 16
             rightMargin: 16
             topMargin: 0
             bottomMargin: 8
 
-            header: ColumnLayout {
+            ColumnLayout {
                 width: detailView.contentWidth
                 spacing: 12
 
@@ -174,8 +172,7 @@ Item {
                     rowSpacing: 4
                     visible: hasResolution || hasSize
 
-                    readonly property bool hasResolution:
-                        Number(root.details?.width ?? 0) > 0 && Number(root.details?.height ?? 0) > 0
+                    readonly property bool hasResolution: Number(root.details?.width ?? 0) > 0 && Number(root.details?.height ?? 0) > 0
                     readonly property string formattedSize: W.I18n.formatSize(root.details?.size)
                     readonly property bool hasSize: formattedSize.length > 0
 
@@ -229,10 +226,11 @@ Item {
                 ColumnLayout {
                     Layout.fillWidth: true
                     spacing: 4
-                    visible: String(root.details?.description ?? "").length > 0
-                             || Boolean(root.details?.querying)
+                    visible: String(root.details?.description ?? "").length > 0 || Boolean(root.details?.querying)
 
-                    MD.Divider { Layout.fillWidth: true }
+                    MD.Divider {
+                        Layout.fillWidth: true
+                    }
 
                     MD.Text {
                         text: qsTr("Description")
@@ -283,9 +281,7 @@ Item {
                         Layout.fillWidth: true
                         typescale: MD.Token.typescale.body_small
                         color: MD.Token.color.on_surface_variant
-                        text: root.downloadTotalBytes > 0
-                            ? W.I18n.formatBytes(root.downloadReceivedBytes) + " / " + W.I18n.formatBytes(root.downloadTotalBytes)
-                            : W.I18n.formatBytes(root.downloadReceivedBytes)
+                        text: root.downloadTotalBytes > 0 ? W.I18n.formatBytes(root.downloadReceivedBytes) + " / " + W.I18n.formatBytes(root.downloadTotalBytes) : W.I18n.formatBytes(root.downloadReceivedBytes)
                     }
                     MD.Text {
                         visible: !downloadProgress.indeterminate
@@ -318,9 +314,12 @@ Item {
                     enabled: root.downloadState === 3 || (root.downloadAction?.enabled ?? true) && root.downloadState !== 1 && root.downloadState !== 2
                     text: {
                         switch (root.downloadState) {
-                        case 1: return qsTr("Pending");
-                        case 2: return qsTr("Downloading");
-                        case 3: return qsTr("Remove");
+                        case 1:
+                            return qsTr("Pending");
+                        case 2:
+                            return qsTr("Downloading");
+                        case 3:
+                            return qsTr("Remove");
                         }
                         if (downloadControl.label.length > 0)
                             return downloadControl.label;
@@ -342,11 +341,16 @@ Item {
                 enabled: root.subscriptionState !== 3
                 text: {
                     switch (root.subscriptionState) {
-                    case 0: return qsTr("Retry");
-                    case 1: return qsTr("Subscribe");
-                    case 2: return qsTr("Unsubscribe");
-                    case 3: return qsTr("Updating…");
-                    default: return qsTr("Subscribe");
+                    case 0:
+                        return qsTr("Retry");
+                    case 1:
+                        return qsTr("Subscribe");
+                    case 2:
+                        return qsTr("Unsubscribe");
+                    case 3:
+                        return qsTr("Updating…");
+                    default:
+                        return qsTr("Subscribe");
                     }
                 }
                 onClicked: {

@@ -46,24 +46,23 @@ ColumnLayout {
             verticalAlignment: Text.AlignVCenter
         }
 
-        MD.VerticalListView {
+        MD.VerticalLazyList {
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(260, Math.max(88, contentHeight + topMargin + bottomMargin))
             visible: control.sheetState.playlists.length > 0
             interactive: contentHeight + topMargin + bottomMargin > height
-            model: control.sheetState.playlists
+            source: MD.ListSnapshotSource {
+                items: control.sheetState.playlists
+            }
             spacing: 6
-            leftMargin: 0
-            rightMargin: 0
-            topMargin: 0
-            bottomMargin: 0
 
             delegate: MD.ListItem {
                 id: selectPlaylistItem
 
-                required property var modelData
+                required property MD.LazyRow row
+                readonly property var modelData: row.value
+                itemRow: row
 
-                width: ListView.view.contentWidth
                 radius: 12
                 text: modelData.name || qsTr("Untitled")
                 supportText: qsTr("%n wallpaper(s)", "", (modelData.entryIds || []).length)

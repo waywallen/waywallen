@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
+import QExtra as QE
 import Qcm.Material as MD
 import waywallen.ui as W
 import waywallen.control as WC
@@ -289,57 +290,28 @@ MD.Page {
         implicitWidth: root.implicitWidth
         implicitHeight: root.implicitHeight
 
-        MD.VerticalListView {
+        MD.VerticalLazyList {
             id: memberList
 
-            property var savedScrollOffset: null
-
-            function saveScrollPosition() {
-                if (savedScrollOffset === null)
-                    savedScrollOffset = contentY - originY;
-            }
-
-            function restoreScrollPosition() {
-                if (savedScrollOffset === null)
-                    return;
-                forceLayout();
-                contentY = originY + savedScrollOffset;
-                savedScrollOffset = null;
-                returnToBounds();
-            }
-
             Connections {
-                target: memberList.model
-                function onLayoutAboutToBeChanged() {
-                    memberList.saveScrollPosition();
-                }
-                function onLayoutChanged() {
-                    Qt.callLater(memberList.restoreScrollPosition);
-                }
-                function onModelAboutToBeReset() {
-                    memberList.saveScrollPosition();
-                }
-                function onModelReset() {
-                    Qt.callLater(memberList.restoreScrollPosition);
-                }
-                function onRowsAboutToBeRemoved() {
-                    memberList.saveScrollPosition();
-                }
-                function onRowsRemoved() {
-                    Qt.callLater(memberList.restoreScrollPosition);
+                target: memberSource.model
+                function onHasMoreChanged() {
+                    memberSource.notifyFetchStateChanged();
                 }
             }
 
             anchors.fill: parent
             clip: true
-            model: root.smart ? previewQuery.data : detailQuery.data
-            onAtYEndChanged: if (atYEnd && root.smart)
-                previewQuery.fetchMore(50)
+            source: MD.ItemModelSource {
+                id: memberSource
+                model: root.smart ? previewQuery.data : detailQuery.data
+                keyRole: "itemKey"
+            }
             spacing: 0
-            topMargin: 8
-            bottomMargin: 20
-            leftMargin: 16
-            rightMargin: 16
+            extraTopMargin: 8
+            extraBottomMargin: 20
+            extraLeftMargin: 16
+            extraRightMargin: 16
 
             header: ColumnLayout {
                 width: memberList.contentWidth
@@ -647,20 +619,19 @@ MD.Page {
 
             delegate: Item {
                 id: wallpaperDelegate
-                required property int index
-                required property var model
+                required property MD.LazyRow row
+                readonly property var model: row.value
 
                 readonly property string entryId: String(model.id_proto || "")
                 readonly property bool retained: root.smart || root.draftEntryIds.indexOf(entryId) >= 0
                 width: memberList.contentWidth
-                height: retained ? wallpaperItem.implicitHeight + 6 : 0
+                implicitHeight: retained ? wallpaperItem.implicitHeight + 6 : 0
                 visible: retained
 
                 MD.ListItem {
                     id: wallpaperItem
 
-                    index: wallpaperDelegate.index
-                    model: wallpaperDelegate.model
+                    itemRow: wallpaperDelegate.row
                     width: parent.width
                     height: implicitHeight
                     radius: 10
@@ -673,6 +644,8 @@ MD.Page {
                     mdState.backgroundColor: MD.Token.color.surface_container
 
                     leader: W.ThumbnailImage {
+                        loadingMode: !wallpaperDelegate.row.active || wallpaperDelegate.row.usage === MD.LazyRow.Pooled ? QE.Image.Suspended : wallpaperDelegate.row.usage === MD.LazyRow.Cached ? QE.Image.Prefetch : QE.Image.Automatic
+                        preparationScope: wallpaperDelegate.row.view
                         implicitWidth: 72
                         implicitHeight: 48
                         source: wallpaperDelegate.model.preview || ""

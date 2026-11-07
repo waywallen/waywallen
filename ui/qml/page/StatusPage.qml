@@ -390,32 +390,31 @@ MD.Page {
                         text: qsTr("No renderers")
                     }
 
-                    ListView {
+                    MD.VerticalLazyList {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: contentHeight
-                        implicitHeight: contentHeight
+                        expand: true
                         interactive: false
                         spacing: 4
 
                         // Push-updated logical renderer slots remain visible while
                         // their process is retained in a stopped state.
-                        model: W.App.rendererManager.renderers
+                        source: MD.ListSnapshotSource {
+                            items: W.App.rendererManager.renderers
+                        }
 
                         delegate: MD.ListItem {
                             id: rendererItem
-                            required property var modelData
+                            required property MD.LazyRow row
+                            readonly property var modelData: row.value
+                            itemRow: row
 
-                            width: ListView.view.width
                             radius: 12
                             text: root.rendererLabel(modelData)
                             font.family: "monospace"
                             leader: MD.Icon {
-                                name: modelData.running
-                                    ? (modelData.status === "paused" ? MD.Token.icon.pause : MD.Token.icon.play_arrow)
-                                    : MD.Token.icon.stop
+                                name: modelData.running ? (modelData.status === "paused" ? MD.Token.icon.pause : MD.Token.icon.play_arrow) : MD.Token.icon.stop
                                 size: 24
-                                color: modelData.running && modelData.status !== "paused"
-                                    ? MD.Token.color.primary : MD.Token.color.on_surface_variant
+                                color: modelData.running && modelData.status !== "paused" ? MD.Token.color.primary : MD.Token.color.on_surface_variant
                             }
                             trailing: RowLayout {
                                 spacing: 6
@@ -453,10 +452,8 @@ MD.Page {
                                     text: (rendererItem.modelData.fps || 0) + " fps"
                                 }
                                 W.Tag {
-                                    visible: rendererItem.modelData.textureWidth > 0
-                                        && rendererItem.modelData.textureHeight > 0
-                                    text: rendererItem.modelData.textureWidth
-                                        + "×" + rendererItem.modelData.textureHeight
+                                    visible: rendererItem.modelData.textureWidth > 0 && rendererItem.modelData.textureHeight > 0
+                                    text: rendererItem.modelData.textureWidth + "×" + rendererItem.modelData.textureHeight
                                 }
                                 Repeater {
                                     model: rendererItem.modelData.runtimeTags || []
@@ -495,23 +492,32 @@ MD.Page {
                         text: qsTr("No components")
                     }
 
-                    ListView {
+                    MD.VerticalLazyList {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: contentHeight
-                        implicitHeight: contentHeight
+                        expand: true
                         interactive: false
                         spacing: 4
 
-                        model: pluginQuery.renderers
+                        source: MD.ListSnapshotSource {
+                            items: pluginQuery.renderers
+                        }
 
                         delegate: MD.ListItem {
                             id: componentItem
-                            required property var modelData
+                            required property MD.LazyRow row
+                            readonly property var modelData: row.value
+                            itemRow: row
 
                             readonly property bool hasSettings: (modelData.settings && modelData.settings.length > 0) === true
                             property var settingsPresentation: null
 
-                            width: ListView.view.width
+                            Connections {
+                                target: componentItem.row
+                                function onReused() {
+                                    componentItem.settingsPresentation = null;
+                                }
+                            }
+
                             radius: 12
                             text: modelData.name || ""
                             supportText: (modelData.types ? modelData.types.map(t => W.I18n.valueLabel(pluginQuery.typeLabels, t)).join(", ") : "")

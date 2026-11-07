@@ -122,24 +122,26 @@ MD.BottomSheet {
             verticalAlignment: Text.AlignVCenter
         }
 
-        MD.VerticalListView {
+        MD.VerticalLazyList {
             id: playlistSheetList
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(360, Math.max(120, contentHeight + topMargin + bottomMargin))
             visible: control.sheetState.playlists.length > 0
             interactive: contentHeight + topMargin + bottomMargin > height
-            model: control.sheetState.playlists
+            source: MD.ListSnapshotSource {
+                items: control.sheetState.playlists
+            }
             spacing: 6
-            leftMargin: 16
-            rightMargin: 16
-            topMargin: 0
-            bottomMargin: 16
+            extraLeftMargin: 16
+            extraRightMargin: 16
+            extraBottomMargin: 16
 
             delegate: MD.ListItem {
                 id: playlistSheetItem
-                required property var modelData
+                required property MD.LazyRow row
+                readonly property var modelData: row.value
+                itemRow: row
 
-                width: ListView.view.contentWidth
                 radius: 12
                 text: modelData.name || qsTr("Untitled")
                 supportText: control.sheetState.playlistRuntimeText(modelData) || ((modelData.sourceKind === "smart" ? qsTr("Smart playlist") + " · " : "") + qsTr("%n wallpaper(s)", "", modelData.itemCount || 0))
