@@ -1,21 +1,6 @@
 use super::*;
-use crate::probe::media::{MediaMeta, MediaProbe};
+use crate::probe::media::ProbeService;
 use std::os::unix::fs::{symlink, PermissionsExt};
-
-use std::sync::atomic::AtomicUsize;
-
-#[derive(Default)]
-struct ImageProbe(AtomicUsize);
-
-impl MediaProbe for ImageProbe {
-    fn probe_media(&self, _: &str) -> MediaMeta {
-        self.0.fetch_add(1, Ordering::Relaxed);
-        MediaMeta {
-            width: Some(1920),
-            height: Some(1080),
-        }
-    }
-}
 
 fn file(path: &Path, content: impl AsRef<[u8]>) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -177,7 +162,7 @@ async fn image_system_descriptors_are_one_entry_each() {
         .iter()
         .find(|entry| entry.resource.ends_with("metadata.json"))
         .unwrap();
-    assert_eq!((kde.width, kde.height), (Some(1920), Some(1080)));
+    assert_eq!((kde.width, kde.height), (None, None));
     let apply = manager.call_apply("image", kde).await.unwrap();
     assert_eq!(apply.extras.len(), 1);
     assert_eq!(apply.extras["path"], kde.resource);
@@ -199,71 +184,39 @@ async fn image_system_files_mode_does_not_infer_packages() {
 }
 
 #[tokio::test]
-async fn image_system_kde_size_matches_the_selected_image_after_scan_sync_and_probe() {
+async fn image_system_timeline_metadata_is_deferred_to_native_probe() {
     let root = tempfile::tempdir().unwrap();
-    let path = root.path().to_str().unwrap().to_owned();
-    let selected = root.path().join("contents/images/1920x1080.png");
     file(
         &root.path().join("metadata.json"),
         r#"{"KPlugin":{"Name":"Size"}}"#,
     );
-    file(&selected, "selected image");
-    file(
-        &root.path().join("contents/images/3840x2160.png"),
-        "larger selected image",
-    );
-    file(&root.path().join("contents/images/800x600.png"), "x");
-    file(
-        &root.path().join("contents/images_dark/1920x1080.png"),
-        "dark image is not added to the size",
-    );
+    file(&root.path().join("contents/images/1920x1080.png"), "image");
     let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
-    let probe = Arc::new(ImageProbe::default());
     let (_plugin, manager) = manager_with_db(
-        serde_json::json!({"SCAN_MODE": "wallpapers"}),
+        serde_json::json!({"SCAN_MODE":"wallpapers"}),
         Some(db.clone()),
     );
-    for (remove_selected, expected_size, expected_width, expected_height) in
-        [(false, 14, 1920, 1080), (true, 21, 3840, 2160)]
-    {
-        if remove_selected {
-            std::fs::remove_file(&selected).unwrap();
-        }
-        let entries = scan(&manager, &[root.path().to_owned()]).await;
-        assert_eq!(entries.len(), 1);
-        assert_eq!(
-            entries[0].resource,
-            root.path().join("metadata.json").to_str().unwrap()
-        );
-        assert_eq!(entries[0].size, Some(expected_size));
-        assert_eq!(
-            (entries[0].width, entries[0].height),
-            (Some(expected_width), Some(expected_height))
-        );
-        crate::model::sync::sync_plugin_entries(
-            &db,
-            crate::model::sync::PluginRef {
-                name: "image",
-                version: "1",
-            },
-            &entries,
-            std::slice::from_ref(&path),
-        )
+    let path = root.path().to_str().unwrap().to_owned();
+    let entries = scan(&manager, &[root.path().to_owned()]).await;
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].size.is_none() && entries[0].width.is_none() && entries[0].height.is_none());
+    crate::model::sync::sync_plugin_entries(
+        &db,
+        crate::model::sync::PluginRef {
+            name: "image",
+            version: "1",
+        },
+        &entries,
+        &[path],
+    )
+    .await
+    .unwrap();
+    crate::probe::task::run_pending(&db, Arc::new(ProbeService::with_tool(None)))
         .await
         .unwrap();
-        let stats = crate::probe::task::run_pending(&db, probe.clone())
-            .await
-            .unwrap();
-        assert_eq!(stats.media_probed, 0);
-        let stored = repo::load_entries(&db).await.unwrap();
-        assert_eq!(stored.len(), 1);
-        assert_eq!(stored[0].size, Some(expected_size));
-        assert_eq!(
-            (stored[0].width, stored[0].height),
-            (Some(expected_width), Some(expected_height))
-        );
-    }
-    assert_eq!(probe.0.load(Ordering::Relaxed), 0);
+    let stored = repo::load_entries(&db).await.unwrap();
+    assert!(stored[0].size.is_none() && stored[0].width.is_none() && stored[0].height.is_none());
+    assert_eq!(stored[0].resource, entries[0].resource);
 }
 
 #[tokio::test]

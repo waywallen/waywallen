@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::catalog::path::relative_under_root;
 use crate::error::{Result, ResultExt};
-use sea_orm::DatabaseConnection;
+use sea_orm::{DatabaseConnection, TransactionTrait};
 
 use super::repo::{self, ItemUpsertArgs};
 use crate::catalog::entry::WallpaperEntry;
@@ -31,10 +31,17 @@ pub async fn sync_plugin_entries(
     entries: &[WallpaperEntry],
     present_libraries: &[String],
 ) -> Result<(SyncSummary, super::entities::source_plugin::Model)> {
-    // Captured before upserts so this round writes `sync_at >= seen_before`.
-    // The post-sync sweep deletes older rows.
-    let seen_before = crate::tasks::now_ms();
+    let scan_id = repo::next_scan_id(db).await?;
+    sync_plugin_entries_in_scan(db, plugin, entries, present_libraries, scan_id).await
+}
 
+pub async fn sync_plugin_entries_in_scan(
+    db: &DatabaseConnection,
+    plugin: PluginRef<'_>,
+    entries: &[WallpaperEntry],
+    present_libraries: &[String],
+    scan_id: i64,
+) -> Result<(SyncSummary, super::entities::source_plugin::Model)> {
     let plugin_model = repo::upsert_plugin(db, plugin.name, plugin.version)
         .await
         .with_context(|| format!("upsert plugin={}", plugin.name))?;
@@ -96,6 +103,7 @@ pub async fn sync_plugin_entries(
             None => repo::add_library(db, plugin_model.id, lib_path).await?,
         };
 
+        let tx = db.begin().await?;
         for (rel, entry) in items {
             let preview_rel = entry
                 .preview
@@ -103,15 +111,13 @@ pub async fn sync_plugin_entries(
                 .and_then(|path| relative_under_root(lib_path, path))
                 .filter(|path| !path.is_empty());
 
-            // Sync only persists what the plugin emitted. Missing
-            // media metadata stays NULL — the daemon's scheduled
             let size = entry.size;
             let width = entry.width.and_then(|v| i32::try_from(v).ok());
             let height = entry.height.and_then(|v| i32::try_from(v).ok());
             let content_rating = entry.content_rating.clone();
 
             let persisted = repo::upsert_item(
-                db,
+                &tx,
                 ItemUpsertArgs {
                     plugin_id: plugin_model.id,
                     library_id: lib_model.id,
@@ -137,13 +143,17 @@ pub async fn sync_plugin_entries(
                 .iter()
                 .filter_map(|n| tag_id_by_lower.get(&n.trim().to_lowercase()).copied())
                 .collect();
-            repo::replace_item_tags(db, persisted.id, &tag_ids).await?;
+            repo::replace_item_tags(&tx, persisted.id, &tag_ids).await?;
+            repo::mark_item_seen(&tx, persisted.id, scan_id).await?;
             summary.items_upserted += 1;
         }
+        if present_libraries.contains(lib_path) {
+            summary.items_deleted +=
+                repo::delete_items_not_seen(&tx, &[lib_model.id], scan_id).await?;
+        }
+        tx.commit().await?;
     }
 
-    // Timestamp sweep: drop items not re-seen this round, scoped to the
-    // libraries that were actually present. Map the caller's present
     let present: HashSet<&str> = present_libraries.iter().map(String::as_str).collect();
     let present_ids: Vec<i64> = repo::list_libraries_by_plugin(db, plugin_model.id)
         .await?
@@ -151,8 +161,7 @@ pub async fn sync_plugin_entries(
         .filter(|l| present.contains(l.path.as_str()))
         .map(|l| l.id)
         .collect();
-    summary.items_deleted +=
-        repo::delete_items_synced_before(db, &present_ids, seen_before).await?;
+    summary.items_deleted += repo::delete_items_not_seen(db, &present_ids, scan_id).await?;
 
     Ok((summary, plugin_model))
 }
@@ -186,8 +195,8 @@ mod tests {
             width: None,
             height: None,
             content_rating: None,
-            modified_at: None,
-            create_at: 0,
+            file_mtime_ns: None,
+            added_at: 0,
             hidden: false,
             can_remove: None,
         }
@@ -351,8 +360,8 @@ mod tests {
             width: None,
             height: None,
             content_rating: None,
-            modified_at: None,
-            create_at: 0,
+            file_mtime_ns: None,
+            added_at: 0,
             hidden: false,
             can_remove: None,
         };
@@ -472,10 +481,6 @@ mod tests {
         )
         .await
         .unwrap();
-
-        // Advance the clock so the second round's `seen_before` is
-        // strictly newer than the first round's `sync_at` stamps.
-        tokio::time::sleep(std::time::Duration::from_millis(2)).await;
 
         // Both /a and /b are present this round, but only /a/x.png is
         // re-seen. /a/y.png (stale) and /b/z.png (present-but-empty
@@ -608,7 +613,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn first_insert_stamps_create_at_and_preserves_it_on_conflict() {
+    async fn first_insert_stamps_added_at_and_preserves_it_on_conflict() {
         let db = mem_db().await;
         let e = entry("p", "/r", "/r/a.png", "image");
         let _ = sync_plugin_entries(
@@ -624,10 +629,9 @@ mod tests {
         .unwrap();
         let plugin = repo::find_plugin_by_name(&db, "p").await.unwrap().unwrap();
         let items = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
-        let first_create = items[0].create_at;
-        let first_update = items[0].update_at;
+        let first_create = items[0].added_at;
+        let first_scan = items[0].seen_scan_id;
         assert!(first_create > 0);
-        assert_eq!(first_update, first_create);
         // Force the wall clock to advance so the second upsert sees a
         // strictly newer now_ms() than the first.
         tokio::time::sleep(std::time::Duration::from_millis(2)).await;
@@ -643,11 +647,7 @@ mod tests {
         .await
         .unwrap();
         let items2 = repo::list_items_by_plugin(&db, plugin.id).await.unwrap();
-        assert_eq!(
-            items2[0].create_at, first_create,
-            "create_at must be sticky"
-        );
-        assert!(items2[0].update_at >= first_update);
-        assert!(items2[0].sync_at >= first_update);
+        assert_eq!(items2[0].added_at, first_create, "added_at must be sticky");
+        assert!(items2[0].seen_scan_id > first_scan);
     }
 }

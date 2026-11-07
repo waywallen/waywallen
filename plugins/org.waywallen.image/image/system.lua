@@ -5,15 +5,6 @@ function M.supported(ctx, path)
     return IMAGE_EXTS[(ctx.extension(path) or ""):lower()] == true
 end
 
-function M.resolution(ctx, path)
-    local name = (ctx.filename(path) or ""):match("^([^.]*)")
-    local width, height = (name or ""):match("^(%d+)x(%d+)$")
-    width, height = tonumber(width), tonumber(height)
-    if width and height and width > 0 and height > 0 and width <= 2147483647 and height <= 2147483647 then
-        return {width=width, height=height}
-    end
-end
-
 function M.data_dirs(ctx)
     local value = ctx.env("XDG_DATA_DIRS")
     if not value or value == "" then value = "/usr/local/share:/usr/share" end
@@ -63,18 +54,7 @@ local function kde(ctx, root, emit)
     local plugin = value and type(value.KPlugin) == "table" and value.KPlugin or {}
     local lang = locale(ctx)
     local name = plugin["Name[" .. lang .. "]"] or plugin["Name[" .. lang:match("^[^_]*") .. "]"] or plugin.Name
-    local media, distance, area
-    for _, image in ipairs(ctx.fs.list_files(root .. "/contents/images")) do
-        local size = M.resolution(ctx, image)
-        if size and M.supported(ctx, image) then
-            local d, a = math.abs(size.width / size.height - 16/9), size.width * size.height
-            if not media or d < distance or (d == distance and a < area) then
-                media, distance, area = size, d, a
-                media.size = ctx.file_size(image)
-            end
-        end
-    end
-    emit(path, type(name) == "string" and name or ctx.filename(root), media)
+    emit(path, type(name) == "string" and name or ctx.filename(root))
     return true
 end
 

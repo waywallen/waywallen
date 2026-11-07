@@ -9,6 +9,7 @@ import qextra;
 import :query.wallpaper;
 import :app;
 import :msg.store;
+import :notify;
 
 using namespace Qt::Literals::StringLiterals;
 
@@ -23,6 +24,12 @@ namespace waywallen
 // ---------------------------------------------------------------------------
 
 WallpaperListQuery::WallpaperListQuery(QObject* parent): QueryList(parent) {
+    connect(Notify::instance(), &Notify::statusChanged, this,
+            [this, scanning = Notify::instance()->scanInProgress()]() mutable {
+        const bool active = Notify::instance()->scanInProgress();
+        if (scanning && ! active && m_reload_pending) delayReload();
+        scanning = active;
+    });
     setLimit(0);
     tdata()->set_store(tdata(), AppStore::instance()->wallpapers);
     connect(this, &WallpaperListQuery::wpTypeChanged, this, &WallpaperListQuery::invalidateList);
@@ -283,6 +290,10 @@ void WallpaperListQuery::restoreSelection(const QVariant& value) {
 }
 
 void WallpaperListQuery::reload() {
+    if (Notify::instance()->scanInProgress()) {
+        m_reload_pending = true;
+        return;
+    }
     const auto revision = beginRequest();
     m_reload_pending    = false;
     m_failed_append     = false;

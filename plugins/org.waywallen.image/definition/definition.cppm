@@ -14,6 +14,10 @@ struct ImageFrame {
     double              duration   = 0;
     bool                transition = false;
 };
+struct DefinitionAccess {
+    void* context                    = nullptr;
+    void (*observe)(void*, ref<str>) = nullptr;
+};
 struct ImageDefinition {
     Vec<ImageFrame> frames;
     Vec<String>     dependencies;
@@ -21,7 +25,9 @@ struct ImageDefinition {
     bool            timed      = false;
     double          start_time = 0;
 
-    static auto           open(ref<str> path, String& error) -> Option<ImageDefinition>;
+    static auto           open(ref<str> path, String& error, Vec<String>* dependencies = nullptr,
+                               DefinitionAccess access = {}) -> Option<ImageDefinition>;
+    const ImageCandidate* representative() const;
     const ImageCandidate* preferred(const Vec<ImageCandidate>& values, rstd::uint32_t width,
                                     rstd::uint32_t height, bool preview = false) const;
     const ImageFrame& frame_at(double unix_seconds, double& mix, double* remaining = nullptr) const;

@@ -90,9 +90,8 @@ pub async fn auto_detect_libraries(
 
     if !added.is_empty() {
         let app_clone = app.clone();
-        app.tasks.spawn_async_unique(
+        app.tasks.spawn_async(
             crate::tasks::TaskKind::Generic,
-            "catalog/refresh",
             "catalog/auto-detect-refresh",
             async move {
                 refresh_sources(&app_clone)
@@ -207,6 +206,16 @@ async fn refresh_selected_sources(
     app: &Arc<DaemonContext>,
     selected: Option<&str>,
 ) -> Result<usize> {
+    let scope = selected.map_or(super::scan::Scope::All, |name| {
+        super::scan::Scope::Source(name.to_owned())
+    });
+    app.scans.request(app, scope).await
+}
+
+pub(super) async fn run_scan_pass(
+    app: &Arc<DaemonContext>,
+    scope: super::scan::Scope,
+) -> Result<usize> {
     let _invalidate = super::wallpaper_query::InvalidateOnDrop(app.wallpaper_changes.clone());
     use std::sync::atomic::Ordering;
     app.scan_in_progress.store(true, Ordering::SeqCst);
@@ -214,8 +223,34 @@ async fn refresh_selected_sources(
     app.events
         .publish(crate::events::GlobalEvent::StatusChanged);
 
-    let result = refresh_sources_inner(app, selected).await;
+    struct StatusGuard<'a>(&'a DaemonContext);
+    impl Drop for StatusGuard<'_> {
+        fn drop(&mut self) {
+            if self
+                .0
+                .scan_in_progress
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                self.0
+                    .events
+                    .publish(crate::events::GlobalEvent::StatusChanged);
+            }
+        }
+    }
+    let _guard = StatusGuard(app);
+    let result = match scope {
+        super::scan::Scope::All => refresh_sources_inner(app, None).await,
+        super::scan::Scope::Source(name) => refresh_sources_inner(app, Some(&name)).await,
+        super::scan::Scope::Metadata => {
+            match crate::probe::task::run_pending(&app.db, app.probe.clone()).await {
+                Ok(_) => repo::list_items_all(&app.db).await.map(|items| items.len()),
+                Err(error) => Err(error),
+            }
+        }
+    };
 
+    app.queue.lock().await.reset_shuffle_round();
+    drop(_invalidate);
     app.scan_in_progress.store(false, Ordering::SeqCst);
     match &result {
         Ok(count) => app
@@ -230,31 +265,14 @@ async fn refresh_selected_sources(
     result
 }
 
-pub async fn notify_wallpaper_db_changed(app: &Arc<DaemonContext>, count: usize) {
-    app.wallpaper_changes
-        .send_modify(|generation| *generation += 1);
-    app.queue.lock().await.reset_shuffle_round();
-
-    let probe = app.probe.clone();
-    let db = app.db.clone();
-    let changes = app.wallpaper_changes.clone();
-    app.tasks.spawn_async_unique(
-        crate::tasks::TaskKind::Generic,
-        "probe/refresh",
-        "probe/post-db-change",
-        async move {
-            crate::probe::task::run_pending_notifying(&db, probe, Some(&changes))
-                .await
-                .map(|_| ())
-                .map_err(anyhow::Error::from)
-        },
-    );
-
-    app.events
-        .publish(crate::events::GlobalEvent::SyncFinished { count });
+pub async fn notify_wallpaper_db_changed(app: &Arc<DaemonContext>, _count: usize) {
+    if let Err(error) = app.scans.request(app, super::scan::Scope::Metadata).await {
+        log::error!("post-change media probe failed: {error:#}");
+    }
 }
 
 async fn refresh_sources_inner(app: &Arc<DaemonContext>, selected: Option<&str>) -> Result<usize> {
+    let scan_id = repo::next_scan_id(&app.db).await?;
     let libs_by_plugin = libraries_by_plugin_name(&app.db).await?;
 
     let source_mgr = app.source_manager.clone();
@@ -271,27 +289,37 @@ async fn refresh_sources_inner(app: &Arc<DaemonContext>, selected: Option<&str>)
     // scan error is carried alongside the snapshot and only surfaced once the
     // successful entries have been synced.
     let selected_owned = selected.map(str::to_owned);
-    let (snapshot, scan_error): (Vec<WallpaperEntry>, Option<Error>) =
-        tokio::task::spawn_blocking(move || {
-            let scan_error = if let Some(name) = selected_owned {
-                handle
-                    .block_on(
-                        source_mgr.scan_source(
-                            &name,
-                            libs_for_scan
-                                .get(&name)
-                                .map(Vec::as_slice)
-                                .unwrap_or_default(),
-                        ),
-                    )
-                    .err()
+    let (snapshot, scan_error, successful): (
+        Vec<WallpaperEntry>,
+        Option<Error>,
+        std::collections::HashSet<String>,
+    ) = tokio::task::spawn_blocking(move || {
+        let (scan_error, successful) = if let Some(name) = selected_owned {
+            let error = handle
+                .block_on(
+                    source_mgr.scan_source(
+                        &name,
+                        libs_for_scan
+                            .get(&name)
+                            .map(Vec::as_slice)
+                            .unwrap_or_default(),
+                    ),
+                )
+                .err();
+            let successful = if error.is_none() {
+                std::collections::HashSet::from([name])
             } else {
-                handle.block_on(source_mgr.scan_all(&libs_for_scan)).err()
+                Default::default()
             };
-            (source_mgr.list(), scan_error)
-        })
-        .await
-        .map_err(|e| Error::Internal(anyhow!("source scan join: {e}")))?;
+            (error, successful)
+        } else {
+            let report = handle.block_on(source_mgr.scan_all_report(&libs_for_scan));
+            (report.error, report.successful)
+        };
+        (source_mgr.list(), scan_error, successful)
+    })
+    .await
+    .map_err(|e| Error::Internal(anyhow!("source scan join: {e}")))?;
 
     let plugins = match app.source_manager.plugins() {
         Ok(p) => p,
@@ -303,9 +331,11 @@ async fn refresh_sources_inner(app: &Arc<DaemonContext>, selected: Option<&str>)
 
     // Sync to the DB first so every entry gets its canonical item id before
     // readers observe the refreshed source-plugin list.
+    let mut failures = Vec::new();
+    let mut probe_sources = std::collections::HashSet::new();
     for info in plugins
         .iter()
-        .filter(|info| selected.is_none_or(|name| name == info.name))
+        .filter(|info| successful.contains(&info.name))
     {
         let entries: Vec<_> = snapshot
             .iter()
@@ -319,12 +349,12 @@ async fn refresh_sources_inner(app: &Arc<DaemonContext>, selected: Option<&str>)
             .map(|paths| {
                 paths
                     .iter()
-                    .filter(|p| std::path::Path::new(p.as_str()).exists())
+                    .filter(|p| std::path::Path::new(p.as_str()).is_dir())
                     .cloned()
                     .collect()
             })
             .unwrap_or_default();
-        match sync::sync_plugin_entries(
+        match sync::sync_plugin_entries_in_scan(
             &app.db,
             sync::PluginRef {
                 name: &info.name,
@@ -332,50 +362,50 @@ async fn refresh_sources_inner(app: &Arc<DaemonContext>, selected: Option<&str>)
             },
             &entries,
             &present,
+            scan_id,
         )
         .await
         {
-            Ok((summary, _)) => log::info!(
-                "sync plugin={} v{}: +{} / -{} items, {} dropped",
-                info.name,
-                info.version,
-                summary.items_upserted,
-                summary.items_deleted,
-                summary.dropped,
-            ),
-            Err(e) => log::warn!("sync plugin={} failed: {e:#}", info.name),
+            Ok((summary, _)) => {
+                probe_sources.insert(info.name.clone());
+                log::info!(
+                    "sync plugin={} v{}: +{} / -{} items, {} dropped",
+                    info.name,
+                    info.version,
+                    summary.items_upserted,
+                    summary.items_deleted,
+                    summary.dropped,
+                );
+            }
+            Err(e) => {
+                log::error!("sync plugin={} failed: {e:#}", info.name);
+                failures.push(format!("{}: {e:#}", info.name));
+            }
         }
-        app.wallpaper_changes
-            .send_modify(|generation| *generation += 1);
     }
 
     // Scan results are now persisted in the DB (the read source of
     // truth); only the source-plugin list is cached in memory.
     let count = snapshot.len();
+    if selected.is_none() {
+        for discover in app.source_manager.discover_sources()? {
+            if !plugins.iter().any(|source| source.name == discover.name) {
+                probe_sources.insert(discover.name);
+            }
+        }
+    }
     *app.source_plugins.write().await = plugins;
-    // Queue reads from the DB dynamically; reset the shuffle round so the
-    // next pick can include freshly imported items.
-    app.queue.lock().await.reset_shuffle_round();
-
-    // Kick one probe drain for newly imported items; spawn_async_unique
-    // collapses refresh bursts into one in-flight pass.
-    let probe = app.probe.clone();
-    let db = app.db.clone();
-    let changes = app.wallpaper_changes.clone();
-    app.tasks.spawn_async_unique(
-        crate::tasks::TaskKind::Generic,
-        "probe/refresh",
-        "probe/post-refresh",
-        async move {
-            crate::probe::task::run_pending_notifying(&db, probe, Some(&changes))
-                .await
-                .map(|_| ())
-                .map_err(anyhow::Error::from)
-        },
-    );
+    if let Err(error) =
+        crate::probe::task::run_sources(&app.db, app.probe.clone(), Some(&probe_sources)).await
+    {
+        failures.push(format!("{error:#}"));
+    }
 
     if let Some(e) = scan_error {
-        return Err(e);
+        failures.push(format!("{e:#}"));
+    }
+    if !failures.is_empty() {
+        return Err(Error::Internal(anyhow!(failures.join("; "))));
     }
     Ok(count)
 }

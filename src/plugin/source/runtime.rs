@@ -1908,8 +1908,8 @@ impl LuaPluginRuntime {
                 content_rating: tbl.get::<String>("content_rating").ok(),
                 can_remove: tbl.get::<Option<bool>>("can_remove")?,
                 // Daemon-only (filled from DB on read); scan leaves it None.
-                modified_at: None,
-                create_at: 0,
+                file_mtime_ns: None,
+                added_at: 0,
                 hidden: false,
             };
             let idx = self.entries.len();

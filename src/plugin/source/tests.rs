@@ -282,6 +282,13 @@ return M
         "error should name the plugin that failed, got: {err}"
     );
     assert!(mgr.list().is_empty());
+    let healthy = dir.path().join("healthy.lua");
+    std::fs::write(&healthy, "return {info=function() return {name='healthy',capabilities={source={types={'image'},scan=true}}} end,source={scan=function() return {} end}}").unwrap();
+    mgr.load_plugin(&healthy, "org.healthy", "1", ENTRY_VERSION)
+        .unwrap();
+    let report = block_value(mgr.scan_all_report(&HashMap::new()));
+    assert_eq!(report.successful, HashSet::from(["healthy".to_owned()]));
+    assert!(report.error.is_some());
 }
 
 #[test]
@@ -793,8 +800,8 @@ return M
         width: None,
         height: None,
         content_rating: None,
-        modified_at: None,
-        create_at: 0,
+        file_mtime_ns: None,
+        added_at: 0,
         hidden: false,
         can_remove: None,
     };
@@ -847,8 +854,8 @@ return M
         width: None,
         height: None,
         content_rating: None,
-        modified_at: None,
-        create_at: 0,
+        file_mtime_ns: None,
+        added_at: 0,
         hidden: false,
         can_remove: None,
     };
@@ -2280,8 +2287,8 @@ return M
         width: None,
         height: None,
         content_rating: None,
-        modified_at: None,
-        create_at: 0,
+        file_mtime_ns: None,
+        added_at: 0,
         plugin_name: "separate_flows".to_string(),
         library_root: String::new(),
         hidden: false,
@@ -2654,8 +2661,8 @@ return M
         width: None,
         height: None,
         content_rating: None,
-        modified_at: None,
-        create_at: 0,
+        file_mtime_ns: None,
+        added_at: 0,
         plugin_name: "apply_test".into(),
         library_root: "/tmp".into(),
         hidden: false,

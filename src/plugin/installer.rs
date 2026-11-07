@@ -47,6 +47,12 @@ fn read_plugin_id(manifest: &Path) -> std::result::Result<String, String> {
 fn read_plugin_info_from_text(text: &str) -> std::result::Result<PluginArchiveInfo, String> {
     let manifest: crate::plugin::renderer_registry::PluginManifest =
         toml::from_str(text).map_err(|e| format!("parse plugin.toml: {e}"))?;
+    plugin_info(&manifest)
+}
+
+fn plugin_info(
+    manifest: &crate::plugin::renderer_registry::PluginManifest,
+) -> std::result::Result<PluginArchiveInfo, String> {
     match (
         manifest.plugin.entry.as_ref(),
         manifest.plugin.entry_version,
@@ -62,12 +68,15 @@ fn read_plugin_info_from_text(text: &str) -> std::result::Result<PluginArchiveIn
         (None, _) => {}
     }
     let mut renderers: Vec<_> = manifest.renderers.keys().cloned().collect();
+    if let Some(probe) = &manifest.plugin.probe {
+        probe.validate().map_err(|e| e.to_string())?;
+    }
     renderers.sort();
     Ok(PluginArchiveInfo {
-        id: manifest.plugin.id,
-        name: manifest.plugin.name,
-        version: manifest.plugin.version,
-        update: manifest.plugin.update,
+        id: manifest.plugin.id.clone(),
+        name: manifest.plugin.name.clone(),
+        version: manifest.plugin.version.clone(),
+        update: manifest.plugin.update.clone(),
         has_source: manifest.plugin.entry.is_some(),
         renderers,
     })
@@ -203,7 +212,17 @@ pub fn install_zip(zip_path: &str) -> Result<String> {
         if !manifest.is_file() {
             return Err(install_fail("archive must contain plugin.toml at root"));
         }
-        let info = read_plugin_info(&manifest).map_err(install_fail)?;
+        let definition: crate::plugin::renderer_registry::PluginManifest = toml::from_str(
+            &std::fs::read_to_string(&manifest).map_err(|e| install_fail(e.to_string()))?,
+        )
+        .map_err(|e| install_fail(e.to_string()))?;
+        let info = plugin_info(&definition).map_err(install_fail)?;
+        if let Some(probe) = &definition.plugin.probe {
+            let files = crate::plugin::renderer_registry::read_plugin_files(&extract_root)
+                .map_err(|e| install_fail(e.to_string()))?;
+            crate::probe::program::Program::open(&info.id, &extract_root, probe, &files)
+                .map_err(|e| install_fail(format!("invalid plugin.probe: {e:#}")))?;
+        }
         let id = info.id;
         validate_plugin_dir_name(&id)?;
         let target = dest_root.join(&id);
@@ -372,6 +391,46 @@ version = "1.0.0"
             assert!(plugin_dir.join("files.txt").is_file());
             assert!(plugin_dir.join("main.lua").is_file());
             assert!(!tmp.path().join("waywallen/plugins/plugin.toml").exists());
+        });
+    }
+
+    #[test]
+    fn invalid_probe_does_not_overwrite_an_installed_plugin() {
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("plugin.zip");
+        let id = "org.example.probe";
+        let valid = manifest(id);
+        write_zip(
+            &archive,
+            &[
+                ("plugin.toml", &valid),
+                ("files.txt", "plugin.toml\nfiles.txt\nmain.lua\n"),
+                ("main.lua", "return {} -- original"),
+            ],
+        );
+        with_xdg_data_home(root.path(), || {
+            install_zip(archive.to_str().unwrap()).unwrap();
+            let invalid =
+                format!("{valid}\n[plugin.probe]\nentry='probe.lua'\nversion=1\ntypes=['scene']\n");
+            write_zip(
+                &archive,
+                &[
+                    ("plugin.toml", &invalid),
+                    ("files.txt", "plugin.toml\nfiles.txt\nmain.lua\nprobe.lua\n"),
+                    ("main.lua", "return {} -- replacement"),
+                ],
+            );
+            assert!(install_zip(archive.to_str().unwrap()).is_err());
+            assert_eq!(
+                std::fs::read_to_string(
+                    root.path()
+                        .join("waywallen/plugins")
+                        .join(id)
+                        .join("main.lua")
+                )
+                .unwrap(),
+                "return {} -- original"
+            );
         });
     }
 

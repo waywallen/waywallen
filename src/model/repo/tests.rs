@@ -336,7 +336,7 @@ async fn item_hidden_batch_validates_all_ids_and_preserves_scan_state() {
         vec![a.id, b.id]
     );
     item::Entity::update_many()
-        .col_expr(item::Column::UpdateAt, Expr::value(123_i64))
+        .col_expr(item::Column::AddedAt, Expr::value(123_i64))
         .filter(item::Column::Id.eq(a.id))
         .exec(&db)
         .await
@@ -356,8 +356,8 @@ async fn item_hidden_batch_validates_all_ids_and_preserves_scan_state() {
             .await
             .unwrap()
             .unwrap()
-            .update_at,
-        saved.update_at
+            .added_at,
+        saved.added_at
     );
     let invalid = b.id + 1;
     assert!(
@@ -674,73 +674,50 @@ async fn upsert_item_persists_media_meta() {
 
 #[tokio::test]
 async fn item_stat_preserves_supplied_size_and_fills_missing_size() {
+    let root = tempfile::tempdir().unwrap();
     let db = mem_db().await;
     let plugin = upsert_plugin(&db, "stat", "1").await.unwrap();
-    let library = add_library(&db, plugin.id, "/stat").await.unwrap();
-    for (path, ty, supplied_size, expected_size) in [
-        ("package/scene.gltf", "gltf", Some(123_456), 123_456),
-        ("image.png", "image", None, 17),
-    ] {
-        let item = upsert_item(
-            &db,
-            ItemUpsertArgs {
-                plugin_id: plugin.id,
-                library_id: library.id,
-                path,
-                ty,
-                sub_type: "",
-                display_name: "item",
-                preview_path: None,
-                description: None,
-                external_id: None,
-                web_url: None,
-                update_available: false,
-                size: supplied_size,
-                width: None,
-                height: None,
-                content_rating: None,
-                can_remove: None,
-            },
-        )
+    let library = add_library(&db, plugin.id, root.path().to_str().unwrap())
         .await
         .unwrap();
-        let stat = FileStat {
-            size: 17,
-            modified_at: 1_000,
-        };
-        assert!(update_item_stat(&db, item.id, &stat).await.unwrap().changed);
-        let current = list_items_by_library(&db, library.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|value| value.id == item.id)
-            .unwrap();
-        assert_eq!(current.size, Some(expected_size));
-        assert_eq!(current.modified_at, Some(1_000));
-        assert!(current.stat_at.is_some());
-        assert!(!update_item_stat(&db, item.id, &stat).await.unwrap().changed);
-        assert!(
-            update_item_stat(
-                &db,
-                item.id,
-                &FileStat {
-                    size: 19,
-                    modified_at: 2_000,
-                },
-            )
-            .await
-            .unwrap()
-            .changed
+    for (path, supplied) in [("model.glb", Some(123456)), ("image.png", None)] {
+        std::fs::write(root.path().join(path), [0_u8; 17]).unwrap();
+        let mut args = minimal_args(plugin.id, library.id, path, "gltf");
+        args.size = supplied;
+        upsert_item(&db, args).await.unwrap();
+    }
+    let service = std::sync::Arc::new(crate::probe::media::ProbeService::with_tool(None));
+    crate::probe::task::run_pending(&db, service.clone())
+        .await
+        .unwrap();
+    for entry in load_entries(&db).await.unwrap() {
+        assert_eq!(
+            entry.size,
+            Some(if entry.resource.ends_with("model.glb") {
+                123456
+            } else {
+                17
+            })
         );
-        let current = list_items_by_library(&db, library.id)
-            .await
-            .unwrap()
-            .into_iter()
-            .find(|value| value.id == item.id)
-            .unwrap();
-        assert_eq!(current.size, Some(expected_size));
-        assert_eq!(current.modified_at, Some(2_000));
-        assert!(current.stat_at.is_some());
+        assert!(entry.file_mtime_ns.is_some());
+    }
+    let stats = crate::probe::task::run_pending(&db, service.clone())
+        .await
+        .unwrap();
+    assert_eq!(stats.stat_changed, 0);
+    for path in ["model.glb", "image.png"] {
+        std::fs::write(root.path().join(path), [0_u8; 23]).unwrap();
+    }
+    crate::probe::task::run_pending(&db, service).await.unwrap();
+    for entry in load_entries(&db).await.unwrap() {
+        assert_eq!(
+            entry.size,
+            Some(if entry.resource.ends_with("model.glb") {
+                123456
+            } else {
+                23
+            })
+        );
     }
 }
 
@@ -854,7 +831,7 @@ async fn remove_plugin_cascades_everything_including_item_tag() {
 }
 
 #[tokio::test]
-async fn delete_items_synced_before_sweeps_only_scoped_and_stale() {
+async fn delete_items_not_seen_sweeps_only_scoped_and_stale() {
     let db = mem_db().await;
     let p = upsert_plugin(&db, "p", "").await.unwrap();
     let l1 = add_library(&db, p.id, "/one").await.unwrap();
@@ -868,19 +845,14 @@ async fn delete_items_synced_before_sweeps_only_scoped_and_stale() {
     upsert_item(&db, minimal_args(p.id, l2.id, "z", "image"))
         .await
         .unwrap();
-    // Advance the clock, then re-see only l1/a — it gets a fresh
-    // sync_at; the cutoff sits between the two timestamps.
-    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-    let cutoff = crate::tasks::now_ms();
-    tokio::time::sleep(std::time::Duration::from_millis(2)).await;
-    upsert_item(&db, minimal_args(p.id, l1.id, "a", "image"))
+    let scan_id = next_scan_id(&db).await.unwrap();
+    let seen = upsert_item(&db, minimal_args(p.id, l1.id, "a", "image"))
         .await
         .unwrap();
+    mark_item_seen(&db, seen.id, scan_id).await.unwrap();
     // Sweep l1 only: stale b/c go, fresh a stays; l2 untouched
     // because it isn't in the scoped set.
-    let deleted = delete_items_synced_before(&db, &[l1.id], cutoff)
-        .await
-        .unwrap();
+    let deleted = delete_items_not_seen(&db, &[l1.id], scan_id).await.unwrap();
     assert_eq!(deleted, 2);
     assert_eq!(list_items_by_library(&db, l1.id).await.unwrap().len(), 1);
     assert_eq!(list_items_by_library(&db, l2.id).await.unwrap().len(), 1);

@@ -50,14 +50,14 @@ pub struct WallpaperEntry {
     /// Scan-time deletion permission hint; never an execution-time authorization.
     #[serde(default)]
     pub can_remove: Option<bool>,
-    /// File mtime in ms since epoch (DB `item.modified_at`). Daemon-only
+    /// File mtime in nanoseconds since epoch. Daemon-only
     /// (filled on read for sorting); plugins do not set it.
     #[serde(default)]
-    pub modified_at: Option<i64>,
+    pub file_mtime_ns: Option<i64>,
     /// DB insertion time in ms since epoch. Daemon-only fallback for sorting
     /// entries whose file mtime has not been captured yet.
     #[serde(default)]
-    pub create_at: i64,
+    pub added_at: i64,
     /// Name of the source plugin that produced this entry.
     /// Written by `SourceManager::scan_plugin`.
     #[serde(default)]

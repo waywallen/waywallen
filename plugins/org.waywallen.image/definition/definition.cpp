@@ -99,7 +99,9 @@ auto kde_images(ref<Path> directory) -> Vec<ImageCandidate> {
     });
     return result;
 }
-bool read_definition(ref<str> path, ImageDefinition& output, String& error, Vec<String>& stack) {
+bool read_definition(ref<str> path, ImageDefinition& output, String& error, Vec<String>& stack,
+                     DefinitionAccess access) {
+    if (access.observe) access.observe(access.context, path);
     const auto depth = stack.len().to_primitive();
     if (depth > 8) {
         error = String::make("wallpaper reference nesting exceeds limit"_str);
@@ -139,6 +141,16 @@ bool read_definition(ref<str> path, ImageDefinition& output, String& error, Vec<
         }
         auto root = PathBuf::from(path);
         root.pop();
+        output.dependencies.push(
+            root.join(ref<Path>("contents/images"_str)).as_path().to_string_lossy());
+        output.dependencies.push(
+            root.join(ref<Path>("contents/images_dark"_str)).as_path().to_string_lossy());
+        if (access.observe) {
+            access.observe(access.context,
+                           output.dependencies[output.dependencies.len() - usize(2)]);
+            access.observe(access.context,
+                           output.dependencies[output.dependencies.len() - usize(1)]);
+        }
         ImageFrame frame;
         frame.light = kde_images(root.join(ref<Path>("contents/images"_str)));
         frame.dark  = kde_images(root.join(ref<Path>("contents/images_dark"_str)));
@@ -188,7 +200,7 @@ bool read_definition(ref<str> path, ImageDefinition& output, String& error, Vec<
                         "a timed light wallpaper with a separate dark source is unsupported"_str);
                     return false;
                 }
-                if (! read_definition(frame.light[usize()].path, output, error, stack))
+                if (! read_definition(frame.light[usize()].path, output, error, stack, access))
                     return false;
             } else {
                 output.frames.push(rstd::move(frame));
@@ -233,15 +245,21 @@ bool read_definition(ref<str> path, ImageDefinition& output, String& error, Vec<
     return true;
 }
 } // namespace
-auto ImageDefinition::open(ref<str> path, String& error) -> Option<ImageDefinition> {
+auto ImageDefinition::open(ref<str> path, String& error, Vec<String>* dependencies,
+                           DefinitionAccess access) -> Option<ImageDefinition> {
     ImageDefinition result;
     Vec<String>     stack;
-    if (! read_definition(path, result, error, stack)) return None();
+    bool            valid = read_definition(path, result, error, stack, access);
     for (const auto& frame : result.frames) {
         for (const auto& value : frame.light) result.dependencies.push(value.path.clone());
         for (const auto& value : frame.dark) result.dependencies.push(value.path.clone());
     }
+    if (dependencies) *dependencies = result.dependencies.clone();
+    if (! valid) return None();
     return Some(rstd::move(result));
+}
+const ImageCandidate* ImageDefinition::representative() const {
+    return frames.is_empty() ? nullptr : preferred(frames[usize()].light, 16, 9, true);
 }
 const ImageCandidate* ImageDefinition::preferred(const Vec<ImageCandidate>& values, uint32_t width,
                                                  uint32_t height, bool preview) const {

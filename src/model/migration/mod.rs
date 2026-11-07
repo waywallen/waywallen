@@ -13,6 +13,7 @@ mod m20261019_000001_item_update_available;
 mod m20261024_000001_item_can_remove;
 mod m20261107_000001_item_sub_type;
 mod m20261107_000002_library_settings;
+mod m20261107_000003_native_probe;
 
 pub struct Migrator;
 
@@ -33,6 +34,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261024_000001_item_can_remove::Migration),
             Box::new(m20261107_000001_item_sub_type::Migration),
             Box::new(m20261107_000002_library_settings::Migration),
+            Box::new(m20261107_000003_native_probe::Migration),
         ]
     }
 }
@@ -51,6 +53,56 @@ mod tests {
         Migrator::down(db, Some((migrations.len() - position) as u32))
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn native_probe_migrates_times_without_inventing_input_versions() {
+        let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
+        downgrade_before(&db, m20261107_000003_native_probe::Migration).await;
+        db.execute_unprepared("INSERT INTO source_plugin (id,name) VALUES (1,'image')")
+            .await
+            .unwrap();
+        db.execute_unprepared("INSERT INTO library (id,plugin_id,path) VALUES (1,1,'/wallpapers')")
+            .await
+            .unwrap();
+        db.execute_unprepared("INSERT INTO item (id,plugin_id,library_id,path,type,create_at,modified_at,probed_at,width,height) VALUES (1,1,1,'a.png','image',42,1234,99,0,0),(2,1,1,'b.png','image',43,NULL,NULL,NULL,NULL)").await.unwrap();
+        Migrator::up(&db, None).await.unwrap();
+        let rows = crate::model::repo::list_items_all(&db).await.unwrap();
+        assert_eq!(rows[0].added_at, 42);
+        assert_eq!(rows[0].file_mtime_ns, Some(1_234_000_000));
+        assert_eq!(rows[0].seen_scan_id, 0);
+        assert!(rows[0].width.is_none() && rows[0].height.is_none());
+        assert!(rows[1].file_mtime_ns.is_none());
+        let state = crate::model::repo::probe_state(&db, 1)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.attempted_at, Some(99));
+        assert!(state.signature.is_none() && state.status.is_none());
+        let columns = db
+            .query_all(Statement::from_string(
+                sea_orm::DbBackend::Sqlite,
+                "PRAGMA table_info(item)".to_owned(),
+            ))
+            .await
+            .unwrap();
+        let names: Vec<String> = columns
+            .iter()
+            .map(|r| r.try_get("", "name").unwrap())
+            .collect();
+        for old in [
+            "create_at",
+            "update_at",
+            "sync_at",
+            "modified_at",
+            "stat_at",
+            "probed_at",
+        ] {
+            assert!(!names.iter().any(|name| name == old));
+        }
+        let first = crate::model::repo::next_scan_id(&db).await.unwrap();
+        assert!(first > rows[0].seen_scan_id);
+        assert!(crate::model::repo::next_scan_id(&db).await.unwrap() > first);
     }
 
     #[tokio::test]

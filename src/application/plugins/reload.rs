@@ -98,6 +98,8 @@ async fn reload_source_entries(
         .collect::<std::collections::HashSet<_>>();
     replacement.retain_plugins_from(&app.source_manager, &failed_plugin_ids)?;
     app.source_manager.replace_plugins(replacement)?;
+    app.probe
+        .replace_programs(app.source_manager.probe_programs());
     suspended.commit();
 
     let infos = app.source_manager.plugins()?;

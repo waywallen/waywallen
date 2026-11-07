@@ -49,9 +49,8 @@ pub async fn add_library(
         paths: vec![lib.path],
     });
     let rescan_app = app.clone();
-    app.tasks.spawn_async_unique(
+    app.tasks.spawn_async(
         crate::tasks::TaskKind::Generic,
-        "scan/refresh",
         "scan/refresh-after-library-add",
         async move {
             super::refresh_sources(&rescan_app)
@@ -109,9 +108,8 @@ pub async fn edit_library(
     }
     let source = plugin.name;
     let app = app.clone();
-    app.clone().tasks.spawn_async_unique(
+    app.clone().tasks.spawn_async(
         crate::tasks::TaskKind::Generic,
-        "scan/refresh",
         "scan/library-edit",
         async move {
             super::refresh_source(&app, &source)

@@ -55,7 +55,7 @@ pub async fn ordered_entry_ids(
 mod tests {
     use super::*;
 
-    fn entry(name: &str, modified_at: Option<i64>, create_at: i64) -> WallpaperEntry {
+    fn entry(name: &str, file_mtime_ns: Option<i64>, added_at: i64) -> WallpaperEntry {
         WallpaperEntry {
             item_id: 0,
             name: name.to_string(),
@@ -72,8 +72,8 @@ mod tests {
             width: None,
             height: None,
             content_rating: None,
-            modified_at,
-            create_at,
+            file_mtime_ns: file_mtime_ns.map(|ms| ms * 1_000_000),
+            added_at,
             plugin_name: String::new(),
             library_root: String::new(),
             hidden: false,
@@ -82,7 +82,7 @@ mod tests {
     }
 
     #[test]
-    fn last_modified_sort_falls_back_to_create_at() {
+    fn last_modified_sort_falls_back_to_added_at() {
         let newer_created = entry("created-newer", None, 30);
         let older_modified = entry("modified-older", Some(20), 40);
         let older_created = entry("created-older", None, 10);

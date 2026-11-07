@@ -30,6 +30,7 @@ pub(super) struct PluginHandle {
     info: StdRwLock<LoadedPluginInfo>,
     generation_state: Arc<AtomicU8>,
     prepare: Option<Arc<crate::remote_asset::prepare::Program>>,
+    probe: Option<Arc<crate::probe::program::Program>>,
 }
 
 pub struct DownloadSession {
@@ -121,6 +122,11 @@ pub struct LuaPluginRegistry {
 }
 
 pub type SourceManager = LuaPluginRegistry;
+
+pub struct ScanReport {
+    pub successful: HashSet<String>,
+    pub error: Option<Error>,
+}
 
 impl LuaPluginRegistry {
     pub fn new() -> Result<Self> {
@@ -254,6 +260,7 @@ impl LuaPluginRegistry {
             entry: path.to_owned(),
             entry_version,
             prepare: None,
+            probe: None,
         })
     }
 
@@ -282,6 +289,7 @@ impl LuaPluginRegistry {
             .ok_or_else(|| Error::SourcePluginNotFound(name.clone()))?;
         let generation_state = runtime.generation_state();
         let handle = Arc::new(PluginHandle {
+            probe: entry.probe.clone().map(Arc::new),
             runtime: Arc::new(tokio::sync::Mutex::new(runtime)),
             info: StdRwLock::new(info),
             generation_state,
@@ -301,6 +309,15 @@ impl LuaPluginRegistry {
         }
         plugins.insert(name.clone(), handle);
         Ok(name)
+    }
+
+    pub fn probe_programs(&self) -> HashMap<String, Arc<crate::probe::program::Program>> {
+        self.plugins
+            .read()
+            .expect("plugin registry lock poisoned")
+            .iter()
+            .filter_map(|(name, handle)| handle.probe.clone().map(|p| (name.clone(), p)))
+            .collect()
     }
 
     pub fn download_session(&self, plugin_name: &str) -> Result<DownloadSession> {
@@ -331,6 +348,14 @@ impl LuaPluginRegistry {
     }
 
     pub async fn scan_all(&self, libs_by_plugin: &HashMap<String, Vec<String>>) -> Result<()> {
+        let report = self.scan_all_report(libs_by_plugin).await;
+        report.error.map_or(Ok(()), Err)
+    }
+
+    pub async fn scan_all_report(
+        &self,
+        libs_by_plugin: &HashMap<String, Vec<String>>,
+    ) -> ScanReport {
         let _scan = self.scan_lock.lock().await;
         let scans = self.handles().into_iter().filter_map(|(name, handle)| {
             let has_source = handle
@@ -346,8 +371,11 @@ impl LuaPluginRegistry {
                     let mut runtime = handle.runtime.lock().await;
                     let mut only_this = HashMap::new();
                     only_this.insert(name.clone(), libraries);
-                    runtime.scan_all(&only_this).await?;
-                    Ok::<_, Error>(runtime.list().to_vec())
+                    let result = runtime
+                        .scan_all(&only_this)
+                        .await
+                        .map(|_| runtime.list().to_vec());
+                    (name, result)
                 }
             })
         });
@@ -358,9 +386,13 @@ impl LuaPluginRegistry {
         // are reported afterwards: a scan that failed must not be presented as
         // a scan that simply found nothing.
         let mut failures: Vec<String> = Vec::new();
-        for result in results {
+        let mut successful = HashSet::new();
+        for (name, result) in results {
             match result {
-                Ok(mut plugin_entries) => entries.append(&mut plugin_entries),
+                Ok(mut plugin_entries) => {
+                    successful.insert(name);
+                    entries.append(&mut plugin_entries);
+                }
                 Err(e) => {
                     log::warn!("scan Lua plugin failed: {e}");
                     failures.push(format!("{e:#}"));
@@ -376,13 +408,11 @@ impl LuaPluginRegistry {
             .write()
             .expect("source catalog lock poisoned")
             .replace(entries);
-        if !failures.is_empty() {
-            return Err(Error::Internal(anyhow!(
-                "source scan failed: {}",
-                failures.join("; ")
-            )));
+        ScanReport {
+            successful,
+            error: (!failures.is_empty())
+                .then(|| Error::Internal(anyhow!("source scan failed: {}", failures.join("; ")))),
         }
-        Ok(())
     }
 
     pub async fn scan_source(&self, name: &str, paths: &[String]) -> Result<()> {

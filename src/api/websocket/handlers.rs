@@ -808,17 +808,14 @@ pub(super) async fn dispatch_inner(
             // Fire-and-forget: kick the rescan onto the TaskManager and
             // return immediately; completion arrives via server events.
             let scan_state = state.clone();
-            state.tasks.spawn_async_unique(
-                tasks::TaskKind::Generic,
-                "scan/refresh",
-                "scan/refresh",
-                async move {
+            state
+                .tasks
+                .spawn_async(tasks::TaskKind::Generic, "scan/refresh", async move {
                     application::refresh_sources(&scan_state)
                         .await
                         .map(|_| ())
                         .map_err(anyhow::Error::from)
-                },
-            );
+                });
             Res::WallpaperScan(pb::WallpaperScanResponse { count: 0 })
         }
 
@@ -2199,9 +2196,8 @@ pub(super) async fn dispatch_inner(
             repo::remove_library(&state.db, r.id).await?;
             state.router.remove_library(r.id);
             let rescan_state = state.clone();
-            state.tasks.spawn_async_unique(
+            state.tasks.spawn_async(
                 tasks::TaskKind::Generic,
-                "scan/refresh",
                 "scan/refresh-after-library-remove",
                 async move {
                     application::refresh_sources(&rescan_state)

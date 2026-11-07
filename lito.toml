@@ -11,6 +11,7 @@ members = [
   "plugins/org.waywallen.wallhaven",
   "tools/i18n",
   "tools/i18n/po",
+  "tools/probe",
   "ui",
   "ui/backend",
 ]
@@ -21,6 +22,7 @@ default-members = [
   "plugins/org.waywallen.video",
   "plugins/org.waywallen.wallhaven",
   "tools/i18n",
+  "tools/probe",
   "ui",
 ]
 

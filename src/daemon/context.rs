@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::probe::media::MediaProbe;
+use crate::probe::media::ProbeService;
 use crate::wallframe::{display, renderer_manager, routing};
 use crate::{events, playback, plugin, settings, system, tasks};
 
@@ -31,13 +31,14 @@ pub(crate) struct DaemonContext {
     pub(crate) events: events::EventBus,
     pub(crate) ws_port: std::sync::atomic::AtomicU16,
     pub(crate) scan_in_progress: std::sync::atomic::AtomicBool,
+    pub(crate) scans: Arc<crate::application::ScanCoordinator>,
     pub(crate) ui_path: std::sync::Mutex<Option<PathBuf>>,
     /// Latest tray/host xdg-activation token (SNI `ProvideXdgActivationToken`).
     pub(crate) xdg_activation_token: std::sync::Mutex<Option<String>>,
     pub(crate) dbus_conn: std::sync::Mutex<Option<Arc<zbus::Connection>>>,
     pub(crate) shutdown: tokio::sync::watch::Sender<bool>,
     pub(crate) tasks: Arc<tasks::TaskManager>,
-    pub(crate) probe: Arc<dyn MediaProbe>,
+    pub(crate) probe: Arc<ProbeService>,
     pub(crate) playlists: playback::playlist::Engine,
     pub(crate) wallpaper_changes: tokio::sync::watch::Sender<u64>,
     pub(crate) playlist_mutation: tokio::sync::Mutex<()>,

@@ -33,19 +33,18 @@ function M.scan(ctx)
     for _, root in ipairs(ctx.libraries()) do
         local settings = ctx.library_settings(root)
         local timeline = settings.scan_mode == "wallpapers"
-        local function collect(path, name, media)
+        local function collect(path, name)
             if not timeline and not system.supported(ctx, path) then return end
             local canonical = ctx.fs.canonicalize(path)
             if not canonical or seen[canonical] or not ctx.fs.is_file(path) then return end
             seen[canonical] = true
             local size
-            if media then size = media.size else size = ctx.file_size(path) end
+            if not timeline then size = ctx.file_size(path) end
             entries[#entries+1] = {
                 name = name or strip_ext(ctx.filename(path) or path),
                 wp_type = "image", sub_type = timeline and "timeline" or "",
                 resource = path, library_root = root, preview = nil,
                 size = size,
-                width = media and media.width, height = media and media.height,
                 can_remove = not timeline and ctx.fs.can_remove(path) or false,
             }
         end
