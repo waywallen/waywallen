@@ -425,6 +425,7 @@ pub struct DisplaySnapshot {
 pub struct CanvasMemberSnapshot {
     pub settings_key: String,
     pub rect: CanvasRect,
+    pub effective_rect: CanvasRect,
     pub display_ids: Vec<DisplayId>,
     pub minimum_scale_to: Option<CanvasSize>,
     pub aspect_locked: bool,
@@ -911,6 +912,30 @@ impl Router {
             .canvas_for_member(Self::settings_key_for(info))
     }
 
+    fn effective_canvas(
+        inner: &Inner,
+        mut canvas: crate::settings::CanvasPrefs,
+    ) -> crate::settings::CanvasPrefs {
+        for (key, member) in &mut canvas.members {
+            if let Some(actual) = Self::canvas_member_minimum_scale_to_locked(inner, key) {
+                match crate::settings::reconcile_canvas_member_runtime_size(
+                    member.rect.size(),
+                    actual,
+                    member.aspect_locked,
+                ) {
+                    Ok(size) => {
+                        member.rect.width = size.width;
+                        member.rect.height = size.height;
+                    }
+                    Err(error) => {
+                        log::warn!("canvas member '{key}' runtime size is invalid: {error}")
+                    }
+                }
+            }
+        }
+        canvas
+    }
+
     fn canvas_id_for_link(link: &Link) -> Option<String> {
         match &link.projection {
             LinkProjection::Independent => None,
@@ -941,6 +966,7 @@ impl Router {
             }
             return links.into_iter().map(|link| link.display_id).collect();
         };
+        let canvas = Self::effective_canvas(inner, canvas);
         let extent = crate::wallframe::display::placement::union(
             canvas.members.values().map(|member| member.rect),
         );
@@ -1844,29 +1870,6 @@ impl Router {
                 }
             }
         }
-        let settings_key = reg.instance_id.as_deref().unwrap_or(&reg.name).to_string();
-        let registration_size = CanvasSize {
-            width: reg.metrics.width,
-            height: reg.metrics.height,
-        };
-        let actual_size = {
-            let inner = self.inner.lock().await;
-            Self::canvas_member_minimum_scale_to_locked(&inner, &settings_key)
-                .map_or(registration_size, |current| {
-                    current.component_max(registration_size)
-                })
-        };
-        let reconciled_canvas_id = self.settings.get().and_then(|settings| {
-            match settings.reconcile_canvas_member_runtime_size(&settings_key, actual_size) {
-                Ok(canvas_id) => canvas_id,
-                Err(error) => {
-                    log::warn!(
-                        "display registration could not reconcile Canvas member '{settings_key}': {error}"
-                    );
-                    None
-                }
-            }
-        });
         let (tx, rx) = mpsc::unbounded_channel();
         let initial_window_state_flags = reg.window_state_flags;
         let (display_id, display_session_id, auto_linked, canvas_id) = {
@@ -1954,6 +1957,7 @@ impl Router {
             );
             let canvas_id = canvas.as_ref().map(|(canvas_id, _)| canvas_id.clone());
             let auto = if let Some((canvas_id, canvas)) = canvas {
+                let canvas = Self::effective_canvas(&inner, canvas);
                 let existing = inner
                     .table
                     .all_links()
@@ -2014,8 +2018,8 @@ impl Router {
             };
             (id, session_id, auto, canvas_id)
         };
-        if let Some(canvas_id) = reconciled_canvas_id {
-            self.canvas_configs_changed([canvas_id]).await;
+        if let Some(canvas_id) = canvas_id.as_ref() {
+            self.canvas_configs_changed([canvas_id.clone()]).await;
         }
         // A freshly auto-linked renderer just gained an audience —
         // cancel any pending orphan timer so it survives.
@@ -2088,10 +2092,11 @@ impl Router {
             inner.displays.remove(&display_id);
             inner.display_conditions.remove(&display_id);
             let removed_links = inner.table.remove_display(display_id);
-            let canvas_ids = removed_links
+            let mut canvas_ids = removed_links
                 .iter()
                 .filter_map(Self::canvas_id_for_link)
                 .collect::<HashSet<_>>();
+            canvas_ids.extend(member_canvas_id.iter().cloned());
             let mut canvas_affected = Vec::new();
             for canvas_id in canvas_ids {
                 canvas_affected.extend(self.refresh_canvas_locked(&mut inner, &canvas_id));
@@ -2267,43 +2272,24 @@ impl Router {
             );
             return;
         }
-        let (changed, size_changed, settings_key, actual_size) = {
+        let (changed, size_changed, canvas_id) = {
             let mut inner = self.inner.lock().await;
             if let Some(s) = inner.displays.get_mut(&display_id) {
-                let differs = s.info.metrics != metrics;
-                let size_differs = s.info.metrics.width != metrics.width
+                let changed = s.info.metrics != metrics;
+                let size_changed = s.info.metrics.width != metrics.width
                     || s.info.metrics.height != metrics.height;
-                let settings_key = Self::settings_key_for(&s.info).to_string();
                 s.info.metrics = metrics;
-                let actual_size = size_differs.then(|| {
-                    Self::canvas_member_minimum_scale_to_locked(&inner, &settings_key)
-                        .expect("resized display must contribute a runtime size")
-                });
-                (differs, size_differs, settings_key, actual_size)
+                let canvas_id = self.canvas_for_info(&s.info).map(|(id, _)| id);
+                (changed, size_changed, canvas_id)
             } else {
                 return;
             }
         };
-        // Layout depends on disp_w/disp_h, so any size change must
-        // trigger a fresh composition config under the resolved fillmode/align.
         if changed {
             if size_changed {
-                if let Some(settings) = self.settings.get() {
-                    match settings.reconcile_canvas_member_runtime_size(
-                        &settings_key,
-                        actual_size.expect("size change must have an aggregate runtime size"),
-                    ) {
-                        Ok(Some(canvas_id)) => {
-                            self.canvas_configs_changed([canvas_id]).await;
-                            return;
-                        }
-                        Ok(None) => {}
-                        Err(error) => {
-                            log::warn!(
-                                "display {display_id:?} resize could not update its canvas: {error}"
-                            );
-                        }
-                    }
+                if let Some(canvas_id) = canvas_id {
+                    self.canvas_configs_changed([canvas_id]).await;
+                    return;
                 }
             }
             self.resync_display_composition(display_id).await;
@@ -2691,6 +2677,7 @@ impl Router {
         let resolve_canvas = |canvas_id: &str,
                               canvas: &crate::settings::CanvasPrefs|
          -> crate::error::Result<ResolvedConfigTarget> {
+            let canvas = Self::effective_canvas(&inner, canvas.clone());
             let extent = crate::wallframe::display::placement::union(
                 canvas.members.values().map(|member| member.rect),
             );
@@ -3050,7 +3037,9 @@ impl Router {
         let s = inner.displays.get(&id)?;
         let link_rows = inner.table.links_for_display(id);
         let settings_key = Self::settings_key_for(&s.info).to_string();
-        let canvas = self.canvas_for_info(&s.info);
+        let canvas = self
+            .canvas_for_info(&s.info)
+            .map(|(id, canvas)| (id, Self::effective_canvas(&inner, canvas)));
         let canvas_id = canvas.as_ref().map(|(id, _)| id.clone());
         let canvas_rect = canvas
             .as_ref()
@@ -3199,7 +3188,9 @@ impl Router {
                 let s = inner.displays.get(&id)?;
                 let link_rows = inner.table.links_for_display(id);
                 let settings_key = Self::settings_key_for(&s.info).to_string();
-                let canvas = self.canvas_for_info(&s.info);
+                let canvas = self
+                    .canvas_for_info(&s.info)
+                    .map(|(id, canvas)| (id, Self::effective_canvas(&inner, canvas)));
                 let canvas_id = canvas.as_ref().map(|(id, _)| id.clone());
                 let canvas_rect = canvas.as_ref().and_then(|(_, canvas)| {
                     canvas.members.get(&settings_key).map(|member| member.rect)
@@ -3284,6 +3275,7 @@ impl Router {
         let mut snapshots = canvases
             .into_iter()
             .map(|(canvas_id, canvas)| {
+                let effective = Self::effective_canvas(&inner, canvas.clone());
                 let mut members = canvas
                     .members
                     .iter()
@@ -3302,6 +3294,7 @@ impl Router {
                         CanvasMemberSnapshot {
                             settings_key: settings_key.clone(),
                             rect: member.rect,
+                            effective_rect: effective.members[settings_key].rect,
                             display_ids,
                             minimum_scale_to,
                             aspect_locked: member.aspect_locked,
@@ -3313,7 +3306,7 @@ impl Router {
                     id: canvas_id.clone(),
                     name: canvas.name,
                     extent: crate::wallframe::display::placement::union(
-                        canvas.members.values().map(|member| member.rect),
+                        effective.members.values().map(|member| member.rect),
                     ),
                     members,
                     layout_override: canvas.layout,

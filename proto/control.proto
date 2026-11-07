@@ -946,6 +946,7 @@ message CanvasMemberInfo {
   // Absent while the member is offline.
   CanvasSize minimum_scale_to = 4;
   bool aspect_locked = 5;
+  CanvasRect effective_rect = 6;
 }
 
 message CanvasInfo {

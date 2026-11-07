@@ -560,6 +560,7 @@ pub(super) fn canvas_snapshot_to_pb(
             .map(|member| pb::CanvasMemberInfo {
                 settings_key: member.settings_key,
                 rect: Some(canvas_rect_to_pb(member.rect)),
+                effective_rect: Some(canvas_rect_to_pb(member.effective_rect)),
                 display_ids: member.display_ids,
                 minimum_scale_to: member.minimum_scale_to.map(|size| pb::CanvasSize {
                     width: size.width,
