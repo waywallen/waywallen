@@ -532,19 +532,8 @@ pub async fn apply_wallpaper(
         })
         .collect::<Vec<_>>();
     let keys = app.router.display_settings_keys(&independent_ids).await;
-    let live_displays = app.router.snapshot_displays().await;
-    let key_counts = live_displays.iter().fold(
-        std::collections::HashMap::<String, usize>::new(),
-        |mut counts, display| {
-            *counts.entry(display.settings_key.clone()).or_default() += 1;
-            counts
-        },
-    );
     app.settings.update(|s| {
         for (_did, key) in &keys {
-            if key_counts.get(key).copied().unwrap_or_default() != 1 {
-                continue;
-            }
             let prefs = s.displays.entry(key.clone()).or_default();
             prefs.last_wallpaper = Some(wp_id.clone());
         }

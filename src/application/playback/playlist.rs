@@ -158,15 +158,6 @@ fn definition_from_detail(detail: repository::Detail) -> Definition {
     }
 }
 
-async fn display_settings_key(app: &Arc<DaemonContext>, display_id: DisplayId) -> Option<String> {
-    app.router
-        .snapshot_displays()
-        .await
-        .into_iter()
-        .find(|display| display.id == display_id)
-        .map(|display| display.instance_id.unwrap_or(display.name))
-}
-
 async fn resume_ids(
     app: &Arc<DaemonContext>,
     definition: &Definition,
@@ -204,14 +195,9 @@ async fn persist_assignments(
     playlist_id: Option<i64>,
     auto_attach: AutoAttachUpdate,
 ) {
-    let mut keys = Vec::new();
-    for display_id in display_ids {
-        if let Some(key) = display_settings_key(app, *display_id).await {
-            keys.push(key);
-        }
-    }
+    let keys = app.router.display_settings_keys(display_ids).await;
     app.settings.update(|settings| {
-        for key in &keys {
+        for (_, key) in &keys {
             let prefs = settings.displays.entry(key.clone()).or_default();
             prefs.active_playlist_id = playlist_id;
             match auto_attach {
