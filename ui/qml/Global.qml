@@ -11,6 +11,7 @@ QtObject {
 
     property bool sidebarAutoExpand: true
     property bool singleUiEnabled: false
+    property bool smoothScrolling: true
     property int networkCacheMaximumMiB: 1024
     readonly property var imageCacheOptions: [0, 64, 128, 256, 512]
     property int imageCacheMiB: 64
@@ -128,6 +129,7 @@ QtObject {
     readonly property Settings _generalSettings: Settings {
         property alias sidebarAutoExpand: root.sidebarAutoExpand
         property alias singleUiEnabled: root.singleUiEnabled
+        property alias smoothScrolling: root.smoothScrolling
         property alias networkCacheMaximumMiB: root.networkCacheMaximumMiB
         property alias imageCacheMiB: root.imageCacheMiB
         property alias imageTextureCacheMiB: root.imageTextureCacheMiB

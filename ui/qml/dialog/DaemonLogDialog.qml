@@ -93,6 +93,7 @@ MD.Dialog {
 
             MD.Flickable {
                 id: logFlick
+                MD.NestedScroll.smoothWheelEnabled: W.Global.smoothScrolling
                 anchors.fill: parent
                 leftMargin: 12
                 rightMargin: 12

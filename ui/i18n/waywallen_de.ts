@@ -1812,6 +1812,16 @@ Betroffener Bildschirm: #%1</translation>
 <context>
     <name>SettingsPage</name>
     <message>
+        <location filename="../qml/page/SettingsPage.qml" line="553"/>
+        <source>Smooth scrolling</source>
+        <translation>Gleichmäßiges Scrollen</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="556"/>
+        <source>Ease mouse wheel scrolling instead of moving immediately.</source>
+        <translation>Mausradbewegungen weich ablaufen lassen, statt sofort zu scrollen.</translation>
+    </message>
+    <message>
         <location filename="../qml/page/SettingsPage.qml" line="15"/>
         <source>Settings</source>
         <translation>Einstellungen</translation>

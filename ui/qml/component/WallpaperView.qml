@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import Qcm.Material as MD
+import waywallen.ui as W
 
 FocusScope {
     id: root
@@ -143,6 +144,7 @@ FocusScope {
         id: gridView
 
         MD.LazyGrid {
+            MD.NestedScroll.smoothWheelEnabled: W.Global.smoothScrolling
             bottomMargin: root.bottomMargin
             cacheExtent: 300
             clip: true
@@ -164,6 +166,7 @@ FocusScope {
         id: masonryView
 
         MD.LazyMasonryGrid {
+            MD.NestedScroll.smoothWheelEnabled: W.Global.smoothScrolling
             bottomMargin: root.bottomMargin
             cacheExtent: 300
             clip: true

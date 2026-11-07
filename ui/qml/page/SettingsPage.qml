@@ -308,6 +308,7 @@ MD.Page {
         m_pending.submittedGlobal = nextGlobal;
         W.Global.sidebarAutoExpand = true;
         W.Global.singleUiEnabled = false;
+        W.Global.smoothScrolling = true;
         W.App.setSingleUiEnabled(false);
         W.DaemonDBusClient.quitOnDaemonShutdown = true;
         W.UpdateChecker.enabled = true;
@@ -489,6 +490,7 @@ MD.Page {
 
     contentItem: MD.VerticalFlickable {
         id: m_flick
+        MD.NestedScroll.smoothWheelEnabled: W.Global.smoothScrolling
         leftMargin: 16
         rightMargin: 16
         bottomMargin: 12
@@ -532,6 +534,36 @@ MD.Page {
                             checked: W.Global.themeMode === "system"
                             onCheckedChangeRequested: W.Global.setThemeMode("system")
                         }
+                    }
+                }
+            }
+
+            SettingItem {
+                first: false
+                last: false
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        FieldLabel { text: qsTr("Smooth scrolling") }
+
+                        MD.Text {
+                            text: qsTr("Ease mouse wheel scrolling instead of moving immediately.")
+                            typescale: MD.Token.typescale.body_small
+                            color: MD.Token.color.on_surface_variant
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                    }
+
+                    MD.Switch {
+                        checked: W.Global.smoothScrolling
+                        onCheckedChangeRequested: checked => W.Global.smoothScrolling = checked
                     }
                 }
             }

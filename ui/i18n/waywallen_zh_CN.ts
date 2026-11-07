@@ -1747,6 +1747,16 @@ Related display: #%1</source>
 </context>
 <context>
     <name>SettingsPage</name>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="553"/>
+        <source>Smooth scrolling</source>
+        <translation>平滑滚动</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="556"/>
+        <source>Ease mouse wheel scrolling instead of moving immediately.</source>
+        <translation>平滑滚动鼠标滚轮，而不是立即移动。</translation>
+    </message>
     <message><source>Excluded windows</source><translation>排除的窗口</translation></message>
     <message><source>Current display</source><translation>当前显示器</translation></message>
     <message><source>All displays</source><translation>所有显示器</translation></message>

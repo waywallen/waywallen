@@ -1086,6 +1086,7 @@ MD.Page {
             clip: true
 
             contentItem: MD.Scrollable {
+                MD.NestedScroll.smoothWheelEnabled: W.Global.smoothScrolling
                 id: detailsFlick
                 clip: true
                 leftMargin: 16
