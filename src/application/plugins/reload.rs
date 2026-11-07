@@ -55,11 +55,10 @@ async fn reload_source_entries(
     let mut suspended = SourcePluginSuspendGuard::new(app.source_manager.clone());
     suspended.suspend().await;
     let installed_plugin_id = installed_plugin_id.to_string();
-    let probe = app.probe.clone();
     let db = app.db.clone();
     let settings = app.settings.clone();
     let load_result = tokio::task::spawn_blocking(move || {
-        let source_manager = crate::plugin::source::SourceManager::with_probe(probe)?;
+        let source_manager = crate::plugin::source::SourceManager::new()?;
         source_manager.attach_db(db);
         source_manager.attach_settings(settings);
 

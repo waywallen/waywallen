@@ -115,7 +115,6 @@ pub struct LuaPluginRegistry {
     scan_lock: tokio::sync::Mutex<()>,
     plugins: StdRwLock<HashMap<String, Arc<PluginHandle>>>,
     catalog: StdRwLock<SourceCatalog>,
-    probe: Arc<dyn MediaProbe>,
     db: StdRwLock<Option<DatabaseConnection>>,
     settings: StdRwLock<Option<Arc<crate::settings::SettingsStore>>>,
     state_store: crate::plugin::state_store::PluginStateStore,
@@ -125,25 +124,16 @@ pub type SourceManager = LuaPluginRegistry;
 
 impl LuaPluginRegistry {
     pub fn new() -> Result<Self> {
-        Self::with_probe(Arc::new(AvFormatProbe::new()))
+        Self::with_state_store(crate::plugin::state_store::PluginStateStore::standard())
     }
 
-    pub fn with_probe(probe: Arc<dyn MediaProbe>) -> Result<Self> {
-        Self::with_probe_and_state_store(
-            probe,
-            crate::plugin::state_store::PluginStateStore::standard(),
-        )
-    }
-
-    pub(crate) fn with_probe_and_state_store(
-        probe: Arc<dyn MediaProbe>,
+    pub(crate) fn with_state_store(
         state_store: crate::plugin::state_store::PluginStateStore,
     ) -> Result<Self> {
         Ok(Self {
             scan_lock: Default::default(),
             plugins: StdRwLock::new(HashMap::new()),
             catalog: StdRwLock::new(SourceCatalog::default()),
-            probe,
             db: StdRwLock::new(None),
             settings: StdRwLock::new(None),
             state_store,
@@ -268,7 +258,7 @@ impl LuaPluginRegistry {
     }
 
     pub fn load_entry(&self, entry: &crate::plugin::renderer_registry::EntryRef) -> Result<String> {
-        let mut runtime = LuaPluginRuntime::with_probe(self.probe.clone())?;
+        let mut runtime = LuaPluginRuntime::new()?;
         runtime.set_state_store(self.state_store.clone());
         if let Some(db) = self.db.read().expect("plugin DB lock poisoned").clone() {
             runtime.attach_db(db);

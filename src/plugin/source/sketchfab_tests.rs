@@ -9,8 +9,7 @@ fn manager_at(root: &Path) -> SourceManager {
 }
 
 fn manager_with_entry(root: &Path, entry: &Path) -> SourceManager {
-    let manager = SourceManager::with_probe_and_state_store(
-        Arc::new(AvFormatProbe::new()),
+    let manager = SourceManager::with_state_store(
         crate::plugin::state_store::PluginStateStore::new(root.join("state"), root.join("legacy")),
     )
     .unwrap();

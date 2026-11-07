@@ -119,16 +119,12 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         registry.register(def.clone());
     }
 
-    // Shared media probe — constructed once, reused by SourceManager
-    // and the sync layer so libavformat is dlopen-ed at most once.
     let probe = Arc::new(AvFormatProbe::new()) as Arc<dyn MediaProbe>;
 
     // Create an empty source manager now; Lua loading and source scans
     // run later in a background task.
-    let source_mgr = Arc::new(
-        plugin::source::SourceManager::with_probe(probe.clone())
-            .expect("failed to create source manager"),
-    );
+    let source_mgr =
+        Arc::new(plugin::source::SourceManager::new().expect("failed to create source manager"));
 
     let renderer_mgr = Arc::new(renderer_manager::RendererManager::new(registry));
     let router = routing::Router::new(renderer_mgr.clone());

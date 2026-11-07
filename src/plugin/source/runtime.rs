@@ -133,8 +133,6 @@ pub struct LuaPluginRuntime {
     entries: Vec<WallpaperEntry>,
     /// Index: wp_type → indices into `entries`.
     by_type: HashMap<WallpaperType, Vec<usize>>,
-    /// Shared media probe exposed to Lua via ctx.probe(path).
-    probe: Arc<dyn MediaProbe>,
     /// DB used by the `ctx.library_meta_*` async-Lua-function bridge.
     /// `None` makes the bridge no-op, which is useful for DB-less tests.
     db: Option<DatabaseConnection>,
@@ -159,10 +157,6 @@ const _: fn() = assert_lua_plugin_runtime_send;
 
 impl LuaPluginRuntime {
     pub fn new() -> Result<Self> {
-        Self::with_probe(Arc::new(AvFormatProbe::new()))
-    }
-
-    pub fn with_probe(probe: Arc<dyn MediaProbe>) -> Result<Self> {
         let lua = Lua::new();
         lua.set_memory_limit(LUA_PLUGIN_MEMORY_LIMIT)
             .map_err(|error| Error::Internal(anyhow!("set Lua memory limit: {error}")))?;
@@ -197,7 +191,6 @@ impl LuaPluginRuntime {
             plugin_infos: HashMap::new(),
             entries: Vec::new(),
             by_type: HashMap::new(),
-            probe,
             db: None,
             settings: None,
             state_store: crate::plugin::state_store::PluginStateStore::standard(),
@@ -2220,29 +2213,6 @@ impl LuaPluginRuntime {
         super::filesystem::install(&self.lua, &fs)?;
         ctx.set("fs", fs)?;
         self.install_artifact_resource_context(&ctx, plugin_name)?;
-
-        // ctx.probe(path) -> table|nil
-        // Returns present file/media fields, or nil if nothing was found.
-        let probe_arc = Arc::clone(&self.probe);
-        let probe_fn = self.lua.create_function(move |lua, path: String| {
-            let s = crate::probe::stat::stat_file(&path);
-            let m = probe_arc.probe_media(&path);
-            if s.is_none() && m.width.is_none() && m.height.is_none() {
-                return Ok(mlua::Value::Nil);
-            }
-            let tbl = lua.create_table()?;
-            if let Some(s) = s {
-                tbl.set("size", s.size)?;
-            }
-            if let Some(v) = m.width {
-                tbl.set("width", v)?;
-            }
-            if let Some(v) = m.height {
-                tbl.set("height", v)?;
-            }
-            Ok(mlua::Value::Table(tbl))
-        })?;
-        ctx.set("probe", probe_fn)?;
 
         // ctx.library_meta_get(library_path, key) -> string|nil
         // ctx.library_meta_set(library_path, key, value_or_nil) -> bool

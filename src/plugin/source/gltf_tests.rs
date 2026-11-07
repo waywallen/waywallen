@@ -1,5 +1,5 @@
 use super::*;
-use crate::probe::media::MediaMeta;
+use crate::probe::media::{MediaMeta, MediaProbe};
 use std::os::unix::fs::symlink;
 
 struct NoMediaProbe;
@@ -30,7 +30,7 @@ fn manager() -> (tempfile::TempDir, SourceManager) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, contents).unwrap();
     }
-    let manager = SourceManager::with_probe(Arc::new(NoMediaProbe)).unwrap();
+    let manager = SourceManager::new().unwrap();
     manager
         .load_plugin(
             &dir.path().join("main.lua"),

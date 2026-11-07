@@ -1,5 +1,5 @@
 use super::*;
-use crate::probe::media::MediaMeta;
+use crate::probe::media::{MediaMeta, MediaProbe};
 use std::os::unix::fs::{symlink, PermissionsExt};
 
 use std::sync::atomic::AtomicUsize;
@@ -22,14 +22,14 @@ fn file(path: &Path, content: impl AsRef<[u8]>) {
     std::fs::write(path, content).unwrap();
 }
 
-fn manager(env: serde_json::Value) -> (tempfile::TempDir, SourceManager, Arc<ImageProbe>) {
+fn manager(env: serde_json::Value) -> (tempfile::TempDir, SourceManager) {
     manager_with_db(env, None)
 }
 
 fn manager_with_db(
     env: serde_json::Value,
     db: Option<DatabaseConnection>,
-) -> (tempfile::TempDir, SourceManager, Arc<ImageProbe>) {
+) -> (tempfile::TempDir, SourceManager) {
     let dir = tempfile::tempdir().unwrap();
     for (path, content) in [
         (
@@ -73,8 +73,7 @@ return M
 "#
         ),
     );
-    let probe = Arc::new(ImageProbe::default());
-    let manager = SourceManager::with_probe(probe.clone()).unwrap();
+    let manager = SourceManager::new().unwrap();
     if let Some(db) = db {
         manager.attach_db(db);
     }
@@ -86,7 +85,7 @@ return M
             ENTRY_VERSION,
         )
         .unwrap();
-    (dir, manager, probe)
+    (dir, manager)
 }
 
 async fn scan(manager: &SourceManager, roots: &[PathBuf]) -> Vec<WallpaperEntry> {
@@ -115,7 +114,7 @@ async fn image_system_auto_detect_keeps_modes_and_ignores_data_home() {
     ] {
         std::fs::create_dir_all(root.path().join(path)).unwrap();
     }
-    let (_plugin, manager, _) = manager(serde_json::json!({
+    let (_plugin, manager) = manager(serde_json::json!({
         "HOME": root.path(), "XDG_DATA_DIRS": root.path().join("data"), "XDG_DATA_HOME":root.path().join("home-data")
     }));
     let libraries = manager
@@ -161,7 +160,7 @@ async fn image_system_descriptors_are_one_entry_each() {
         r#"<background><static><duration>10</duration><file>day.png</file></static><transition><duration>10</duration><from>day.png</from><to>night.png</to></transition></background>"#,
     );
     file(&root.path().join("gnome/day.png"), "image");
-    let (_plugin, manager, probe) = manager(serde_json::json!({"SCAN_MODE":"wallpapers"}));
+    let (_plugin, manager) = manager(serde_json::json!({"SCAN_MODE":"wallpapers"}));
     let entries = scan(&manager, &[root.path().to_owned()]).await;
     assert_eq!(entries.len(), 3);
     assert!(entries.iter().all(|entry| entry.sub_type == "timeline"
@@ -179,7 +178,6 @@ async fn image_system_descriptors_are_one_entry_each() {
         .find(|entry| entry.resource.ends_with("metadata.json"))
         .unwrap();
     assert_eq!((kde.width, kde.height), (Some(1920), Some(1080)));
-    assert_eq!(probe.0.load(Ordering::Relaxed), 0);
     let apply = manager.call_apply("image", kde).await.unwrap();
     assert_eq!(apply.extras.len(), 1);
     assert_eq!(apply.extras["path"], kde.resource);
@@ -192,7 +190,7 @@ async fn image_system_files_mode_does_not_infer_packages() {
     file(&root.path().join("contents/images/1920x1080.png"), "image");
     file(&root.path().join("ignored.jxl"), "image");
     file(&root.path().join("ignored.xml"), "<wallpapers/>");
-    let (_plugin, manager, _) = manager(serde_json::json!({}));
+    let (_plugin, manager) = manager(serde_json::json!({}));
     let entries = scan(&manager, &[root.path().to_owned()]).await;
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].sub_type, "");
@@ -220,7 +218,8 @@ async fn image_system_kde_size_matches_the_selected_image_after_scan_sync_and_pr
         "dark image is not added to the size",
     );
     let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
-    let (_plugin, manager, probe) = manager_with_db(
+    let probe = Arc::new(ImageProbe::default());
+    let (_plugin, manager) = manager_with_db(
         serde_json::json!({"SCAN_MODE": "wallpapers"}),
         Some(db.clone()),
     );
@@ -276,7 +275,7 @@ async fn image_system_reads_saved_library_settings_on_each_scan() {
     );
     file(&root.path().join("contents/images/1920x1080.png"), "image");
     let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
-    let (_plugin, manager, _) = manager_with_db(serde_json::json!({}), Some(db.clone()));
+    let (_plugin, manager) = manager_with_db(serde_json::json!({}), Some(db.clone()));
     let plugin = repo::upsert_plugin(&db, "image", "1").await.unwrap();
     let settings = HashMap::from([("scan_mode".into(), "wallpapers".into())]);
     let path = root.path().to_str().unwrap().to_owned();
@@ -318,7 +317,7 @@ async fn image_system_reads_saved_library_settings_on_each_scan() {
 
 #[test]
 fn image_system_library_settings_validate_independently() {
-    let (_plugin, manager, _) = manager(serde_json::json!({}));
+    let (_plugin, manager) = manager(serde_json::json!({}));
     assert_eq!(
         manager.library_settings("image", HashMap::new()).unwrap()["scan_mode"],
         "files"
@@ -388,10 +387,9 @@ async fn image_system_preserves_user_depth_and_refreshes_removal_permissions() {
     ] {
         file(&library.join(relative), b"image");
     }
-    let (_plugin, manager, probe) = manager(serde_json::json!({}));
+    let (_plugin, manager) = manager(serde_json::json!({}));
     let entries = scan(&manager, &[library.clone()]).await;
     assert_eq!(entries.len(), 3);
-    assert_eq!(probe.0.load(Ordering::Relaxed), 0);
     let mut entry = entries
         .iter()
         .find(|entry| entry.resource == path.to_str().unwrap())
@@ -439,7 +437,7 @@ async fn image_system_removes_symlink_not_canonical_target() {
     std::fs::create_dir(&library).unwrap();
     let link = library.join("link.png");
     symlink(&target, &link).unwrap();
-    let (_plugin, manager, _) = manager(serde_json::json!({}));
+    let (_plugin, manager) = manager(serde_json::json!({}));
     let entries = scan(&manager, &[library]).await;
     manager
         .remove_item("image", &entries[0], &[])

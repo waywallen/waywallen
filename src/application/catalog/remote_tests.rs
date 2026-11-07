@@ -210,13 +210,10 @@ return M
     );
     let entry = directory.path().join("main.lua");
     std::fs::write(&entry, script).unwrap();
-    let manager = SourceManager::with_probe_and_state_store(
-        Arc::new(AvFormatProbe::new()),
-        PluginStateStore::new(
-            directory.path().join("state"),
-            directory.path().join("legacy"),
-        ),
-    )
+    let manager = SourceManager::with_state_store(PluginStateStore::new(
+        directory.path().join("state"),
+        directory.path().join("legacy"),
+    ))
     .unwrap();
     manager
         .load_plugin(&entry, "org.test.remote", "1", ENTRY_VERSION_V6)
@@ -1162,10 +1159,10 @@ return import('original')
     ]);
     assert!(scan.incompatible.is_empty(), "{:?}", scan.incompatible);
     assert_eq!(scan.entries.len(), 1);
-    let manager = SourceManager::with_probe_and_state_store(
-        Arc::new(AvFormatProbe::new()),
-        PluginStateStore::new(output.join("plugin-state"), output.join("legacy-state")),
-    )
+    let manager = SourceManager::with_state_store(PluginStateStore::new(
+        output.join("plugin-state"),
+        output.join("legacy-state"),
+    ))
     .unwrap();
     manager.load_entry(&scan.entries[0]).unwrap();
     let session = manager.download_session("sketchfab").unwrap();
