@@ -69,16 +69,16 @@ void RemoteAvailabilityQuery::reload() {
                         om[u"labelText"_s] = pluginMessageFromPb(option.labelText(), fallback);
                         options.push_back(om);
                     }
-                    fm[u"id"_s]           = filter.id_proto();
-                    fm[u"title"_s]        = filter.title();
-                    fm[u"type"_s]         = static_cast<int>(filter.type());
-                    fm[u"options"_s]      = options;
-                    fm[u"description"_s]  = filter.description();
-                    fm[u"confirmation"_s] = filter.confirmation();
-                    fm[u"matchModes"_s] = filter.matchModes();
-                    fm[u"defaultMatchMode"_s] = filter.defaultMatchMode();
+                    fm[u"id"_s]                = filter.id_proto();
+                    fm[u"title"_s]             = filter.title();
+                    fm[u"type"_s]              = static_cast<int>(filter.type());
+                    fm[u"options"_s]           = options;
+                    fm[u"description"_s]       = filter.description();
+                    fm[u"confirmation"_s]      = filter.confirmation();
+                    fm[u"matchModes"_s]        = filter.matchModes();
+                    fm[u"defaultMatchMode"_s]  = filter.defaultMatchMode();
                     fm[u"supportsExclusion"_s] = filter.supportsExclusion();
-                    fm[u"titleText"_s]    = pluginMessageFromPb(filter.titleText(), filter.title());
+                    fm[u"titleText"_s] = pluginMessageFromPb(filter.titleText(), filter.title());
                     fm[u"descriptionText"_s] =
                         pluginMessageFromPb(filter.descriptionText(), filter.description());
                     fm[u"confirmationText"_s] =
@@ -213,8 +213,12 @@ RemoteSearchQuery::RemoteSearchQuery(QObject* parent): QueryList(parent) {
     connect(this, &RemoteSearchQuery::queryChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(this, &RemoteSearchQuery::sortKeyChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(this, &RemoteSearchQuery::tagsChanged, this, &RemoteSearchQuery::invalidateSearch);
-    connect(this, &RemoteSearchQuery::excludedTagsChanged, this, &RemoteSearchQuery::invalidateSearch);
-    connect(this, &RemoteSearchQuery::filterMatchModesChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(
+        this, &RemoteSearchQuery::excludedTagsChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(this,
+            &RemoteSearchQuery::filterMatchModesChanged,
+            this,
+            &RemoteSearchQuery::invalidateSearch);
 }
 
 auto RemoteSearchQuery::sourceId() const -> const QString& { return m_source_id; }
@@ -248,7 +252,9 @@ void RemoteSearchQuery::setExcludedTags(const QStringList& v) {
     m_excluded_tags = v;
     Q_EMIT excludedTagsChanged();
 }
-auto RemoteSearchQuery::filterMatchModes() const -> const QVariantMap& { return m_filter_match_modes; }
+auto RemoteSearchQuery::filterMatchModes() const -> const QVariantMap& {
+    return m_filter_match_modes;
+}
 void RemoteSearchQuery::setFilterMatchModes(const QVariantMap& v) {
     if (m_filter_match_modes == v) return;
     m_filter_match_modes = v;

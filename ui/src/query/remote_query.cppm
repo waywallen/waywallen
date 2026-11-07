@@ -45,8 +45,10 @@ export class RemoteSearchQuery : public QueryList,
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged FINAL)
     Q_PROPERTY(QString sortKey READ sortKey WRITE setSortKey NOTIFY sortKeyChanged FINAL)
     Q_PROPERTY(QStringList tags READ tags WRITE setTags NOTIFY tagsChanged FINAL)
-    Q_PROPERTY(QStringList excludedTags READ excludedTags WRITE setExcludedTags NOTIFY excludedTagsChanged FINAL)
-    Q_PROPERTY(QVariantMap filterMatchModes READ filterMatchModes WRITE setFilterMatchModes NOTIFY filterMatchModesChanged FINAL)
+    Q_PROPERTY(QStringList excludedTags READ excludedTags WRITE setExcludedTags NOTIFY
+                   excludedTagsChanged FINAL)
+    Q_PROPERTY(QVariantMap filterMatchModes READ filterMatchModes WRITE setFilterMatchModes NOTIFY
+                   filterMatchModesChanged FINAL)
     Q_PROPERTY(bool browsingEnabled READ browsingEnabled WRITE setBrowsingEnabled NOTIFY
                    browsingEnabledChanged FINAL)
     Q_PROPERTY(waywallen::model::RemoteListModel* model READ model CONSTANT FINAL)

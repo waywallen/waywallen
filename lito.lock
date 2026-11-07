@@ -253,7 +253,7 @@ dependencies = [
 [[packages]]
 name = "vrento"
 version = "0.1.0"
-source = "git+https://github.com/vecren/vrento.git#b5030da3b31a53e50eea3d69e034d0550c016e35"
+source = "git+https://github.com/vecren/vrento.git#30b86b5828f339db56e664e8df0d278a5f1e095b"
 dependencies = [
   "lito-spirv",
   "rstd-log",
@@ -275,7 +275,7 @@ dependencies = [
 [[packages]]
 name = "wavsen"
 version = "0.1.0"
-source = "git+https://github.com/hypengw/wavsen.git#4f766f1c4e4f9bd60f4ad6a31367b1b85830f97f"
+source = "git+https://github.com/hypengw/wavsen.git#de4ad56f7458345eca2309d0fad67ba54038b4c7"
 dependencies = [
   "rstd-core",
   "rstd-dlopn",
@@ -328,9 +328,10 @@ name = "waywallen-image-plugin"
 version = "0.5.0"
 dependencies = [
   "rstd-argparse",
-  "rstd-cppstd",
   "rstd-json",
   "rstd-log",
+  "rstd-std",
+  "rstd-test",
   "wavsen",
   "waywallen-plugin-common",
 ]
