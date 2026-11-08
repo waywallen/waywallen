@@ -618,6 +618,7 @@ struct Inner {
     renderer_slots: HashMap<RendererId, RendererSlot>,
     displays: HashMap<DisplayId, DisplayState>,
     disconnected_assignments: HashMap<String, RendererId>,
+    ambiguous_display_keys: HashSet<String>,
     renderer_tasks: HashMap<RendererId, JoinHandle<()>>,
     renderer_manual_paused: HashSet<RendererId>,
     resume_retries: HashMap<RendererId, ResumeRetry>,
@@ -758,6 +759,7 @@ impl Router {
                 renderer_slots: HashMap::new(),
                 displays: HashMap::new(),
                 disconnected_assignments: HashMap::new(),
+                ambiguous_display_keys: HashSet::new(),
                 renderer_tasks: HashMap::new(),
                 renderer_manual_paused: HashSet::new(),
                 resume_retries: HashMap::new(),
@@ -1852,29 +1854,43 @@ impl Router {
         self: &Arc<Self>,
         reg: DisplayRegistration,
     ) -> crate::error::Result<DisplayHandle> {
-        // One-time legacy migration: if the consumer advertised a v4
-        // instance_id, copy any legacy name-keyed settings once.
-        if let (Some(iid), Some(settings)) =
-            (reg.instance_id.as_deref(), self.settings.get().cloned())
-        {
-            if reg.role == DisplayRole::Desktop && settings.display_prefs(iid).is_none() {
-                if let Some(legacy) = settings.display_prefs(&reg.name) {
-                    let iid_owned = iid.to_string();
-                    settings.update(|s| {
-                        s.displays.entry(iid_owned).or_insert(legacy);
-                    });
-                    log::info!(
-                        "display settings: migrated [display.{}] → [display.{}]",
-                        reg.name,
-                        iid
-                    );
-                }
-            }
-        }
+        let settings_key = reg.instance_id.as_deref().unwrap_or(&reg.name).to_string();
         let (tx, rx) = mpsc::unbounded_channel();
         let initial_window_state_flags = reg.window_state_flags;
         let (display_id, display_session_id, auto_linked, canvas_id) = {
             let mut inner = self.inner.lock().await;
+            if let (Some(iid), Some(settings)) = (reg.instance_id.as_deref(), self.settings.get()) {
+                let name_in_use = inner.displays.values().any(|display| {
+                    display.info.role == DisplayRole::Desktop
+                        && display.info.name == reg.name
+                        && Self::settings_key_for(&display.info) != iid
+                });
+                if reg.role == DisplayRole::Desktop && iid != reg.name && !name_in_use {
+                    let mut migrated = false;
+                    settings.update(|s| {
+                        if !s.displays.contains_key(iid) {
+                            if let Some(legacy) = s.displays.remove(&reg.name) {
+                                s.displays.insert(iid.to_string(), legacy);
+                                migrated = true;
+                            }
+                        }
+                    });
+                    if migrated {
+                        log::info!(
+                            "display settings: migrated [display.{}] → [display.{}]",
+                            reg.name,
+                            iid
+                        );
+                    }
+                }
+            }
+            if inner
+                .displays
+                .values()
+                .any(|display| Self::settings_key_for(&display.info) == settings_key)
+            {
+                inner.ambiguous_display_keys.insert(settings_key.clone());
+            }
             inner.next_display_id += 1;
             inner.next_display_session_id = inner
                 .next_display_session_id
@@ -2086,11 +2102,23 @@ impl Router {
                     })
             });
             if let Some((settings_key, renderer_id)) = disconnected {
-                inner
-                    .disconnected_assignments
-                    .insert(settings_key, renderer_id);
+                if !inner.ambiguous_display_keys.contains(&settings_key) {
+                    inner
+                        .disconnected_assignments
+                        .insert(settings_key, renderer_id);
+                }
             }
-            inner.displays.remove(&display_id);
+            if let Some(display) = inner.displays.remove(&display_id) {
+                let settings_key = Self::settings_key_for(&display.info);
+                // The remaining session may still carry the wrong identity.
+                if !inner
+                    .displays
+                    .values()
+                    .any(|display| Self::settings_key_for(&display.info) == settings_key)
+                {
+                    inner.ambiguous_display_keys.remove(settings_key);
+                }
+            }
             inner.display_conditions.remove(&display_id);
             let removed_links = inner.table.remove_display(display_id);
             let mut canvas_ids = removed_links
@@ -3418,8 +3446,7 @@ impl Router {
         result
     }
 
-    /// For each requested `DisplayId`, return its settings key —
-    /// `instance_id` when present, else display name.
+    /// Return persistable settings keys, excluding overlapping display identities.
     pub async fn display_settings_keys(
         self: &Arc<Self>,
         ids: &[DisplayId],
@@ -3428,7 +3455,8 @@ impl Router {
         ids.iter()
             .filter_map(|did| {
                 let s = inner.displays.get(did)?;
-                Some((*did, Self::settings_key_for(&s.info).to_string()))
+                let key = Self::settings_key_for(&s.info);
+                (!inner.ambiguous_display_keys.contains(key)).then(|| (*did, key.to_string()))
             })
             .collect()
     }
