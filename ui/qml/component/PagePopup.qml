@@ -18,21 +18,12 @@ MD.Popup {
     positioningItem: overlayItem
     x: Math.round((overlayWidth - width) / 2)
     y: Math.round((overlayHeight - height) / 2)
-    width: Math.min(Math.max(400, implicitWidth), overlayWidth)
-    height: Math.min(implicitHeight, overlayHeight * 0.8)
+    width: fillWidth ? overlayWidth : m_size_transition.size.width
+    height: fillHeight ? overlayHeight : m_size_transition.size.height
 
     mdState.textColor: MD.MProp.color.on_surface
     mdState.backgroundColor: MD.MProp.color.surface
     MD.MProp.backgroundColor: MD.MProp.color.surface
-
-    Binding on height {
-        value: root.overlayHeight
-        when: root.fillHeight
-    }
-    Binding on width {
-        value: root.overlayWidth
-        when: root.fillWidth
-    }
 
     radius: MD.MProp.size.isCompact ? 0 : MD.Token.shape.corner.large
     modal: !MD.MProp.size.isCompact
@@ -57,15 +48,11 @@ MD.Popup {
         const item = request.object as Item;
         if (!item)
             return null;
-        m_stack.completeTransition();
-        m_stack.outgoingItem = m_stack.currentItem;
         d.accepting = request;
         try {
             return m_stack.pushItem(item, mode) && m_stack.currentItem === item ? item : null;
         } finally {
             d.accepting = null;
-            if (!m_stack.busy)
-                m_stack.outgoingItem = null;
         }
     }
 
@@ -179,11 +166,7 @@ MD.Popup {
             root.pendingRequest = null;
             if (previous)
                 previous.cancel();
-            m_stack.completeTransition();
-            m_stack.outgoingItem = m_stack.currentItem;
             m_stack.popCurrentItem();
-            if (!m_stack.busy)
-                m_stack.outgoingItem = null;
         } finally {
             d.changing = false;
         }
@@ -256,13 +239,14 @@ MD.Popup {
 
     contentItem: MD.PageStack {
         id: m_stack
-        property Item outgoingItem: null
-        implicitWidth: Math.max(outgoingItem?.implicitWidth ?? 0, currentItem?.implicitWidth ?? 0)
-        implicitHeight: Math.max(outgoingItem?.implicitHeight ?? 0, currentItem?.implicitHeight ?? 0)
 
-        onBusyChanged: {
-            if (!busy)
-                outgoingItem = null;
+        sizeTransition: MD.SizeTransition {
+            id: m_size_transition
+
+            enabled: root.visible && !(root.fillWidth && root.fillHeight)
+            targetSize: Qt.size(root.fillWidth ? root.overlayWidth : Math.max(400, root.implicitWidth),
+                                root.fillHeight ? root.overlayHeight : root.implicitHeight)
+            maximumSize: Qt.size(root.overlayWidth, root.fillHeight ? root.overlayHeight : root.overlayHeight * 0.8)
         }
         onEntryAdded: (id, item) => {
             if (d.accepting && d.accepting.object === item)

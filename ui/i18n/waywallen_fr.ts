@@ -2300,6 +2300,21 @@ Related display: #%1</source>
     </message>
 </context>
 <context>
+    <name>EditLibraryPage</name>
+    <message>
+        <source>Edit library</source>
+        <translation>Modifier la bibliothèque</translation>
+    </message>
+    <message>
+        <source>Library name</source>
+        <translation>Nom de la bibliothèque</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation>Appliquer</translation>
+    </message>
+</context>
+<context>
     <name>SourceManagePage</name>
     <message>
         <source>Auto detect libraries</source>
@@ -2310,8 +2325,8 @@ Related display: #%1</source>
         <translation>Aucune nouvelle bibliothèque trouvée</translation>
     </message>
     <message>
-        <source>Rename library</source>
-        <translation>Renommer la bibliothèque</translation>
+        <source>Edit library</source>
+        <translation>Modifier la bibliothèque</translation>
     </message>
     <message>
         <source>Library name</source>

@@ -115,6 +115,7 @@ qt.qml_module({
     "qml/page/display/DisplayLayoutControls.qml",
     "qml/page/display/RendererConnectionPanel.qml",
     "qml/page/SourceManagePage.qml",
+    "qml/page/EditLibraryPage.qml",
     "qml/page/AddLibraryPage.qml",
     "qml/page/AboutPage.qml",
     "qml/page/PluginSettingsPage.qml",

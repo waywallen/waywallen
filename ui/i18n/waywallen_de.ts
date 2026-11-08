@@ -2300,6 +2300,21 @@ Betroffener Bildschirm: #%1</translation>
     </message>
 </context>
 <context>
+    <name>EditLibraryPage</name>
+    <message>
+        <source>Edit library</source>
+        <translation>Bibliothek bearbeiten</translation>
+    </message>
+    <message>
+        <source>Library name</source>
+        <translation>Bibliotheksname</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation>Anwenden</translation>
+    </message>
+</context>
+<context>
     <name>SourceManagePage</name>
     <message>
         <source>Apply</source>

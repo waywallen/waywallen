@@ -1,7 +1,6 @@
 pragma ComponentBehavior: Bound
 pragma ValueTypeBehavior: Assertable
 import QtQuick
-import QtQuick.Layouts
 import Qcm.Material as MD
 import waywallen.ui as W
 
@@ -19,6 +18,18 @@ MD.Page {
         if (!libraryQuery || !W.App.libraryManager.initialized)
             return [];
         return hiddenIds.filter(id => !libraries.some(library => library.id === id));
+    }
+
+    function editLibrary(library) {
+        if (sourceQuery.querying || removeQuery.querying)
+            return;
+        const source = (sourceQuery.sources || []).find(source => source.name === library.pluginName);
+        root.MD.MProp.page.pushItem('waywallen.ui/EditLibraryPage', {
+            libraryId: library.id,
+            originalName: library.name,
+            initialValues: Object.assign({}, library.settings),
+            schemas: source ? source.librarySettings : []
+        });
     }
 
     actions: [
@@ -61,107 +72,6 @@ MD.Page {
         }
     }
 
-    W.LibraryEditQuery {
-        id: editQuery
-        forwardError: false
-        onErrorOccurred: function (error) {
-            editDialog.errorText = error;
-        }
-        onFinished: editDialog.close()
-    }
-
-    MD.Dialog {
-        id: editDialog
-        property string pluginName: ""
-        property string errorText: ""
-        property string originalName: ""
-        property var originalValues: ({})
-        property var values: ({})
-        readonly property var schemas: {
-            const sources = sourceQuery.sources || [];
-            for (const source of sources)
-                if (source.name === pluginName)
-                    return source.librarySettings;
-            return [];
-        }
-        readonly property bool hasChanges: nameField.text.trim() !== originalName || Object.keys(values).some(key => values[key] !== originalValues[key])
-        readonly property bool canApply: !editQuery.querying && nameField.text.trim().length > 0 && hasChanges
-
-        title: qsTr("Edit library")
-        parent: MD.Overlay.overlay
-        modal: true
-        horizontalPadding: 24
-        implicitWidth: Math.min(400, parent ? parent.width - 48 : 400)
-        standardButtons: MD.Dialog.Cancel | MD.Dialog.Apply
-
-        function openFor(library) {
-            editQuery.libraryId = library.id;
-            pluginName = library.pluginName;
-            originalName = library.name;
-            nameField.text = library.name;
-            const next = Object.assign({}, library.settings);
-            for (const schema of schemas)
-                next[schema.key] = next[schema.key] ?? schema.default_value;
-            originalValues = Object.assign({}, next);
-            values = next;
-            errorText = "";
-            open();
-        }
-
-        function submit() {
-            if (!canApply)
-                return;
-            errorText = "";
-            editQuery.name = nameField.text.trim();
-            editQuery.settings = values;
-            editQuery.reload();
-        }
-
-        Component.onCompleted: {
-            const apply = standardButton(MD.Dialog.Apply);
-            if (apply) {
-                apply.text = qsTr("Apply");
-                apply.enabled = Qt.binding(function () {
-                    return editDialog.canApply;
-                });
-            }
-        }
-        onOpened: nameField.forceActiveFocus()
-        onApplied: submit()
-        contentItem: ColumnLayout {
-            spacing: 12
-            MD.TextField {
-                id: nameField
-                Layout.fillWidth: true
-                mdState.size: MD.Enum.S
-                placeholderText: qsTr("Library name")
-                enabled: !editQuery.querying
-                onTextEdited: editDialog.errorText = ""
-                onAccepted: editDialog.submit()
-            }
-            W.LibrarySettingsFields {
-                Layout.fillWidth: true
-                visible: editDialog.schemas.length > 0
-                enabled: !editQuery.querying
-                schemas: editDialog.schemas
-                values: editDialog.values
-                onCommitted: (key, value) => {
-                    const next = Object.assign({}, editDialog.values);
-                    next[key] = value;
-                    editDialog.values = next;
-                    editDialog.errorText = "";
-                }
-            }
-            MD.Text {
-                Layout.fillWidth: true
-                visible: text.length > 0
-                text: editDialog.errorText
-                color: MD.Token.color.error
-                wrapMode: Text.WordWrap
-            }
-        }
-    }
-
     contentItem: Item {
         implicitHeight: Math.max(m_view.contentHeight + m_view.topMargin + m_view.bottomMargin, emptyLabel.implicitHeight + 16)
         implicitWidth: m_view.implicitWidth
@@ -190,13 +100,15 @@ MD.Page {
                         required property var modelData
                         width: m_view.contentWidth
                         text: qsTr("Removed source #%1").arg(modelData)
-                        trailing: MD.IconButton {
-                            enabled: root.visibilityReady
-                            icon.name: MD.Token.icon.close
-                            Accessible.name: qsTr("Clear hidden state")
-                            MD.ToolTip.text: Accessible.name
-                            MD.ToolTip.visible: mdState.interactions.hovered
-                            onClicked: root.libraryQuery.toggleLibraryHidden(missingSourceItem.modelData)
+                        trailing: MD.ActionToolBar {
+                            actions: [
+                                MD.Action {
+                                    enabled: root.visibilityReady
+                                    icon.name: MD.Token.icon.close
+                                    text: qsTr("Clear hidden state")
+                                    onTriggered: root.libraryQuery.toggleLibraryHidden(missingSourceItem.modelData)
+                                }
+                            ]
                         }
                     }
                 }
@@ -213,6 +125,7 @@ MD.Page {
                 radius: 8
 
                 mdState.backgroundColor: MD.Token.color.surface_container
+                onClicked: root.editLibrary(sourceItem.modelData)
 
                 text: modelData.name
                 supportText: qsTr("Plugin: %1").arg(modelData.pluginName)
@@ -230,36 +143,33 @@ MD.Page {
                     color: MD.Token.color.on_surface_variant
                 }
 
-                trailing: Row {
-                    spacing: 4
-                    MD.IconButton {
-                        enabled: !editQuery.querying && !sourceQuery.querying
-                        icon.name: MD.Token.icon.edit
-                        Accessible.name: qsTr("Edit library")
-                        MD.ToolTip.text: Accessible.name
-                        MD.ToolTip.visible: mdState.interactions.hovered
-                        onClicked: editDialog.openFor(sourceItem.modelData)
-                    }
-                    MD.IconToggleButton {
-                        visible: root.libraryQuery !== null
-                        enabled: root.visibilityReady
-                        checked: !root.hiddenIds.includes(sourceItem.modelData.id)
-                        icon.name: checked ? MD.Token.icon.visibility : MD.Token.icon.visibility_off
-                        Accessible.name: checked ? qsTr("Hide source") : qsTr("Show source")
-                        MD.ToolTip.text: Accessible.name
-                        MD.ToolTip.visible: mdState.interactions.hovered
-                        onCheckedChangeRequested: root.libraryQuery.toggleLibraryHidden(sourceItem.modelData.id)
-                    }
-                    MD.IconButton {
-                        icon.name: MD.Token.icon.delete
-                        Accessible.name: qsTr("Remove library")
-                        MD.ToolTip.text: Accessible.name
-                        MD.ToolTip.visible: mdState.interactions.hovered
-                        onClicked: {
-                            removeQuery.libraryId = sourceItem.modelData.id;
-                            removeQuery.reload();
+                trailing: MD.ActionToolBar {
+                    actions: [
+                        MD.Action {
+                            enabled: !sourceQuery.querying && !removeQuery.querying
+                            icon.name: MD.Token.icon.edit
+                            text: qsTr("Edit library")
+                            onTriggered: root.editLibrary(sourceItem.modelData)
+                        },
+                        MD.Action {
+                            visible: root.libraryQuery !== null
+                            enabled: root.visibilityReady
+                            checkable: true
+                            checked: !root.hiddenIds.includes(sourceItem.modelData.id)
+                            icon.name: checked ? MD.Token.icon.visibility : MD.Token.icon.visibility_off
+                            text: checked ? qsTr("Hide source") : qsTr("Show source")
+                            onTriggered: root.libraryQuery.toggleLibraryHidden(sourceItem.modelData.id)
+                        },
+                        MD.Action {
+                            enabled: !removeQuery.querying
+                            icon.name: MD.Token.icon.delete
+                            text: qsTr("Remove library")
+                            onTriggered: {
+                                removeQuery.libraryId = sourceItem.modelData.id;
+                                removeQuery.reload();
+                            }
                         }
-                    }
+                    ]
                 }
             }
         }

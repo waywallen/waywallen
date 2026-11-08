@@ -2188,6 +2188,21 @@ Related display: #%1</source>
     </message>
 </context>
 <context>
+    <name>EditLibraryPage</name>
+    <message>
+        <source>Edit library</source>
+        <translation>Изменить библиотеку</translation>
+    </message>
+    <message>
+        <source>Library name</source>
+        <translation>Название библиотеки</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation>Применить</translation>
+    </message>
+</context>
+<context>
     <name>SourceManagePage</name>
     <message>
         <source>Apply</source>

@@ -2189,6 +2189,21 @@ Related display: #%1</source>
     </message>
 </context>
 <context>
+    <name>EditLibraryPage</name>
+    <message>
+        <source>Edit library</source>
+        <translation>编辑库</translation>
+    </message>
+    <message>
+        <source>Library name</source>
+        <translation>库名称</translation>
+    </message>
+    <message>
+        <source>Apply</source>
+        <translation>应用</translation>
+    </message>
+</context>
+<context>
     <name>SourceManagePage</name>
     <message>
         <source>Apply</source>
