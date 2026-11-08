@@ -514,11 +514,7 @@ MD.Page {
     function applyCanvasDraft() {
         if (!root.selectedCanvasObject || !canvasEditor.dirty)
             return;
-        const members = canvasEditor.members.map(member => member.sizeEdited ? member : Object.assign({}, member, {
-            width: member.authoredWidth ?? member.width,
-            height: member.authoredHeight ?? member.height
-        }));
-        canvasMutationQuery.updateCanvas(root.selectedCanvasObject.id, canvasEditor.baseRevision, canvasEditor.name.trim(), members);
+        canvasMutationQuery.updateCanvas(root.selectedCanvasObject.id, canvasEditor.baseRevision, canvasEditor.name.trim(), canvasEditor.draftMembers());
     }
 
     function dropDisplayOnCanvas(canvasObject, displayObject, dropX, dropY, memberBounds) {
