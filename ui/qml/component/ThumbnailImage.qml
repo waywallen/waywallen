@@ -96,6 +96,7 @@ Item {
 
         QE.AnimatedImage {
             cache: true
+            frameDataRequired: false
             fillMode: root.fillMode
             loadingMode: root.loadingMode
             maxSize: root.maxSize
