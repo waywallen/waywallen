@@ -222,7 +222,10 @@ async fn image_system_package_library_keeps_one_persistable_item() {
     let loaded = crate::model::repo::load_entries(&db).await.unwrap();
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].preview, entries[0].preview);
-    assert_eq!((loaded[0].width, loaded[0].height), (Some(1920), Some(1080)));
+    assert_eq!(
+        (loaded[0].width, loaded[0].height),
+        (Some(1920), Some(1080))
+    );
     assert_eq!(loaded[0].can_remove, Some(false));
 }
 
