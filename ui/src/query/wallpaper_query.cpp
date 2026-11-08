@@ -24,12 +24,14 @@ namespace waywallen
 // ---------------------------------------------------------------------------
 
 WallpaperListQuery::WallpaperListQuery(QObject* parent): QueryList(parent) {
-    connect(Notify::instance(), &Notify::statusChanged, this,
+    connect(Notify::instance(),
+            &Notify::statusChanged,
+            this,
             [this, scanning = Notify::instance()->scanInProgress()]() mutable {
-        const bool active = Notify::instance()->scanInProgress();
-        if (scanning && ! active && m_reload_pending) delayReload();
-        scanning = active;
-    });
+                const bool active = Notify::instance()->scanInProgress();
+                if (scanning && ! active && m_reload_pending) delayReload();
+                scanning = active;
+            });
     setLimit(0);
     tdata()->set_store(tdata(), AppStore::instance()->wallpapers);
     connect(this, &WallpaperListQuery::wpTypeChanged, this, &WallpaperListQuery::invalidateList);
