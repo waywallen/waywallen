@@ -6,10 +6,12 @@ import waywallen.ui as W
 QtObject {
     id: root
 
+    readonly property int imageCacheMaximumMiB: W.Global.imageCacheMaximumMiB
     readonly property int imageCacheMiB: W.Global.imageCacheMiB
-    readonly property var imageCacheOptions: W.Global.imageCacheOptions
+    readonly property int imageCacheStepMiB: W.Global.imageCacheStepMiB
+    readonly property int imageTextureCacheMaximumMiB: W.Global.imageTextureCacheMaximumMiB
     readonly property int imageTextureCacheMiB: W.Global.imageTextureCacheMiB
-    readonly property var imageTextureCacheOptions: W.Global.imageTextureCacheOptions
+    readonly property int imageTextureCacheStepMiB: W.Global.imageTextureCacheStepMiB
     property real itemAspectRatio: 1
     readonly property real itemHeight: itemSize / Math.max(itemAspectRatio, 0.1)
     property int itemSize: 162

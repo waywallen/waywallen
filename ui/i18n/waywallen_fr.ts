@@ -2662,8 +2662,8 @@ L'état d'image non enregistré risque d'être perdu.</translation>
     </message>
     <message>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="160"/>
-        <source>Lower values use less memory but may increase CPU usage when playing animated thumbnails. Set to 0 to disable caching.</source>
-        <translation>Des valeurs plus basses consomment moins de mémoire mais peuvent augmenter l'usage du processeur avec les vignettes animées. Mettez 0 pour désactiver la mise en cache.</translation>
+        <source>Lower values use less memory but may increase CPU usage when playing animated thumbnails.</source>
+        <translation>Des valeurs plus basses consomment moins de mémoire mais peuvent augmenter l'usage du processeur avec les vignettes animées.</translation>
     </message>
     <message>
         <source>Image GPU cache</source>
@@ -2674,8 +2674,8 @@ L'état d'image non enregistré risque d'être perdu.</translation>
         <translation>256 MiB</translation>
     </message>
     <message>
-        <source>Lower values use less GPU memory but may require more texture uploads. Set to 0 to disable caching unused textures.</source>
-        <translation>Des valeurs plus basses consomment moins de mémoire GPU mais entraînent plus de transferts de textures. Mettez 0 pour ne pas garder en cache les textures inutilisées.</translation>
+        <source>Lower values use less GPU memory but may require more texture uploads.</source>
+        <translation>Des valeurs plus basses consomment moins de mémoire GPU mais entraînent plus de transferts de textures.</translation>
     </message>
 </context>
 <context>

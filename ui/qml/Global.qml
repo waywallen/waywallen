@@ -12,10 +12,12 @@ QtObject {
     property bool sidebarAutoExpand: true
     property bool singleUiEnabled: false
     property int networkCacheMaximumMiB: 1024
-    readonly property var imageCacheOptions: [0, 64, 128, 256, 512]
+    readonly property int imageCacheMaximumMiB: 512
+    readonly property int imageCacheStepMiB: 64
     property int imageCacheMiB: 64
-    readonly property var imageTextureCacheOptions: [0, 64, 128, 256]
-    property int imageTextureCacheMiB: 0
+    readonly property int imageTextureCacheMaximumMiB: 256
+    readonly property int imageTextureCacheStepMiB: 64
+    property int imageTextureCacheMiB: 64
     property string themeMode: "system"
     readonly property color defaultAccentColor: "#6750A4"
     property string accentMode: "system"
@@ -42,30 +44,16 @@ QtObject {
 
     function setImageCacheMiB(value) {
         const requested = Number(value);
-        let selected = 64;
-        if (requested <= 0) {
-            selected = 0;
-        } else if (Number.isFinite(requested)) {
-            for (let i = 1; i < imageCacheOptions.length; ++i) {
-                const option = imageCacheOptions[i];
-                if (Math.abs(option - requested) < Math.abs(selected - requested))
-                    selected = option;
-            }
-        }
-        imageCacheMiB = selected;
+        const stepped = Number.isFinite(requested)
+            ? Math.round(requested / imageCacheStepMiB) * imageCacheStepMiB : 64;
+        imageCacheMiB = Math.max(0, Math.min(imageCacheMaximumMiB, stepped));
     }
 
     function setImageTextureCacheMiB(value) {
         const requested = Number(value);
-        let selected = 0;
-        if (Number.isFinite(requested) && requested > 0) {
-            for (let i = 1; i < imageTextureCacheOptions.length; ++i) {
-                const option = imageTextureCacheOptions[i];
-                if (Math.abs(option - requested) < Math.abs(selected - requested))
-                    selected = option;
-            }
-        }
-        imageTextureCacheMiB = selected;
+        const stepped = Number.isFinite(requested)
+            ? Math.round(requested / imageTextureCacheStepMiB) * imageTextureCacheStepMiB : 64;
+        imageTextureCacheMiB = Math.max(0, Math.min(imageTextureCacheMaximumMiB, stepped));
     }
 
     function setThemeMode(mode) {

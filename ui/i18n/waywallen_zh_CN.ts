@@ -2555,8 +2555,8 @@ Unsaved frame state may be lost.</source>
     </message>
     <message>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="160"/>
-        <source>Lower values use less memory but may increase CPU usage when playing animated thumbnails. Set to 0 to disable caching.</source>
-        <translation>较小的值占用更少内存，但播放动态缩略图时可能增加 CPU 占用。设为 0 可关闭缓存。</translation>
+        <source>Lower values use less memory but may increase CPU usage when playing animated thumbnails.</source>
+        <translation>较小的值占用更少内存，但播放动态缩略图时可能增加 CPU 占用。</translation>
     </message>
     <message>
         <source>Image GPU cache</source>
@@ -2567,8 +2567,8 @@ Unsaved frame state may be lost.</source>
         <translation>256 MiB</translation>
     </message>
     <message>
-        <source>Lower values use less GPU memory but may require more texture uploads. Set to 0 to disable caching unused textures.</source>
-        <translation>较小的值占用更少显存，但可能增加纹理上传。设为 0 可关闭未使用纹理的缓存。</translation>
+        <source>Lower values use less GPU memory but may require more texture uploads.</source>
+        <translation>较小的值占用更少显存，但可能增加纹理上传。</translation>
     </message>
 </context>
 <context>

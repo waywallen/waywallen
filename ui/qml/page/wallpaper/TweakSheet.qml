@@ -205,18 +205,18 @@ MD.BottomSheet {
                         Layout.fillWidth: true
                         from: 0
                         snapMode: MD.Slider.SnapAlways
-                        stepSize: 1
-                        to: control.tweak.imageCacheOptions.length - 1
-                        value: Math.max(0, control.tweak.imageCacheOptions.indexOf(control.tweak.imageCacheMiB))
-                        valueMaxText: qsTr("512 MiB")
-                        valueText: qsTr("%1 MiB").arg(control.tweak.imageCacheOptions[Math.round(value)])
+                        stepSize: control.tweak.imageCacheStepMiB
+                        to: control.tweak.imageCacheMaximumMiB
+                        value: control.tweak.imageCacheMiB
+                        valueMaxText: qsTr("%1 MiB").arg(to)
+                        valueText: qsTr("%1 MiB").arg(Math.round(value))
 
-                        onValueChangeRequested: value => control.tweak.setImageCacheMiB(control.tweak.imageCacheOptions[Math.round(value)])
+                        onValueChangeRequested: value => control.tweak.setImageCacheMiB(value)
                     }
                     MD.Text {
                         Layout.fillWidth: true
                         color: MD.Token.color.on_surface_variant
-                        text: qsTr("Lower values use less memory but may increase CPU usage when playing animated thumbnails. Set to 0 to disable caching.")
+                        text: qsTr("Lower values use less memory but may increase CPU usage when playing animated thumbnails.")
                         typescale: MD.Token.typescale.body_small
                         wrapMode: Text.WordWrap
                     }
@@ -234,18 +234,18 @@ MD.BottomSheet {
                         Layout.fillWidth: true
                         from: 0
                         snapMode: MD.Slider.SnapAlways
-                        stepSize: 1
-                        to: control.tweak.imageTextureCacheOptions.length - 1
-                        value: Math.max(0, control.tweak.imageTextureCacheOptions.indexOf(control.tweak.imageTextureCacheMiB))
-                        valueMaxText: qsTr("256 MiB")
-                        valueText: qsTr("%1 MiB").arg(control.tweak.imageTextureCacheOptions[Math.round(value)])
+                        stepSize: control.tweak.imageTextureCacheStepMiB
+                        to: control.tweak.imageTextureCacheMaximumMiB
+                        value: control.tweak.imageTextureCacheMiB
+                        valueMaxText: qsTr("%1 MiB").arg(to)
+                        valueText: qsTr("%1 MiB").arg(Math.round(value))
 
-                        onValueChangeRequested: value => control.tweak.setImageTextureCacheMiB(control.tweak.imageTextureCacheOptions[Math.round(value)])
+                        onValueChangeRequested: value => control.tweak.setImageTextureCacheMiB(value)
                     }
                     MD.Text {
                         Layout.fillWidth: true
                         color: MD.Token.color.on_surface_variant
-                        text: qsTr("Lower values use less GPU memory but may require more texture uploads. Set to 0 to disable caching unused textures.")
+                        text: qsTr("Lower values use less GPU memory but may require more texture uploads.")
                         typescale: MD.Token.typescale.body_small
                         wrapMode: Text.WordWrap
                     }
