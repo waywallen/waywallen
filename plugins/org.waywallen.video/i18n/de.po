@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: org.waywallen.video 0.5.0\nLanguage: de\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: org.waywallen.video 0.6.0\nLanguage: de\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 #: main.lua:15
 msgid "A directory containing video files. Subdirectories up to two levels deep are also scanned. Supported formats: MP4, MKV, WebM, MOV, AVI, and other common containers."

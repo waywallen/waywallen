@@ -63,7 +63,9 @@ Waywallen is built by [Lito](https://github.com/litocpp/lito) (Please star it)
 - Image plugin
 - Video plugin
   - Hardware decoding via Vulkan and VA-API
-- Wallhaven plugin
+- glTF plugin
+- [Wallhaven](https://wallhaven.cc/) plugin
+- [Sketchfab](https://sketchfab.com/) plugin
 
 ### Third-party plugins
 

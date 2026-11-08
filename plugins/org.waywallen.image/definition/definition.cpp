@@ -174,8 +174,7 @@ bool read_definition(ref<str> path, ImageDefinition& output, String& error, Vec<
                                       static_cast<int>(bytes->len().to_primitive()),
                                       filename.as_ptr(),
                                       nullptr,
-                                      XML_PARSE_NO_XXE | XML_PARSE_NONET | XML_PARSE_NOERROR |
-                                          XML_PARSE_NOWARNING) };
+                                      XML_PARSE_NONET | XML_PARSE_NOERROR | XML_PARSE_NOWARNING) };
     auto*    root = document.value ? xmlDocGetRootElement(document.value) : nullptr;
     if (! root || (! tag(root, "wallpapers") && ! tag(root, "background"))) {
         error = String::make("unsupported or invalid wallpaper XML"_str);

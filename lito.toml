@@ -27,7 +27,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.6.0"
 
 [workspace.dependencies]
 waywallen-image-definition = { path = "plugins/org.waywallen.image/definition" }
@@ -49,7 +49,7 @@ qextra = { git = "https://github.com/hypengw/QExtra.git" }
 vecgltf = { git = "https://github.com/vecren/vecgltf.git" }
 
 [workspace.external-dependencies.pkg-config]
-libxml2 = { module = "libxml-2.0", version = ">= 2.13" }
+libxml2 = { module = "libxml-2.0", version = ">= 2.9.14" }
 gbm = { module = "gbm" }
 libavformat = { module = "libavformat", version = ">= 58" }
 libavcodec = { module = "libavcodec", version = ">= 58" }

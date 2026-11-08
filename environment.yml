@@ -35,6 +35,7 @@ dependencies:
   - nasm
   - make
   - zlib
+  - libjxl
 
   # Build infrastructure
   - cmake>=3.28

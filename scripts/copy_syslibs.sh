@@ -66,10 +66,10 @@ copy_header() {
 #   $CONDA_PREFIX/lib, preserving symlinks.
 copy_libs() {
     local host_libdir="$1" base="$2" found=0 f
-    rm -f "$CONDA_PREFIX/lib/lib${base}.so" "$CONDA_PREFIX/lib/lib${base}.so".*
+    # Conda tools may still require another SONAME of the same library.
     shopt -s nullglob
     for f in "$host_libdir/lib${base}.so" "$host_libdir/lib${base}.so".*; do
-        cp -a "$f" "$CONDA_PREFIX/lib/"
+        cp -a --remove-destination "$f" "$CONDA_PREFIX/lib/"
         found=1
     done
     shopt -u nullglob
@@ -119,6 +119,41 @@ install_gbm() {
         "$stamp"
 
     step "GBM installed -> $stamp"
+}
+
+# libxml2
+install_libxml2() {
+    local stamp="$CONDA_PREFIX/lib/pkgconfig/libxml-2.0.pc"
+    if [[ -f "$stamp" && -f "$CONDA_PREFIX/include/libxml2/libxml/parser.h" \
+        && -e "$CONDA_PREFIX/lib/libxml2.so" && -z "${FORCE:-}" ]]; then
+        step "libxml2 already installed in \$CONDA_PREFIX (set FORCE=1 to refresh)"
+        return 0
+    fi
+
+    host_pkgconf --exists "libxml-2.0 >= 2.9.14" \
+        || fail "host has no libxml-2.0 >= 2.9.14; install libxml2-devel / libxml2-dev"
+
+    local xml_ver xml_libdir xml_incdir xml_pcdir
+    xml_ver="$(host_pkgconf --modversion libxml-2.0)"
+    xml_libdir="$(host_pkgconf --variable=libdir libxml-2.0)"
+    xml_incdir="$(host_pkgconf --variable=includedir libxml-2.0)"
+    xml_pcdir="$(host_pkgconf --variable=pcfiledir libxml-2.0)"
+    [[ -f "$xml_pcdir/libxml-2.0.pc" ]] \
+        || fail "host libxml-2.0.pc missing: $xml_pcdir/libxml-2.0.pc"
+
+    step "Copying libxml2 $xml_ver from host"
+
+    copy_headers "$xml_incdir" libxml2
+    copy_libs "$xml_libdir" xml2
+    cp -a "$xml_pcdir/libxml-2.0.pc" "$stamp"
+    sed -i \
+        -e "s|^prefix=.*|prefix=$CONDA_PREFIX|" \
+        -e 's|^exec_prefix=.*|exec_prefix=${prefix}|' \
+        -e 's|^includedir=.*|includedir=${prefix}/include|' \
+        -e 's|^libdir=.*|libdir=${prefix}/lib|' \
+        "$stamp"
+
+    step "libxml2 installed -> $stamp"
 }
 
 # pipewire (libpipewire-0.3 + libspa-0.2)
@@ -275,6 +310,7 @@ EOF
 }
 
 install_gbm
+install_libxml2
 install_pipewire
 install_fontconfig
 install_pulse

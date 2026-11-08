@@ -10,7 +10,7 @@ ENV_NAME="${WAYWALLEN_CONDA_ENV:-waywallen}"
 ENV_PREFIX="${WAYWALLEN_CONDA_PREFIX:-$PROJECT_DIR/build/conda-envs/$ENV_NAME}"
 TMP_DIR="${TMPDIR:-/tmp}"
 WAYWALLEN_DISPLAY_REPO="${WAYWALLEN_DISPLAY_REPO:-https://github.com/waywallen/waywallen-display.git}"
-WAYWALLEN_DISPLAY_REF="${WAYWALLEN_DISPLAY_REF:-3c9c4a736677182695bbe5bc36fadaf8e211a091}"
+WAYWALLEN_DISPLAY_REF="${WAYWALLEN_DISPLAY_REF:-66fa1fe2b7fed3386f95a391a11fa7527bfd1a13}"
 APPDIR="$PROJECT_DIR/build/AppDir"
 INSTALL_DIR="$APPDIR/usr"
 TOOLS_DIR="$PROJECT_DIR/build/_tools"
@@ -170,7 +170,9 @@ bash "$PROJECT_DIR/scripts/build_ffmpeg.sh"
 bash "$PROJECT_DIR/scripts/copy_syslibs.sh"
 
 QT_VER="$("$CONDA_PREFIX/bin/qmake6" -query QT_VERSION)"
-if [[ ! -f "$CONDA_PREFIX/lib/cmake/Qt6Protobuf/Qt6ProtobufConfig.cmake" ]]; then
+QTPROTOBUFGEN="$("$CONDA_PREFIX/bin/qmake6" -query QT_INSTALL_LIBEXECS)/qtprotobufgen"
+# An empty protoc request checks the plugin and its shared libraries without CLI options.
+if ! "$QTPROTOBUFGEN" </dev/null >/dev/null 2>&1; then
     info "Building qtgrpc v$QT_VER"
     QTGRPC_SRC="$PROJECT_DIR/build/_qtgrpc-src"
     QTGRPC_BUILD="$PROJECT_DIR/build/_qtgrpc-build"
@@ -190,6 +192,8 @@ if [[ ! -f "$CONDA_PREFIX/lib/cmake/Qt6Protobuf/Qt6ProtobufConfig.cmake" ]]; the
         -DQT_BUILD_TESTS=OFF
     cmake --build "$QTGRPC_BUILD" --parallel
     cmake --install "$QTGRPC_BUILD"
+    "$QTPROTOBUFGEN" </dev/null >/dev/null \
+        || fail "qtprotobufgen cannot run after rebuilding qtgrpc"
 fi
 
 info "Building and installing waywallen into AppDir: $APPDIR"

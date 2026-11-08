@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: org.waywallen.gltf 0.5.0\nLanguage: zh-CN\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: org.waywallen.gltf 0.6.0\nLanguage: zh-CN\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 msgid "glTF"
 msgstr "glTF"

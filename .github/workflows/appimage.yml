@@ -39,7 +39,7 @@ jobs:
             curl ca-certificates git bzip2 file xz-utils \
             build-essential pkg-config glslang-tools \
             libfuse2 libxkbcommon0 libgl1 libegl1 libpulse-dev \
-            libglib2.0-0 libgles-dev libgbm-dev libfreetype-dev \
+            libglib2.0-0 libgles-dev libgbm-dev libfreetype-dev libxml2-dev \
             libpipewire-0.3-dev libarchive-tools zsync
 
       - uses: actions/checkout@v4

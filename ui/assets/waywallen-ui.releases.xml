@@ -1,3 +1,40 @@
+<release version="0.6.0" date="2026-11-08">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Wallpaper and Discover views support masonry layouts with configurable spacing.</li>
+      <li>Support render glTF as wallpaper.</li>
+      <li>Support browse and download models from Sketchfab.</li>
+      <li>Scan KDE and GNOME system wallpapers.</li>
+      <li>Support native X11 display clients on MATE, Cinnamon, and Xfce. #354 by @wehrwolfmann</li>
+      <li>Remote sources can provide excluded tags, and matching any or all selected topics.</li>
+      <li>Add French UI translations. #378 by @Suricisson</li>
+    </ul>
+    <p>Improved:</p>
+    <ul>
+      <li>Reuse decoded thumbnails and GPU textures during scrolling, with separate cache controls.</li>
+      <li>Image, video, and timeline thumbnails share loading feedback and synchronized shimmer effects.</li>
+      <li>Edit libraries within the current popup and open their folders from the action toolbar.</li>
+      <li>Show download transfer progress.</li>
+      <li>Show wallpaper update indicators. #344 by @MR-kartoshki</li>
+      <li>Allow playlists to target all displays before any display connects. #370 by @wehrwolfmann</li>
+    </ul>
+    <p>Changed:</p>
+    <ul>
+      <li>Move media probing to the standalone waywallen-probe tool.</li>
+    </ul>
+    <p>Fixed:</p>
+    <ul>
+      <li>Preserve display assignments across hotplug and identity collisions. #374 by @MR-kartoshki</li>
+      <li>Restore saved random playlist selections independently for each display. #375 by @MR-kartoshki</li>
+      <li>Keep temporary display size changes out of saved canvas geometry. #376 by @MR-kartoshki</li>
+      <li>Honor the configured video frame-rate limit. #367 by @MR-kartoshki</li>
+      <li>Keep thumbnails visible with the software scene graph. #353 by @wehrwolfmann</li>
+      <li>Fall back when the selected display backend binary is missing. #356 by @wehrwolfmann</li>
+      <li>Forward the latest desktop activation token when opening the UI from the tray.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.5.0" date="2026-10-20">
   <description>
     <p>Added:</p>

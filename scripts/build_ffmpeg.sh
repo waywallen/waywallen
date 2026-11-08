@@ -65,7 +65,7 @@ DECODERS=(
     # in video_decoder.cpp: hw paths use native `av1`, sw uses libdav1d.
     h264 hevc av1 libdav1d vp8 vp9 mpeg4 mjpeg
     # image (also used for image-sequence demuxing)
-    png apng webp gif bmp tiff pam pbm pgm ppm
+    png apng webp gif bmp tiff pam pbm pgm ppm libjxl
     # audio (probe-only)
     aac mp3 opus vorbis flac pcm_s16le pcm_s16be
 )
@@ -76,13 +76,13 @@ DEMUXERS=(
     # Configure names for the *_pipe formats have an image_ prefix.
     image2 image2pipe gif apng ico
     image_png_pipe image_jpeg_pipe image_webp_pipe image_bmp_pipe image_tiff_pipe
-    image_pam_pipe image_pbm_pipe image_pgm_pipe image_ppm_pipe
+    image_pam_pipe image_pbm_pipe image_pgm_pipe image_ppm_pipe image_jpegxl_pipe jpegxl_anim
     aac mp3 ogg flac wav
 )
 PARSERS=(
     h264 hevc av1 vp8 vp9 mjpeg
     aac mpegaudio opus vorbis flac
-    png webp bmp gif pnm
+    png webp bmp gif pnm jpegxl
 )
 BSFS=(
     h264_mp4toannexb hevc_mp4toannexb
@@ -131,6 +131,7 @@ CFG_ARGS=(
     # libdav1d for sw AV1 decode (FFmpeg's built-in av1 decoder is
     # hwaccel-only). Headers/lib come from conda-forge `dav1d`.
     --enable-libdav1d
+    --enable-libjxl
 )
 for x in "${DECODERS[@]}";  do CFG_ARGS+=( "--enable-decoder=$x" ); done
 for x in "${ENCODERS[@]}";  do CFG_ARGS+=( "--enable-encoder=$x" ); done
