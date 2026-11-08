@@ -579,16 +579,14 @@ MD.Page {
                     }
                 }
 
-                // Horizontal scan-progress strip below the toolbar.
-                // Only shown when the grid has wallpapers to display
-                // (the empty-state path uses the centered BusyIndicator).
+                // Covers both discovery and media probing, including the first scan.
                 MD.LinearIndicator {
                     Layout.fillWidth: true
                     Layout.leftMargin: 16
                     Layout.rightMargin: 16
                     Layout.topMargin: 4
                     running: visible
-                    visible: m_grid_view.count > 0 && W.Notify.scanInProgress
+                    visible: W.Notify.scanInProgress
                 }
 
                 // Grid + centered empty-state overlay
@@ -664,20 +662,20 @@ MD.Page {
                         ColumnLayout {
                             readonly property string libraryHintIcon: '<font face="' + MD.Token.font.icon_family + '" style="font-size: ' + libraryHintSize + 'px;">' + sourcesAction.icon.name + '</font>'
                             readonly property int libraryHintSize: 22
-                            readonly property bool showLibraryHint: !wallpaperQuery.querying && !wallpaperQuery.hasActiveFilters && wallpaperQuery.searchText.trim().length === 0 && W.App.libraryManager.count === 0
+                            readonly property bool showLibraryHint: !wallpaperQuery.querying && !W.Notify.scanInProgress && !wallpaperQuery.hasActiveFilters && wallpaperQuery.searchText.trim().length === 0 && W.App.libraryManager.count === 0
 
                             spacing: 16
 
                             MD.BusyIndicator {
                                 Layout.alignment: Qt.AlignHCenter
-                                running: wallpaperQuery.querying
+                                running: wallpaperQuery.querying || W.Notify.scanInProgress
                             }
                             MD.Text {
                                 Layout.alignment: Qt.AlignHCenter
                                 color: MD.Token.color.on_surface_variant
                                 text: wallpaperQuery.status === 3 ? wallpaperQuery.error : qsTr("No wallpapers found")
                                 typescale: MD.Token.typescale.body_large
-                                visible: !wallpaperQuery.querying
+                                visible: !wallpaperQuery.querying && !W.Notify.scanInProgress
                             }
                             MD.Button {
                                 Layout.alignment: Qt.AlignHCenter
@@ -996,7 +994,7 @@ MD.Page {
             } else {
                 W.Action.toast(qsTr("Scanned %n wallpaper(s)", "", count));
             }
-            wallpaperQuery.reload();
+            wallpaperQuery.delayReload();
         }
 
         target: W.Notify

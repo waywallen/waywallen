@@ -9,7 +9,6 @@ use crate::playback::playlist::{
     Activation, ApplyPort, ApplyRequest, ApplySource as PlaylistApplySource, Definition, Target,
     TargetId,
 };
-use crate::playback::Mode;
 use crate::wallframe::scheduler::DisplayId;
 use crate::DaemonContext;
 
@@ -163,9 +162,6 @@ async fn resume_ids(
     definition: &Definition,
     display_ids: &[DisplayId],
 ) -> HashMap<DisplayId, String> {
-    if definition.mode == Mode::Random {
-        return HashMap::new();
-    }
     let mut ids = HashMap::new();
     let snapshots = app.router.snapshot_displays().await;
     for display_id in display_ids {

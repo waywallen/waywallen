@@ -808,17 +808,14 @@ pub(super) async fn dispatch_inner(
             // Fire-and-forget: kick the rescan onto the TaskManager and
             // return immediately; completion arrives via server events.
             let scan_state = state.clone();
-            state.tasks.spawn_async_unique(
-                tasks::TaskKind::Generic,
-                "scan/refresh",
-                "scan/refresh",
-                async move {
+            state
+                .tasks
+                .spawn_async(tasks::TaskKind::Generic, "scan/refresh", async move {
                     application::refresh_sources(&scan_state)
                         .await
                         .map(|_| ())
                         .map_err(anyhow::Error::from)
-                },
-            );
+                });
             Res::WallpaperScan(pb::WallpaperScanResponse { count: 0 })
         }
 
@@ -836,6 +833,11 @@ pub(super) async fn dispatch_inner(
                     plugin_id: p.plugin_id,
                     settings: p
                         .settings
+                        .iter()
+                        .map(crate::control_proto::source_setting_to_proto)
+                        .collect(),
+                    library_settings: p
+                        .library_settings
                         .iter()
                         .map(crate::control_proto::source_setting_to_proto)
                         .collect(),
@@ -2162,8 +2164,20 @@ pub(super) async fn dispatch_inner(
         }
 
         Req::LibraryAdd(r) => {
-            application::add_library(&state, &r.plugin_name, &r.path, r.name.as_deref()).await?;
+            application::add_library(
+                &state,
+                &r.plugin_name,
+                &r.path,
+                r.name.as_deref(),
+                r.settings,
+            )
+            .await?;
             Res::LibraryAdd(pb::Empty {})
+        }
+
+        Req::LibraryEdit(r) => {
+            application::edit_library(&state, r.id, &r.name, r.settings).await?;
+            Res::LibraryEdit(pb::Empty {})
         }
 
         Req::LibraryRename(r) => {
@@ -2182,9 +2196,8 @@ pub(super) async fn dispatch_inner(
             repo::remove_library(&state.db, r.id).await?;
             state.router.remove_library(r.id);
             let rescan_state = state.clone();
-            state.tasks.spawn_async_unique(
+            state.tasks.spawn_async(
                 tasks::TaskKind::Generic,
-                "scan/refresh",
                 "scan/refresh-after-library-remove",
                 async move {
                     application::refresh_sources(&rescan_state)

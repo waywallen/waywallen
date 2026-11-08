@@ -108,5 +108,8 @@ fn should_duplicate_renderers(
     setting_enabled && has_targets && sharing == RendererSharingPolicy::UseSettings
 }
 
+mod scan;
 #[cfg(test)]
 mod tests;
+use catalog::run_scan_pass;
+pub(crate) use scan::{run_media_input_watcher, ScanCoordinator};

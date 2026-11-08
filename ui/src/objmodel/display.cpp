@@ -238,8 +238,10 @@ auto Canvas::membersFromPb(const proto::CanvasInfo& info) -> QVariantList {
     out.reserve(info.members().size());
     for (const auto& member : info.members()) {
         QVariantMap row;
-        row[u"settingsKey"_s] = member.settingsKey();
-        row[u"rect"_s]        = member.hasRect() ? rectFromPb(member.rect()) : QVariantMap {};
+        row[u"settingsKey"_s]  = member.settingsKey();
+        const auto authored    = member.hasRect() ? rectFromPb(member.rect()) : QVariantMap {};
+        row[u"authoredRect"_s] = authored;
+        row[u"rect"_s] = member.hasEffectiveRect() ? rectFromPb(member.effectiveRect()) : authored;
         QVariantMap minimum_scale_to;
         if (member.hasMinimumScaleTo()) {
             minimum_scale_to[u"width"_s]  = member.minimumScaleTo().width();

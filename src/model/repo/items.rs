@@ -11,6 +11,7 @@ pub struct ItemUpsertArgs<'a> {
     /// Stored lowercase by [`upsert_item`] so `"Scene"` and `"scene"`
     /// don't split on reads.
     pub ty: &'a str,
+    pub sub_type: &'a str,
     pub display_name: &'a str,
     pub preview_path: Option<&'a str>,
     pub description: Option<&'a str>,
@@ -25,41 +26,44 @@ pub struct ItemUpsertArgs<'a> {
 }
 
 /// Upsert an item keyed by `(library_id, path)`. Every non-key column
-/// (except `create_at`) is refreshed on conflict — new scan is truth.
+/// (except `added_at`) is refreshed on conflict — new scan is truth.
 pub async fn upsert_item(
     db: &impl ConnectionTrait,
     args: ItemUpsertArgs<'_>,
 ) -> Result<item::Model> {
     let ty_norm = args.ty.to_lowercase();
+    let size = args.size.filter(|n| *n >= 0);
+    let width = args.width.filter(|n| *n > 0);
+    let height = args.height.filter(|n| *n > 0);
     let now = now_ms();
     let am = item::ActiveModel {
         plugin_id: Set(args.plugin_id),
         library_id: Set(args.library_id),
         path: Set(args.path.to_owned()),
         ty: Set(ty_norm),
+        sub_type: Set(args.sub_type.to_owned()),
         display_name: Set(args.display_name.to_owned()),
         preview_path: Set(args.preview_path.map(str::to_owned)),
         description: Set(args.description.map(str::to_owned)),
         external_id: Set(args.external_id.map(str::to_owned)),
         web_url: Set(args.web_url.map(str::to_owned)),
         update_available: Set(args.update_available),
-        size: Set(args.size),
-        width: Set(args.width),
-        height: Set(args.height),
+        size: Set(size),
+        width: Set(width),
+        height: Set(height),
         content_rating: Set(args.content_rating.map(str::to_owned)),
         can_remove: Set(args.can_remove),
-        create_at: Set(now),
-        update_at: Set(now),
-        sync_at: Set(now),
+        added_at: Set(now),
+        seen_scan_id: Set(0),
         ..Default::default()
     };
     item::Entity::insert(am)
         .on_conflict(
-            // CreateAt deliberately omitted from update_columns so the
-            // first-insert value survives every subsequent upsert. The
+            // The first-insert timestamp survives subsequent scans.
             OnConflict::columns([item::Column::LibraryId, item::Column::Path])
                 .update_columns([
                     item::Column::Ty,
+                    item::Column::SubType,
                     item::Column::PluginId,
                     item::Column::DisplayName,
                     item::Column::PreviewPath,
@@ -68,8 +72,6 @@ pub async fn upsert_item(
                     item::Column::WebUrl,
                     item::Column::UpdateAvailable,
                     item::Column::CanRemove,
-                    item::Column::UpdateAt,
-                    item::Column::SyncAt,
                 ])
                 .value(
                     item::Column::Size,
@@ -92,13 +94,18 @@ pub async fn upsert_item(
         .exec(db)
         .await
         .with_context(|| format!("upsert item lib={} path={}", args.library_id, args.path))?;
-    item::Entity::find()
+    let item = item::Entity::find()
         .filter(item::Column::LibraryId.eq(args.library_id))
         .filter(item::Column::Path.eq(args.path))
         .one(db)
         .await
         .with_context(|| format!("reload item lib={} path={}", args.library_id, args.path))?
-        .ok_or_else(|| Error::Internal(anyhow!("reloaded item missing after upsert")))
+        .ok_or_else(|| Error::Internal(anyhow!("reloaded item missing after upsert")))?;
+    let fields = i32::from(size.is_some())
+        | (i32::from(width.is_some()) << 1)
+        | (i32::from(height.is_some()) << 2);
+    set_source_media_fields(db, item.id, fields).await?;
+    Ok(item)
 }
 
 pub async fn list_items_by_library(
@@ -134,9 +141,9 @@ fn entry_from_item(
         .join(&it.path)
         .to_string_lossy()
         .into_owned();
-    let preview = it.preview_path.as_deref().map(|rel| {
+    let preview = it.preview_path.as_deref().map(|path| {
         Path::new(library_path)
-            .join(rel)
+            .join(path)
             .to_string_lossy()
             .into_owned()
     });
@@ -144,6 +151,7 @@ fn entry_from_item(
         item_id: it.id,
         name: it.display_name,
         wp_type: it.ty,
+        sub_type: it.sub_type,
         resource,
         preview,
         description: it.description,
@@ -156,8 +164,8 @@ fn entry_from_item(
         height: it.height.map(|v| v as u32),
         content_rating: it.content_rating,
         can_remove: it.can_remove,
-        modified_at: it.modified_at,
-        create_at: it.create_at,
+        file_mtime_ns: it.file_mtime_ns,
+        added_at: it.added_at,
         plugin_name: plugin_name.to_string(),
         library_root: library_path.to_string(),
         hidden: it.hidden,
@@ -210,30 +218,10 @@ pub async fn load_entries_excluding_libraries(
 
 /// A single item as a `WallpaperEntry` by DB id, with its tags filled.
 pub async fn get_entry(
-    db: &DatabaseConnection,
+    db: &impl ConnectionTrait,
     item_id: i64,
 ) -> Result<Option<crate::catalog::entry::WallpaperEntry>> {
-    let row = item::Entity::find_by_id(item_id)
-        .find_also_related(library::Entity)
-        .one(db)
-        .await
-        .with_context(|| format!("select item id={item_id}"))?;
-    let (it, lib) = match row {
-        Some((it, Some(lib))) => (it, lib),
-        _ => return Ok(None),
-    };
-    let plugin = find_plugin_by_id(db, it.plugin_id)
-        .await?
-        .map(|p| p.name)
-        .unwrap_or_default();
-    let tags = list_tags_of_item(db, it.id)
-        .await?
-        .into_iter()
-        .map(|t| t.name)
-        .collect();
-    let mut entry = entry_from_item(it, &lib.path, &plugin);
-    entry.tags = tags;
-    Ok(Some(entry))
+    Ok(get_entries_ordered(db, &[item_id]).await?.pop())
 }
 
 pub async fn get_entries_ordered<C: ConnectionTrait>(
@@ -606,21 +594,21 @@ pub async fn has_item_by_plugin_external_id(
 }
 
 /// Sweep stale items in `library_ids`.
-/// Deletes rows with `sync_at` older than the pre-sync timestamp.
-pub async fn delete_items_synced_before(
-    db: &DatabaseConnection,
+/// Only the caller's successfully scanned libraries may be swept.
+pub async fn delete_items_not_seen(
+    db: &impl ConnectionTrait,
     library_ids: &[i64],
-    before: i64,
+    scan_id: i64,
 ) -> Result<u64> {
     if library_ids.is_empty() {
         return Ok(0);
     }
     let res = item::Entity::delete_many()
         .filter(item::Column::LibraryId.is_in(library_ids.iter().copied()))
-        .filter(item::Column::SyncAt.lt(before))
+        .filter(item::Column::SeenScanId.ne(scan_id))
         .exec(db)
         .await
-        .context("sweep stale items by sync_at")?;
+        .context("sweep items not seen in scan")?;
     Ok(res.rows_affected)
 }
 
@@ -630,159 +618,6 @@ pub async fn delete_item(db: &DatabaseConnection, item_id: i64) -> Result<u64> {
         .await
         .with_context(|| format!("delete item id={item_id}"))?;
     Ok(res.rows_affected)
-}
-
-/// Items needing either a stat-tier refresh OR a media-tier probe.
-///
-pub async fn list_items_needing_stat(
-    db: &DatabaseConnection,
-) -> Result<Vec<(item::Model, String)>> {
-    use sea_orm::Condition;
-
-    let rows = item::Entity::find()
-        .filter(
-            Condition::any()
-                .add(item::Column::Size.is_null())
-                .add(item::Column::StatAt.is_null()),
-        )
-        .find_also_related(library::Entity)
-        .all(db)
-        .await
-        .context("select items needing stat")?;
-
-    Ok(rows
-        .into_iter()
-        .filter_map(|(it, lib)| lib.map(|l| (it, l.path)))
-        .collect())
-}
-
-/// Items where the media tier still has work. The candidate set is
-/// scoped at the SQL layer so non-media items (scene, web, etc.) never
-pub async fn list_items_needing_probe(
-    db: &DatabaseConnection,
-    probable_exts: &[&str],
-) -> Result<Vec<(item::Model, String)>> {
-    use sea_orm::sea_query::Expr;
-    use sea_orm::Condition;
-
-    let mut ext_cond = Condition::any();
-    for ext in probable_exts {
-        ext_cond = ext_cond.add(item::Column::Path.like(format!("%.{ext}")));
-    }
-
-    let type_cond = Condition::any()
-        .add(item::Column::Ty.eq("image"))
-        .add(item::Column::Ty.eq("video"));
-
-    let trigger_cond = Condition::any()
-        .add(item::Column::Width.is_null())
-        .add(item::Column::Height.is_null())
-        .add(item::Column::ProbedAt.is_null())
-        .add(item::Column::ModifiedAt.is_null())
-        .add(Expr::col(item::Column::ProbedAt).lt(Expr::col(item::Column::ModifiedAt)));
-
-    let rows = item::Entity::find()
-        .filter(
-            Condition::all()
-                .add(type_cond)
-                .add(ext_cond)
-                .add(trigger_cond),
-        )
-        .find_also_related(library::Entity)
-        .all(db)
-        .await
-        .context("select items needing media probe")?;
-
-    Ok(rows
-        .into_iter()
-        .filter_map(|(it, lib)| lib.map(|l| (it, l.path)))
-        .collect())
-}
-
-/// Result of a single update — true if any persisted column changed value.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ItemWriteOutcome {
-    pub changed: bool,
-}
-
-/// Tier-1 stat result: fills missing `size` and writes `modified_at`, `stat_at`. Bumps
-/// `update_at` only when size or modified_at actually changed.
-pub async fn update_item_stat<C: ConnectionTrait>(
-    db: &C,
-    id: i64,
-    stat: &FileStat,
-) -> Result<ItemWriteOutcome> {
-    let existing = item::Entity::find_by_id(id)
-        .one(db)
-        .await
-        .with_context(|| format!("reload item id={id}"))?
-        .ok_or_else(|| Error::Internal(anyhow!("item id={id} disappeared before stat write")))?;
-
-    // Source/package sizes may include more than the resource entry file.
-    let new_size = existing.size.or(Some(stat.size));
-    let new_modified = Some(stat.modified_at);
-    let changed = new_size != existing.size || new_modified != existing.modified_at;
-
-    let now = now_ms();
-    let mut am: item::ActiveModel = existing.into();
-    if changed {
-        am.size = Set(new_size);
-        am.modified_at = Set(new_modified);
-        am.update_at = Set(now);
-    } else {
-        am.size = NotSet;
-        am.modified_at = NotSet;
-        am.update_at = NotSet;
-    }
-    am.stat_at = Set(Some(now));
-    am.update(db)
-        .await
-        .with_context(|| format!("update item stat id={id}"))?;
-    Ok(ItemWriteOutcome { changed })
-}
-
-/// Tier-2 media probe result: writes `width`, `height`, and `probed_at`.
-/// Missing probe fields preserve existing dimensions.
-pub async fn update_item_media<C: ConnectionTrait>(
-    db: &C,
-    id: i64,
-    meta: &MediaMeta,
-) -> Result<ItemWriteOutcome> {
-    let existing = item::Entity::find_by_id(id)
-        .one(db)
-        .await
-        .with_context(|| format!("reload item id={id}"))?
-        .ok_or_else(|| Error::Internal(anyhow!("item id={id} disappeared before probe write")))?;
-
-    let new_width = meta
-        .width
-        .and_then(|v| i32::try_from(v).ok())
-        .or(existing.width)
-        .unwrap_or(0);
-    let new_height = meta
-        .height
-        .and_then(|v| i32::try_from(v).ok())
-        .or(existing.height)
-        .unwrap_or(0);
-
-    let changed = Some(new_width) != existing.width || Some(new_height) != existing.height;
-
-    let now = now_ms();
-    let mut am: item::ActiveModel = existing.into();
-    if changed {
-        am.width = Set(Some(new_width));
-        am.height = Set(Some(new_height));
-        am.update_at = Set(now);
-    } else {
-        am.width = NotSet;
-        am.height = NotSet;
-        am.update_at = NotSet;
-    }
-    am.probed_at = Set(Some(now));
-    am.update(db)
-        .await
-        .with_context(|| format!("update item media id={id}"))?;
-    Ok(ItemWriteOutcome { changed })
 }
 
 /// Validates all ids and returns the ids whose hidden flag changed after commit.
@@ -820,11 +655,9 @@ pub async fn set_items_hidden(
             }
         }
     }
-    let now = now_ms();
     for chunk in changed.chunks(500) {
         item::Entity::update_many()
             .col_expr(item::Column::Hidden, Expr::value(hidden))
-            .col_expr(item::Column::UpdateAt, Expr::value(now))
             .filter(item::Column::Id.is_in(chunk.iter().copied()))
             .exec(&txn)
             .await

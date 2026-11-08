@@ -55,7 +55,7 @@ QtObject {
             delegate: MD.MenuItem {
                 required property var model
                 required property int index
-                width: ListView.view.width
+                width: libraryCombo.popup?.contentItem?.width ?? implicitWidth
                 text: model.name
                 selected: libraryCombo.currentIndex === index
                 highlighted: libraryCombo.highlightedIndex === index

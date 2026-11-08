@@ -196,6 +196,7 @@ using proto::LibraryAddRequest;
 using proto::LibraryAutoDetectRequest;
 using proto::LibraryAutoDetectResponse;
 using proto::LibraryChanged;
+using proto::LibraryEditRequest;
 using proto::LibraryInstance;
 using proto::LibraryListRequest;
 using proto::LibraryListResponse;

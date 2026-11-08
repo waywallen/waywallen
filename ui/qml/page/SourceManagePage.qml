@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 pragma ValueTypeBehavior: Assertable
 import QtQuick
+import QtQuick.Layouts
 import Qcm.Material as MD
 import waywallen.ui as W
 
@@ -22,7 +23,7 @@ MD.Page {
 
     actions: [
         MD.Action {
-            icon.name: MD.Token.icon.search
+            icon.name: MD.Token.icon.image_search
             text: qsTr("Auto detect libraries")
             enabled: !autoDetectQuery.querying
             onTriggered: autoDetectQuery.reload()
@@ -46,65 +47,138 @@ MD.Page {
         id: removeQuery
     }
 
-    W.LibraryRenameQuery {
-        id: renameQuery
+    W.SourceListQuery {
+        id: sourceQuery
+    }
+    Component.onCompleted: sourceQuery.reload()
+    Connections {
+        target: W.Notify
+        function onDaemonReady() {
+            sourceQuery.reload();
+        }
+        function onPluginChanged() {
+            sourceQuery.reload();
+        }
+    }
+
+    W.LibraryEditQuery {
+        id: editQuery
         forwardError: false
         onErrorOccurred: function (error) {
-            renameDialog.errorText = error;
+            editDialog.errorText = error;
         }
-        onFinished: renameDialog.close()
+        onFinished: editDialog.close()
     }
 
     MD.Dialog {
-        id: renameDialog
+        id: editDialog
+        property string pluginName: ""
         property string errorText: ""
         property string originalName: ""
-        title: qsTr("Rename library")
+        property var originalValues: ({})
+        property var values: ({})
+        readonly property var schemas: {
+            const sources = sourceQuery.sources || [];
+            for (const source of sources)
+                if (source.name === pluginName)
+                    return source.librarySettings;
+            return [];
+        }
+        readonly property bool hasChanges: nameField.text.trim() !== originalName || Object.keys(values).some(key => values[key] !== originalValues[key])
+        readonly property bool canApply: !editQuery.querying && nameField.text.trim().length > 0 && hasChanges
+
+        title: qsTr("Edit library")
         parent: MD.Overlay.overlay
         modal: true
         horizontalPadding: 24
         implicitWidth: Math.min(400, parent ? parent.width - 48 : 400)
-        standardButtons: MD.Dialog.Cancel
+        standardButtons: MD.Dialog.Cancel | MD.Dialog.Apply
 
         function openFor(library) {
-            renameQuery.libraryId = library.id;
+            editQuery.libraryId = library.id;
+            pluginName = library.pluginName;
             originalName = library.name;
             nameField.text = library.name;
+            const next = Object.assign({}, library.settings);
+            for (const schema of schemas)
+                next[schema.key] = next[schema.key] ?? schema.default_value;
+            originalValues = Object.assign({}, next);
+            values = next;
             errorText = "";
             open();
         }
 
+        function submit() {
+            if (!canApply)
+                return;
+            errorText = "";
+            editQuery.name = nameField.text.trim();
+            editQuery.settings = values;
+            editQuery.reload();
+        }
+
+        Component.onCompleted: {
+            const apply = standardButton(MD.Dialog.Apply);
+            if (apply) {
+                apply.text = qsTr("Apply");
+                apply.enabled = Qt.binding(function () {
+                    return editDialog.canApply;
+                });
+            }
+        }
         onOpened: nameField.forceActiveFocus()
-        contentItem: W.ApplyTextField {
-            id: nameField
-            placeholderText: qsTr("Library name")
-            enabled: !renameQuery.querying
-            canApply: text.trim().length > 0 && text.trim() !== renameDialog.originalName
-            error: renameDialog.errorText.length > 0
-            errorText: renameDialog.errorText
-            onTextEdited: renameDialog.errorText = ""
-            onApplied: value => {
-                renameQuery.name = value;
-                renameQuery.reload();
+        onApplied: submit()
+        contentItem: ColumnLayout {
+            spacing: 12
+            MD.TextField {
+                id: nameField
+                Layout.fillWidth: true
+                mdState.size: MD.Enum.S
+                placeholderText: qsTr("Library name")
+                enabled: !editQuery.querying
+                onTextEdited: editDialog.errorText = ""
+                onAccepted: editDialog.submit()
+            }
+            W.LibrarySettingsFields {
+                Layout.fillWidth: true
+                visible: editDialog.schemas.length > 0
+                enabled: !editQuery.querying
+                schemas: editDialog.schemas
+                values: editDialog.values
+                onCommitted: (key, value) => {
+                    const next = Object.assign({}, editDialog.values);
+                    next[key] = value;
+                    editDialog.values = next;
+                    editDialog.errorText = "";
+                }
+            }
+            MD.Text {
+                Layout.fillWidth: true
+                visible: text.length > 0
+                text: editDialog.errorText
+                color: MD.Token.color.error
+                wrapMode: Text.WordWrap
             }
         }
     }
 
     contentItem: Item {
-        implicitHeight: Math.max(m_view.contentHeight, emptyLabel.implicitHeight) + 16
+        implicitHeight: Math.max(m_view.contentHeight + m_view.topMargin + m_view.bottomMargin, emptyLabel.implicitHeight + 16)
         implicitWidth: m_view.implicitWidth
 
-        MD.VerticalListView {
+        MD.VerticalLazyList {
             id: m_view
             width: parent.width
             height: parent.height
-            model: W.App.libraryManager.libraries
+            source: MD.ListSnapshotSource {
+                items: W.App.libraryManager.libraries
+            }
             spacing: 8
 
-            topMargin: 8
-            bottomMargin: 8
-            leftMargin: 12
-            rightMargin: 12
+            extraTopMargin: 8
+            extraBottomMargin: 8
+            extraLeftMargin: 12
+            extraRightMargin: 12
 
             footer: Column {
                 width: m_view.contentWidth
@@ -130,7 +204,9 @@ MD.Page {
 
             delegate: MD.ListItem {
                 id: sourceItem
-                required property var modelData
+                required property MD.LazyRow row
+                readonly property var modelData: row.value
+                itemRow: row
                 readonly property string fullPath: String(modelData.path || "")
 
                 width: m_view.contentWidth
@@ -157,12 +233,12 @@ MD.Page {
                 trailing: Row {
                     spacing: 4
                     MD.IconButton {
-                        enabled: !renameQuery.querying
+                        enabled: !editQuery.querying && !sourceQuery.querying
                         icon.name: MD.Token.icon.edit
-                        Accessible.name: qsTr("Rename library")
+                        Accessible.name: qsTr("Edit library")
                         MD.ToolTip.text: Accessible.name
                         MD.ToolTip.visible: mdState.interactions.hovered
-                        onClicked: renameDialog.openFor(sourceItem.modelData)
+                        onClicked: editDialog.openFor(sourceItem.modelData)
                     }
                     MD.IconToggleButton {
                         visible: root.libraryQuery !== null

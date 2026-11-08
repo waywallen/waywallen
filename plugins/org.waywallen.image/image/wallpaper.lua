@@ -8,8 +8,7 @@ function M.properties(entry, ctx)
             value = {0.0, 0.0, 0.0, 1.0},
         },
     }
-    if entry and ctx and ctx.fs.is_dir(entry.resource .. "/images")
-        and ctx.fs.is_dir(entry.resource .. "/images_dark") then
+    if entry and entry.sub_type == "timeline" then
         properties["waywallen.image_variant"] = {
             text = tr("Wallpaper variant"), type = "combo", value = "day-night",
             options = {

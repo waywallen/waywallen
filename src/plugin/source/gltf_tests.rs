@@ -1,14 +1,6 @@
 use super::*;
-use crate::probe::media::MediaMeta;
+use crate::probe::media::ProbeService;
 use std::os::unix::fs::symlink;
-
-struct NoMediaProbe;
-
-impl MediaProbe for NoMediaProbe {
-    fn probe_media(&self, _: &str) -> MediaMeta {
-        panic!("glTF discovery must not probe a model as image or video")
-    }
-}
 
 fn manager() -> (tempfile::TempDir, SourceManager) {
     let dir = tempfile::tempdir().unwrap();
@@ -30,7 +22,7 @@ fn manager() -> (tempfile::TempDir, SourceManager) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, contents).unwrap();
     }
-    let manager = SourceManager::with_probe(Arc::new(NoMediaProbe)).unwrap();
+    let manager = SourceManager::new().unwrap();
     manager
         .load_plugin(
             &dir.path().join("main.lua"),
@@ -129,14 +121,14 @@ async fn gltf_source_counts_the_model_directory_and_preserves_size_after_probe()
     )
     .await
     .unwrap();
-    let stats = crate::probe::task::run_pending(&db, Arc::new(NoMediaProbe))
+    let stats = crate::probe::task::run_pending(&db, Arc::new(ProbeService::with_tool(None)))
         .await
         .unwrap();
     assert_eq!(stats.stat_done, 2);
     let stored = crate::model::repo::load_entries(&db).await.unwrap();
     assert!(stored
         .iter()
-        .all(|entry| entry.size == Some(25) && entry.modified_at.is_some()));
+        .all(|entry| entry.size == Some(25) && entry.file_mtime_ns.is_some()));
 
     std::fs::write(package.join("textures/extra.png"), b"extra").unwrap();
     manager.scan_all(&libraries).await.unwrap();

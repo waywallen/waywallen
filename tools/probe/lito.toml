@@ -1,0 +1,25 @@
+[package]
+name = "waywallen-probe"
+version.workspace = true
+
+[[bin]]
+name = "waywallen-probe"
+module = "waywallen.probe"
+sources = ["main.cpp", "probe.cppm", "probe.cpp", "support.cppm", "lua.cppm"]
+
+[dependencies.luato]
+workspace = true
+
+[dependencies.rstd-std]
+workspace = true
+
+[dependencies.rstd-json]
+workspace = true
+
+[dependencies.wavsen]
+workspace = true
+default-features = false
+features = ["image"]
+
+[dependencies.waywallen-image-definition]
+workspace = true

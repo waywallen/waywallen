@@ -1,3 +1,19 @@
+#: main.lua
+msgid "Scan mode"
+msgstr "Режим сканирования"
+
+#: main.lua
+msgid "Image files"
+msgstr "Файлы изображений"
+
+#: main.lua
+msgid "Desktop wallpapers"
+msgstr "Обои рабочего стола"
+
+#: main.lua
+msgid "Scan image files or desktop wallpaper definitions such as KDE and GNOME wallpapers."
+msgstr "Сканировать изображения или описания обоев рабочего стола KDE и GNOME."
+
 msgid ""
 msgstr "Project-Id-Version: org.waywallen.image 0.5.0\nLanguage: ru\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 

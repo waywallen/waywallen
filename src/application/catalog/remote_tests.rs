@@ -7,7 +7,7 @@ use tokio::io::AsyncReadExt;
 use crate::plugin::source::SourceManager;
 use crate::plugin::source::ENTRY_VERSION_V6;
 use crate::plugin::state_store::PluginStateStore;
-use crate::probe::media::AvFormatProbe;
+use crate::probe::media::ProbeService;
 
 #[derive(Clone)]
 struct Reply {
@@ -210,13 +210,10 @@ return M
     );
     let entry = directory.path().join("main.lua");
     std::fs::write(&entry, script).unwrap();
-    let manager = SourceManager::with_probe_and_state_store(
-        Arc::new(AvFormatProbe::new()),
-        PluginStateStore::new(
-            directory.path().join("state"),
-            directory.path().join("legacy"),
-        ),
-    )
+    let manager = SourceManager::with_state_store(PluginStateStore::new(
+        directory.path().join("state"),
+        directory.path().join("legacy"),
+    ))
     .unwrap();
     manager
         .load_plugin(&entry, "org.test.remote", "1", ENTRY_VERSION_V6)
@@ -446,7 +443,7 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     .await
     .unwrap();
     let installed = publication.commit();
-    let stats = crate::probe::task::run_pending(&db, Arc::new(AvFormatProbe::new()))
+    let stats = crate::probe::task::run_pending(&db, Arc::new(ProbeService::with_tool(None)))
         .await
         .unwrap();
     assert_eq!(stats.stat_done, 1);
@@ -456,7 +453,7 @@ async fn remote_download_imports_archive_preview_metadata_and_reuses_publication
     assert_eq!(entry.plugin_name, "test");
     assert_eq!(entry.wp_type, "gltf");
     assert_eq!(entry.size, installed.artifact.metadata.size);
-    assert!(entry.modified_at.is_some());
+    assert!(entry.file_mtime_ns.is_some());
     assert_eq!(entry.resource, installed.resource().to_str().unwrap());
     assert_eq!(
         entry.preview.as_deref(),
@@ -1162,10 +1159,10 @@ return import('original')
     ]);
     assert!(scan.incompatible.is_empty(), "{:?}", scan.incompatible);
     assert_eq!(scan.entries.len(), 1);
-    let manager = SourceManager::with_probe_and_state_store(
-        Arc::new(AvFormatProbe::new()),
-        PluginStateStore::new(output.join("plugin-state"), output.join("legacy-state")),
-    )
+    let manager = SourceManager::with_state_store(PluginStateStore::new(
+        output.join("plugin-state"),
+        output.join("legacy-state"),
+    ))
     .unwrap();
     manager.load_entry(&scan.entries[0]).unwrap();
     let session = manager.download_session("sketchfab").unwrap();

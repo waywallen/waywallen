@@ -9,8 +9,7 @@ fn manager_at(root: &Path) -> SourceManager {
 }
 
 fn manager_with_entry(root: &Path, entry: &Path) -> SourceManager {
-    let manager = SourceManager::with_probe_and_state_store(
-        Arc::new(AvFormatProbe::new()),
+    let manager = SourceManager::with_state_store(
         crate::plugin::state_store::PluginStateStore::new(root.join("state"), root.join("legacy")),
     )
     .unwrap();
@@ -1682,6 +1681,7 @@ async fn sketchfab_saved_presentation_artifact_exports_render_profile() {
         item_id: 1,
         name: metadata.title.clone(),
         wp_type: metadata.wp_type.clone(),
+        sub_type: String::new(),
         resource: installed.resource().to_str().unwrap().into(),
         preview: installed
             .preview()
@@ -1696,8 +1696,8 @@ async fn sketchfab_saved_presentation_artifact_exports_render_profile() {
         height: None,
         content_rating: metadata.content_rating.clone(),
         can_remove: Some(true),
-        modified_at: None,
-        create_at: 0,
+        file_mtime_ns: None,
+        added_at: 0,
         plugin_name: "sketchfab".into(),
         library_root: target_root.to_str().unwrap().into(),
         hidden: false,

@@ -69,6 +69,7 @@ Item {
                 source: card.wallpaper?.preview ?? ""
                 resource: card.wallpaper?.resource ?? ""
                 wpType: card.wallpaper?.wpType ?? ""
+                timeline: (card.wallpaper?.subType ?? 0) === 1
                 fillMode: Image.PreserveAspectCrop
                 radius: card.effectiveCornerRadius
             }

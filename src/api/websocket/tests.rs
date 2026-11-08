@@ -1,9 +1,47 @@
 use super::*;
 
 #[test]
+fn timeline_preview_remains_an_optional_path_on_the_wire() {
+    use prost::Message;
+    for preview in ["", "/wallpapers/metadata.json", "/backgrounds/entry.xml"] {
+        let entry = pb::WallpaperEntry {
+            resource: "/backgrounds/entry.xml".into(),
+            preview: preview.into(),
+            sub_type: pb::WallpaperSubType::Timeline as i32,
+            ..Default::default()
+        };
+        let decoded = pb::WallpaperEntry::decode(entry.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(decoded.preview, preview);
+        assert_eq!(decoded.resource, entry.resource);
+        assert_eq!(decoded.sub_type, pb::WallpaperSubType::Timeline as i32);
+    }
+}
+
+#[test]
+fn library_edit_protocol_round_trip() {
+    use prost::Message;
+    let edit = pb::LibraryEditRequest {
+        id: 17,
+        name: "Desktop wallpapers".into(),
+        settings: std::collections::HashMap::from([("scan_mode".into(), "wallpapers".into())]),
+    };
+    let request = pb::Request {
+        request_id: 42,
+        payload: Some(pb::request::Payload::LibraryEdit(edit.clone())),
+    };
+    let decoded = pb::Request::decode(request.encode_to_vec().as_slice()).unwrap();
+    assert_eq!(decoded.request_id, 42);
+    assert_eq!(
+        decoded.payload,
+        Some(pb::request::Payload::LibraryEdit(edit))
+    );
+}
+
+#[test]
 fn library_names_protocol_round_trip() {
     use prost::Message;
     let snapshot = LibrarySnapshot {
+        settings: Default::default(),
         id: 17,
         name: "My wallpapers".into(),
         path: "/a/wallpapers".into(),
@@ -19,6 +57,7 @@ fn library_names_protocol_round_trip() {
     };
     assert_eq!(event.libraries, [decoded]);
     let add = pb::LibraryAddRequest {
+        settings: Default::default(),
         path: "/a".into(),
         plugin_name: "image".into(),
         name: None,

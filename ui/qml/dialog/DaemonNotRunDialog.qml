@@ -91,7 +91,7 @@ MD.Popup {
             visible: root.daemonStarting
         }
 
-        MD.VerticalListView {
+        MD.VerticalLazyList {
             id: m_proc_list
             Layout.fillWidth: true
             Layout.leftMargin: 16
@@ -101,16 +101,20 @@ MD.Popup {
             visible: !root.daemonStarting && m_proc_model.count > 0
             clip: true
             spacing: 4
-            model: ListModel {
-                id: m_proc_model
+            source: MD.ItemModelSource {
+                keyMode: MD.ItemModelSource.PersistentIndexKey
+                model: ListModel {
+                    id: m_proc_model
+                }
             }
 
             delegate: MD.ListItem {
                 id: m_item
-                width: ListView.view ? ListView.view.contentWidth : 0
+                required property MD.LazyRow row
+                itemRow: row
                 spacing: 8
-                required property int pid
-                required property string cmdline
+                readonly property int pid: model.pid
+                readonly property string cmdline: model.cmdline
 
                 text: cmdline
                 elide: Text.ElideLeft
@@ -128,7 +132,7 @@ MD.Popup {
                     mdState.type: MD.Enum.BtText
                     busy: m_t.running
                     onClicked: {
-                        W.DaemonDBusClient.killProcess(parent.pid);
+                        W.DaemonDBusClient.killProcess(m_item.pid);
                         m_t.start();
                     }
                 }

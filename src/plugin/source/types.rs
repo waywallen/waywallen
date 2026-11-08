@@ -87,6 +87,36 @@ pub struct SourcePluginInfo {
     /// User-configurable settings the plugin declares via `info().settings`,
     /// stored under the Lua source name in the shared component settings map.
     pub settings: Vec<SourceSetting>,
+    pub library_settings: Vec<SourceSetting>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SourceLibrary {
+    pub path: String,
+    #[serde(default)]
+    pub settings: HashMap<String, String>,
+}
+
+pub fn validate_library_settings(
+    schema: &[SourceSetting],
+    values: HashMap<String, String>,
+) -> Result<HashMap<String, String>> {
+    let mut result = HashMap::new();
+    for setting in schema {
+        let raw = values.get(&setting.key).unwrap_or(&setting.default);
+        result.insert(
+            setting.key.clone(),
+            validate_source_setting(setting, raw).map_err(Error::SettingsValidationFailed)?,
+        );
+    }
+    for key in values.keys() {
+        if !result.contains_key(key) {
+            return Err(Error::SettingsValidationFailed(format!(
+                "undeclared library setting '{key}'"
+            )));
+        }
+    }
+    Ok(result)
 }
 
 /// One entry from a source plugin's `info().settings` sequence. Shapes the
@@ -104,6 +134,7 @@ pub struct SourceSetting {
     pub group_label: LocalizedText,
     pub order: i32,
     pub choices: Vec<String>,
+    pub choice_labels: Vec<LocalizedText>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

@@ -46,6 +46,11 @@ pub(super) fn entry_to_pb(
         wp_type: e.wp_type.clone(),
         resource: e.resource.clone(),
         preview: e.preview.clone().unwrap_or_default(),
+        sub_type: if e.sub_type == "timeline" {
+            pb::WallpaperSubType::Timeline as i32
+        } else {
+            pb::WallpaperSubType::None as i32
+        },
         // Per-entry metadata is no longer carried (extras() decouples
         // the renderer launch args); the wire field stays for compat.
         metadata: Default::default(),

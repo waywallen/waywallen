@@ -2,6 +2,7 @@
 import rstd;
 import rstd.test;
 import waywallen.image.content;
+import waywallen.image.definition;
 
 using namespace rstd::prelude;
 using namespace rstd::literals;
@@ -17,7 +18,9 @@ struct Package {
     PathBuf           root;
     Package()
         : storage(rstd::fs::TempDir::make("waywallen-image"_str).unwrap()),
-          root(PathBuf::from(storage.path())) {}
+          root(PathBuf::from(storage.path())) {
+        write("metadata.json"_str, R"({"KPlugin":{"Name":"Test"}})"_str);
+    }
     auto path(ref<str> relative) const -> PathBuf { return root.join(ref<Path>(relative)); }
     void write(ref<str> relative, ref<str> value) {
         rstd::fs::write(path(relative), value.as_bytes()).unwrap();
@@ -38,6 +41,65 @@ struct Package {
     }
 };
 
+TEST(ImageContent, GnomeXmlKeepsPairsAndNodesInOneDefinition) {
+    Package package;
+    package.image("images", 255, 0, 0);
+    package.image("images_dark", 0, 0, 255);
+    package.write("pair.xml"_str, R"(<wallpapers>
+        <wallpaper><filename>contents/images/2x2.png</filename><filename-dark>contents/images_dark/2x2.png</filename-dark></wallpaper>
+        <wallpaper><filename>contents/images/2x2.png</filename></wallpaper>
+    </wallpapers>)"_str);
+    ww_image::DecodeError error;
+    auto                  content = ww_image::ImageContent::open(
+        package.path("pair.xml"_str).as_path().to_str().unwrap(), &error);
+    ASSERT_TRUE(bool(content));
+    content->set_mode("dark"_str);
+    auto image = content->decode(2, 2, &error);
+    ASSERT_EQ(image.data[usize(2)], u8(255));
+    String reason;
+    auto   definition = ww_image::ImageDefinition::open(
+        package.path("pair.xml"_str).as_path().to_str().unwrap(), reason);
+    ASSERT_TRUE(bool(definition));
+    ASSERT_EQ(definition->frames.len().to_primitive(), rstd::size_t(2));
+    ASSERT_EQ(definition->preview().len().to_primitive(), rstd::size_t(2));
+}
+
+TEST(ImageContent, GnomeTimelineUsesParsedDurations) {
+    Package package;
+    package.write("timed.xml"_str, R"(<background>
+        <static><duration>10</duration><file>a.png</file></static>
+        <transition><duration>10</duration><from>a.png</from><to>b.png</to></transition>
+        <static><duration>10</duration><file>b.png</file></static>
+    </background>)"_str);
+    String reason;
+    auto   definition = ww_image::ImageDefinition::open(
+        package.path("timed.xml"_str).as_path().to_str().unwrap(), reason);
+    ASSERT_TRUE(bool(definition));
+    double      mix   = 0;
+    const auto& frame = definition->frame_at(15, mix);
+    ASSERT_TRUE(frame.transition);
+    ASSERT_EQ(mix, 0.5);
+    double remaining = 0;
+    definition->frame_at(15.5, mix, &remaining);
+    ASSERT_EQ(mix, 0.55);
+    ASSERT_EQ(remaining, 4.5);
+    ASSERT_EQ(definition->preview().len().to_primitive(), rstd::size_t(2));
+}
+
+TEST(ImageContent, GnomeXmlDoesNotLoadExternalEntitiesAndRejectsCycles) {
+    Package package;
+    package.write("pair.xml"_str, R"(<!DOCTYPE wallpapers SYSTEM "https://invalid.example/test.dtd">
+        <wallpapers><wallpaper><filename>image.png</filename></wallpaper></wallpapers>)"_str);
+    String reason;
+    ASSERT_TRUE(bool(ww_image::ImageDefinition::open(
+        package.path("pair.xml"_str).as_path().to_str().unwrap(), reason)));
+    package.write(
+        "pair.xml"_str,
+        R"(<wallpapers><wallpaper><filename>pair.xml</filename></wallpaper></wallpapers>)"_str);
+    ASSERT_TRUE(! ww_image::ImageDefinition::open(
+        package.path("pair.xml"_str).as_path().to_str().unwrap(), reason));
+}
+
 TEST(ImageContent, SimulatedSchedule) {
     using ww_image::ImageContent;
     ASSERT_EQ(ImageContent::simulated_darkness(0, true), 1.0);
@@ -55,7 +117,8 @@ TEST(ImageContent, PackageModesAndMissingSide) {
     package.image("images", 255, 0, 0);
     package.image("images_dark", 0, 0, 255);
     ww_image::DecodeError error;
-    auto content = ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error);
+    auto                  content = ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error);
     ASSERT_TRUE(bool(content));
     ASSERT_TRUE(content->dynamic());
     content->set_mode("light"_str);
@@ -76,12 +139,15 @@ TEST(ImageContent, PackageModesAndMissingSide) {
 TEST(ImageContent, PlainImageAndEmptyPackage) {
     Package               package;
     ww_image::DecodeError error;
-    ASSERT_TRUE(! ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error));
+    ASSERT_TRUE(! ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error));
     package.image("images_dark", 0, 0, 255);
-    ASSERT_TRUE(! ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error));
+    ASSERT_TRUE(! ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error));
     package.image("images", 0, 0, 255);
     rstd::fs::remove_dir_all(package.path("contents/images_dark"_str)).unwrap();
-    auto content = ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error);
+    auto content = ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error);
     ASSERT_TRUE(bool(content));
     ASSERT_TRUE(! content->dynamic());
     auto image = content->decode(4, 4, &error);
@@ -107,7 +173,8 @@ TEST(ImageContent, CrossfadeMetadataAndClockChanges) {
     auto       timestamp = local.assume_offset(offset).unix_time();
     const auto morning =
         SystemTime::from_unix_time(timestamp.seconds, timestamp.nanoseconds).unwrap();
-    auto content = ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error);
+    auto content = ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error);
     content->update(morning);
     auto mixed = content->decode(2, 2, &error);
     ASSERT_EQ(mixed.data[usize(0)], u8(128));
@@ -118,8 +185,9 @@ TEST(ImageContent, CrossfadeMetadataAndClockChanges) {
     ASSERT_EQ(content->decode(2, 2, &error).data[usize(0)], u8(255));
     content->update(morning);
     ASSERT_EQ(content->decode(2, 2, &error).data[usize(0)], u8(128));
-    package.write("metadata.json"_str, R"({"X-KDE-CrossFade":false})"_str);
-    auto discrete = ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error);
+    package.write("metadata.json"_str, R"({"KPlugin":{},"X-KDE-CrossFade":false})"_str);
+    auto discrete = ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error);
     discrete->update(morning);
     ASSERT_EQ(discrete->decode(2, 2, &error).data[usize(0)], u8(255));
     discrete->update(morning + Duration::from_secs(u64(12 * 3600)));
@@ -131,7 +199,8 @@ TEST(ImageContent, SelectsResolutionAndFallsBackAfterDecodeFailure) {
     package.image("images", 255, 0, 0, 2, 2, "2x2.png");
     package.image("images", 0, 0, 255, 8, 8, "8x8.png");
     ww_image::DecodeError error;
-    auto content = ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error);
+    auto                  content = ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error);
     ASSERT_TRUE(bool(content));
     ASSERT_EQ(content->width(), 8u);
     ASSERT_EQ(content->decode(2, 2, &error).data[usize(0)], u8(255));
@@ -148,11 +217,13 @@ TEST(ImageContent, KdeFilenameAndPreferredSizeRules) {
     package.image("images", 255, 0, 0, 2, 2, "0x100.png");
     package.image("images", 255, 0, 0, 2, 2, "2147483648x1.png");
     ww_image::DecodeError error;
-    ASSERT_TRUE(! ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error));
+    ASSERT_TRUE(! ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error));
     package.image("images", 255, 0, 0, 2, 2, "1920x1080.png");
     package.image("images", 0, 0, 255, 2, 2, "1280x1024.png");
     package.image("images", 0, 255, 0, 2, 2, "1600x1200.png");
-    auto content = ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error);
+    auto content = ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error);
     ASSERT_TRUE(bool(content));
     ASSERT_EQ(content->decode(1350, 1080, &error).data[usize(2)], u8(255));
     ASSERT_EQ(content->decode(1440, 1080, &error).data[usize(1)], u8(255));
@@ -164,7 +235,8 @@ TEST(ImageContent, VariantSizesAndNamesNeedNotMatch) {
     package.image("images", 255, 0, 0);
     package.image("images_dark", 0, 0, 255, 4, 2, "4x2.png");
     ww_image::DecodeError error;
-    auto content = ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error);
+    auto                  content = ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error);
     ASSERT_TRUE(bool(content));
     ASSERT_TRUE(content->dynamic());
     content->set_mode("dark"_str);
@@ -179,7 +251,8 @@ TEST(ImageContent, PackageFollowsSymlinkedImages) {
                         package.path("contents/images/1920x1080.png"_str))
         .unwrap();
     ww_image::DecodeError error;
-    auto content = ww_image::ImageContent::open(package.root.as_path().to_str().unwrap(), &error);
+    auto                  content = ww_image::ImageContent::open(
+        package.path("metadata.json"_str).as_path().to_str().unwrap(), &error);
     ASSERT_TRUE(bool(content));
     ASSERT_EQ(content->decode(2, 2, &error).data[usize()], u8(255));
 }

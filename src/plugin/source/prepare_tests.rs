@@ -3,10 +3,10 @@ use crate::plugin::renderer_registry::{scan_plugins, PluginScan};
 use std::os::unix::fs::{symlink, PermissionsExt};
 
 fn manager(root: &Path) -> SourceManager {
-    SourceManager::with_probe_and_state_store(
-        Arc::new(AvFormatProbe::new()),
-        crate::plugin::state_store::PluginStateStore::new(root.join("state"), root.join("legacy")),
-    )
+    SourceManager::with_state_store(crate::plugin::state_store::PluginStateStore::new(
+        root.join("state"),
+        root.join("legacy"),
+    ))
     .unwrap()
 }
 

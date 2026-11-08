@@ -466,6 +466,7 @@ mod tests {
                     library_id: library.id,
                     path: &path,
                     ty: "image",
+                    sub_type: "",
                     display_name: "",
                     preview_path: None,
                     description: None,

@@ -1059,8 +1059,9 @@ int run(int argc, char** argv) {
             }
             if ((session->dynamic() || content_dirty) &&
                 rstd::time::Instant::now() >= next_update) {
-                next_update = rstd::time::Instant::now() + rstd::time::Duration::from_secs(u64(30));
                 content_dirty = session->update(rstd::time::SystemTime::now()) || content_dirty;
+                next_update = rstd::time::Instant::now() +
+                              rstd::time::Duration::from_millis(u64(session->update_interval_ms()));
                 if (content_dirty && host.negotiated.load(rstd::sync::atomic::Ordering::Acquire)) {
                     auto     rgba = session->decode(host.active_width, host.active_height, &derr);
                     uint64_t generation {};

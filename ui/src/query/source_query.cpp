@@ -52,32 +52,40 @@ void SourceListQuery::reload() {
                 m[u"types"_s]    = types;
                 m[u"pluginId"_s] = s.pluginId();
 
-                QVariantList settings;
-                for (const auto& ss : s.settings()) {
-                    QVariantMap sm;
-                    sm[u"key"_s]             = ss.key();
-                    sm[u"type"_s]            = static_cast<int>(ss.type());
-                    sm[u"default_value"_s]   = ss.defaultValue();
-                    sm[u"identity"_s]        = ss.identity();
-                    sm[u"label_key"_s]       = ss.labelKey();
-                    sm[u"description_key"_s] = ss.descriptionKey();
-                    sm[u"label"_s]           = pluginMessageFromPb(ss.label(), ss.labelKey());
-                    sm[u"description"_s] =
-                        pluginMessageFromPb(ss.description(), ss.descriptionKey());
-                    sm[u"group_label"_s] = pluginMessageFromPb(ss.groupLabel(), ss.group());
-                    sm[u"min"_s]         = ss.min();
-                    sm[u"max"_s]         = ss.max();
-                    sm[u"step"_s]        = ss.step();
-                    QStringList choices;
-                    for (const auto& c : ss.choices()) {
-                        choices.append(c);
+                const auto schemas = [](const auto& input) {
+                    QVariantList settings;
+                    for (const auto& ss : input) {
+                        QVariantMap sm;
+                        sm[u"key"_s]             = ss.key();
+                        sm[u"type"_s]            = static_cast<int>(ss.type());
+                        sm[u"default_value"_s]   = ss.defaultValue();
+                        sm[u"identity"_s]        = ss.identity();
+                        sm[u"label_key"_s]       = ss.labelKey();
+                        sm[u"description_key"_s] = ss.descriptionKey();
+                        sm[u"label"_s]           = pluginMessageFromPb(ss.label(), ss.labelKey());
+                        sm[u"description"_s] =
+                            pluginMessageFromPb(ss.description(), ss.descriptionKey());
+                        sm[u"group_label"_s] = pluginMessageFromPb(ss.groupLabel(), ss.group());
+                        sm[u"min"_s]         = ss.min();
+                        sm[u"max"_s]         = ss.max();
+                        sm[u"step"_s]        = ss.step();
+                        QStringList choices;
+                        for (const auto& c : ss.choices()) {
+                            choices.append(c);
+                        }
+                        sm[u"choices"_s] = choices;
+                        QVariantList labels;
+                        for (const auto& label : ss.choiceLabels())
+                            labels.append(pluginMessageFromPb(label));
+                        sm[u"choiceLabels"_s] = labels;
+                        sm[u"group"_s]        = ss.group();
+                        sm[u"order"_s]        = static_cast<int>(ss.order());
+                        settings.append(sm);
                     }
-                    sm[u"choices"_s] = choices;
-                    sm[u"group"_s]   = ss.group();
-                    sm[u"order"_s]   = static_cast<int>(ss.order());
-                    settings.append(sm);
-                }
-                m[u"settings"_s] = settings;
+                    return settings;
+                };
+                m[u"settings"_s]        = schemas(s.settings());
+                m[u"librarySettings"_s] = schemas(s.librarySettings());
                 items.append(m);
             }
             self->m_sources = std::move(items);

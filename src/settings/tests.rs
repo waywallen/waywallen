@@ -445,7 +445,7 @@ fn canvas_mutation_is_canonical_and_rejects_cross_canvas_membership() {
 }
 
 #[test]
-fn canvas_runtime_layout_and_scale_to_reconciliation_do_not_change_topology_revision() {
+fn canvas_layout_does_not_change_topology_revision() {
     let store = SettingsStore::from_test_settings(Settings::default());
     let created = store
         .create_canvas(
@@ -498,48 +498,7 @@ fn canvas_runtime_layout_and_scale_to_reconciliation_do_not_change_topology_revi
         .unwrap());
     assert_eq!(store.canvas_revision(), revision);
 
-    assert_eq!(
-        store
-            .reconcile_canvas_member_runtime_size(
-                "right",
-                CanvasSize {
-                    width: 150,
-                    height: 120,
-                },
-            )
-            .unwrap(),
-        Some(created.canvas_id.clone())
-    );
-    assert_eq!(
-        store
-            .reconcile_canvas_member_runtime_size(
-                "right",
-                CanvasSize {
-                    width: 130,
-                    height: 200,
-                },
-            )
-            .unwrap(),
-        Some(created.canvas_id.clone())
-    );
-    assert_eq!(
-        store
-            .reconcile_canvas_member_runtime_size(
-                "right",
-                CanvasSize {
-                    width: 100,
-                    height: 100,
-                },
-            )
-            .unwrap(),
-        Some(created.canvas_id.clone())
-    );
-    assert_eq!(store.canvas_revision(), revision);
     let canvas = store.canvas(&created.canvas_id).unwrap();
-    assert_eq!(canvas.members["right"].rect.x, 100);
-    assert_eq!(canvas.members["right"].rect.y, 20);
-    assert_eq!(canvas.members["right"].rect.width, 150);
-    assert_eq!(canvas.members["right"].rect.height, 150);
 
     let updated = store
         .update_canvas(
@@ -629,34 +588,6 @@ fn canvas_member_config_is_canonical_and_persistent() {
         .unwrap();
     assert_eq!(independent.canvas.members["display"].rect.width, 2000);
     assert_eq!(independent.canvas.members["display"].rect.height, 1200);
-
-    assert_eq!(
-        store
-            .reconcile_canvas_member_runtime_size(
-                "display",
-                CanvasSize {
-                    width: 1600,
-                    height: 900,
-                },
-            )
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        store
-            .reconcile_canvas_member_runtime_size(
-                "display",
-                CanvasSize {
-                    width: 2400,
-                    height: 1300,
-                },
-            )
-            .unwrap(),
-        Some(created.canvas_id.clone())
-    );
-    let canvas = store.canvas(&created.canvas_id).unwrap();
-    assert_eq!(canvas.members["display"].rect.width, 2400);
-    assert_eq!(canvas.members["display"].rect.height, 1300);
 
     let reset = store
         .configure_canvas_member(

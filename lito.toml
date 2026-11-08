@@ -4,12 +4,14 @@ members = [
   "bridge",
   "plugins/common",
   "plugins/org.waywallen.image",
+  "plugins/org.waywallen.image/definition",
   "plugins/org.waywallen.gltf",
   "plugins/org.waywallen.sketchfab",
   "plugins/org.waywallen.video",
   "plugins/org.waywallen.wallhaven",
   "tools/i18n",
   "tools/i18n/po",
+  "tools/probe",
   "ui",
   "ui/backend",
 ]
@@ -20,6 +22,7 @@ default-members = [
   "plugins/org.waywallen.video",
   "plugins/org.waywallen.wallhaven",
   "tools/i18n",
+  "tools/probe",
   "ui",
 ]
 
@@ -27,6 +30,7 @@ default-members = [
 version = "0.5.0"
 
 [workspace.dependencies]
+waywallen-image-definition = { path = "plugins/org.waywallen.image/definition" }
 waywallen-bridge = { path = "bridge" }
 waywallen-plugin-common = { path = "plugins/common" }
 waywallen-backend-connection = { path = "ui/backend" }
@@ -45,6 +49,7 @@ qextra = { git = "https://github.com/hypengw/QExtra.git" }
 vecgltf = { git = "https://github.com/vecren/vecgltf.git" }
 
 [workspace.external-dependencies.pkg-config]
+libxml2 = { module = "libxml-2.0", version = ">= 2.13" }
 gbm = { module = "gbm" }
 libavformat = { module = "libavformat", version = ">= 58" }
 libavcodec = { module = "libavcodec", version = ">= 58" }

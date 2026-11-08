@@ -10,7 +10,6 @@ use std::time::{Duration, Instant};
 use crate::catalog::entry::{WallpaperEntry, WallpaperType};
 use crate::error::{Error, Result};
 use crate::model::repo;
-use crate::probe::media::{AvFormatProbe, MediaProbe};
 
 mod filesystem;
 mod manager;
@@ -29,6 +28,8 @@ mod discover_tests;
 mod gltf_tests;
 #[cfg(test)]
 mod image_tests;
+#[cfg(test)]
+mod library_tests;
 #[cfg(test)]
 mod prepare_tests;
 #[cfg(test)]

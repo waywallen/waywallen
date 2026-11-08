@@ -55,11 +55,10 @@ async fn reload_source_entries(
     let mut suspended = SourcePluginSuspendGuard::new(app.source_manager.clone());
     suspended.suspend().await;
     let installed_plugin_id = installed_plugin_id.to_string();
-    let probe = app.probe.clone();
     let db = app.db.clone();
     let settings = app.settings.clone();
     let load_result = tokio::task::spawn_blocking(move || {
-        let source_manager = crate::plugin::source::SourceManager::with_probe(probe)?;
+        let source_manager = crate::plugin::source::SourceManager::new()?;
         source_manager.attach_db(db);
         source_manager.attach_settings(settings);
 
@@ -99,6 +98,8 @@ async fn reload_source_entries(
         .collect::<std::collections::HashSet<_>>();
     replacement.retain_plugins_from(&app.source_manager, &failed_plugin_ids)?;
     app.source_manager.replace_plugins(replacement)?;
+    app.probe
+        .replace_programs(app.source_manager.probe_programs());
     suspended.commit();
 
     let infos = app.source_manager.plugins()?;

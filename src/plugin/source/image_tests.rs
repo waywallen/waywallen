@@ -1,27 +1,20 @@
 use super::*;
-use crate::probe::media::MediaMeta;
+use crate::probe::media::ProbeService;
 use std::os::unix::fs::{symlink, PermissionsExt};
-use std::sync::atomic::AtomicUsize;
-
-#[derive(Default)]
-struct ImageProbe(AtomicUsize);
-
-impl MediaProbe for ImageProbe {
-    fn probe_media(&self, _: &str) -> MediaMeta {
-        self.0.fetch_add(1, Ordering::Relaxed);
-        MediaMeta {
-            width: Some(1920),
-            height: Some(1080),
-        }
-    }
-}
 
 fn file(path: &Path, content: impl AsRef<[u8]>) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(path, content).unwrap();
 }
 
-fn manager(env: serde_json::Value) -> (tempfile::TempDir, SourceManager, Arc<ImageProbe>) {
+fn manager(env: serde_json::Value) -> (tempfile::TempDir, SourceManager) {
+    manager_with_db(env, None)
+}
+
+fn manager_with_db(
+    env: serde_json::Value,
+    db: Option<DatabaseConnection>,
+) -> (tempfile::TempDir, SourceManager) {
     let dir = tempfile::tempdir().unwrap();
     for (path, content) in [
         (
@@ -52,6 +45,12 @@ local scan, detect = M.source.scan, M.source.auto_detect
 local function configure(ctx)
     local values = ctx.json.parse([==[{env}]==])
     ctx.env = function(key) return values[key] end
+    local library_settings = ctx.library_settings
+    ctx.library_settings = function(path)
+        local result = library_settings(path)
+        result.scan_mode = values.SCAN_MODE or result.scan_mode
+        return result
+    end
 end
 M.source.scan = function(ctx) configure(ctx); return scan(ctx) end
 M.source.auto_detect = function(ctx) configure(ctx); return detect(ctx) end
@@ -59,8 +58,10 @@ return M
 "#
         ),
     );
-    let probe = Arc::new(ImageProbe::default());
-    let manager = SourceManager::with_probe(probe.clone()).unwrap();
+    let manager = SourceManager::new().unwrap();
+    if let Some(db) = db {
+        manager.attach_db(db);
+    }
     manager
         .load_plugin(
             &dir.path().join("main.lua"),
@@ -69,7 +70,7 @@ return M
             ENTRY_VERSION,
         )
         .unwrap();
-    (dir, manager, probe)
+    (dir, manager)
 }
 
 async fn scan(manager: &SourceManager, roots: &[PathBuf]) -> Vec<WallpaperEntry> {
@@ -87,71 +88,202 @@ async fn scan(manager: &SourceManager, roots: &[PathBuf]) -> Vec<WallpaperEntry>
 }
 
 #[tokio::test]
-async fn image_system_auto_detect_honors_xdg_and_preserves_pictures() {
+async fn image_system_auto_detect_keeps_modes_and_ignores_data_home() {
     let root = tempfile::tempdir().unwrap();
-    let data = root.path().join("data");
-    let alias = root.path().join("alias");
-    for dir in ["data/backgrounds", "data/wallpapers", "Pictures/Wallpapers"] {
-        std::fs::create_dir_all(root.path().join(dir)).unwrap();
+    for path in [
+        "data/wallpapers",
+        "data/gnome-background-properties",
+        "data/backgrounds",
+        "Pictures/Wallpapers",
+        "home-data/wallpapers",
+    ] {
+        std::fs::create_dir_all(root.path().join(path)).unwrap();
     }
-    symlink(&data, &alias).unwrap();
-    let (_plugin, manager, _) = manager(serde_json::json!({
-        "HOME": root.path(),
-        "XDG_DATA_DIRS": format!("relative:{}:{}:{}", data.display(), alias.display(), data.display()),
+    let (_plugin, manager) = manager(serde_json::json!({
+        "HOME": root.path(), "XDG_DATA_DIRS": root.path().join("data"), "XDG_DATA_HOME":root.path().join("home-data")
     }));
-    let detected = manager.auto_detect_all().await.unwrap();
-    let paths = &detected["image"];
-    assert_eq!(
-        paths,
-        &[
-            root.path().join("Pictures/Wallpapers").to_str().unwrap(),
-            data.join("backgrounds").to_str().unwrap(),
-            data.join("wallpapers").to_str().unwrap(),
-        ]
-    );
-    assert_eq!(manager.auto_detect_all().await.unwrap()["image"], *paths);
+    let libraries = manager
+        .auto_detect_all()
+        .await
+        .unwrap()
+        .remove("image")
+        .unwrap();
+    assert_eq!(libraries.len(), 3);
+    assert_eq!(libraries[0].settings["scan_mode"], "wallpapers");
+    assert_eq!(libraries[1].settings["scan_mode"], "wallpapers");
+    assert_eq!(libraries[2].settings["scan_mode"], "files");
+    assert!(libraries
+        .iter()
+        .all(|library| !library.path.contains("home-data")));
 }
 
 #[tokio::test]
-async fn image_system_requires_light_images_and_protects_package_removal() {
+async fn image_system_descriptors_are_one_entry_each() {
     let root = tempfile::tempdir().unwrap();
-    let wallpapers = root.path().join("wallpapers");
-    let image = wallpapers.join("Night/contents/images_dark/1920x1080.png");
-    file(&image, b"image");
     file(
-        &wallpapers.join("Night/metadata.json"),
-        r#"{"KPlugin":{"Name":"Night"}}"#,
+        &root.path().join("KDE/metadata.json"),
+        r#"{"KPlugin":{"Name":"Pair"}}"#,
     );
-    let (_plugin, manager, _) = manager(serde_json::json!({
-        "XDG_DATA_DIRS": root.path().join("missing"),
-    }));
-    assert!(scan(&manager, &[wallpapers.clone()]).await.is_empty());
-    let light = wallpapers.join("Night/contents/images/1920x1080.png");
-    file(&light, b"image");
-    let entries = scan(&manager, &[wallpapers]).await;
-    assert_eq!(entries.len(), 1);
+    file(
+        &root.path().join("KDE/contents/images/1920x1080.png"),
+        "image",
+    );
+    file(
+        &root.path().join("KDE/contents/images/3840x2160.png"),
+        "image",
+    );
+    file(
+        &root.path().join("KDE/contents/images_dark/1920x1080.png"),
+        "image",
+    );
+    file(
+        &root.path().join("gnome/pair.xml"),
+        r#"<wallpapers><wallpaper><name>Pair</name><filename>day.png</filename><filename-dark>night.png</filename-dark></wallpaper><wallpaper><filename>other.png</filename></wallpaper></wallpapers>"#,
+    );
+    file(
+        &root.path().join("gnome/timed.xml"),
+        r#"<background><static><duration>10</duration><file>day.png</file></static><transition><duration>10</duration><from>day.png</from><to>night.png</to></transition></background>"#,
+    );
+    file(&root.path().join("gnome/day.png"), "image");
+    let (_plugin, manager) = manager(serde_json::json!({"SCAN_MODE":"wallpapers"}));
+    let entries = scan(&manager, &[root.path().to_owned()]).await;
+    assert_eq!(entries.len(), 3);
+    assert!(entries.iter().all(|entry| entry.sub_type == "timeline"
+        && entry.preview.is_none()
+        && entry.can_remove == Some(false)));
     assert_eq!(
-        entries[0].resource,
-        root.path()
-            .join("wallpapers/Night/contents")
-            .to_str()
-            .unwrap()
+        entries
+            .iter()
+            .filter(|entry| entry.resource.ends_with(".xml"))
+            .count(),
+        2
     );
-    assert_eq!(entries[0].preview.as_deref(), light.to_str());
-    assert_eq!(entries[0].name, "Night");
-    assert_eq!(entries[0].can_remove, Some(false));
-    assert!(!manager.supports_entry_remove(&entries[0]));
-    assert!(manager
-        .remove_item("image", &entries[0], &[])
+    let kde = entries
+        .iter()
+        .find(|entry| entry.resource.ends_with("metadata.json"))
+        .unwrap();
+    assert_eq!((kde.width, kde.height), (None, None));
+    let apply = manager.call_apply("image", kde).await.unwrap();
+    assert_eq!(apply.extras.len(), 1);
+    assert_eq!(apply.extras["path"], kde.resource);
+}
+
+#[tokio::test]
+async fn image_system_files_mode_does_not_infer_packages() {
+    let root = tempfile::tempdir().unwrap();
+    file(&root.path().join("metadata.json"), r#"{"KPlugin":{}}"#);
+    file(&root.path().join("contents/images/1920x1080.png"), "image");
+    file(&root.path().join("ignored.jxl"), "image");
+    file(&root.path().join("ignored.xml"), "<wallpapers/>");
+    let (_plugin, manager) = manager(serde_json::json!({}));
+    let entries = scan(&manager, &[root.path().to_owned()]).await;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].sub_type, "");
+    assert!(entries[0].resource.ends_with(".png"));
+    assert!(entries[0].preview.is_none());
+}
+
+#[tokio::test]
+async fn image_system_timeline_metadata_is_deferred_to_native_probe() {
+    let root = tempfile::tempdir().unwrap();
+    file(
+        &root.path().join("metadata.json"),
+        r#"{"KPlugin":{"Name":"Size"}}"#,
+    );
+    file(&root.path().join("contents/images/1920x1080.png"), "image");
+    let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
+    let (_plugin, manager) = manager_with_db(
+        serde_json::json!({"SCAN_MODE":"wallpapers"}),
+        Some(db.clone()),
+    );
+    let path = root.path().to_str().unwrap().to_owned();
+    let entries = scan(&manager, &[root.path().to_owned()]).await;
+    assert_eq!(entries.len(), 1);
+    assert!(entries[0].size.is_none() && entries[0].width.is_none() && entries[0].height.is_none());
+    crate::model::sync::sync_plugin_entries(
+        &db,
+        crate::model::sync::PluginRef {
+            name: "image",
+            version: "1",
+        },
+        &entries,
+        &[path],
+    )
+    .await
+    .unwrap();
+    crate::probe::task::run_pending(&db, Arc::new(ProbeService::with_tool(None)))
         .await
+        .unwrap();
+    let stored = repo::load_entries(&db).await.unwrap();
+    assert!(stored[0].size.is_none() && stored[0].width.is_none() && stored[0].height.is_none());
+    assert_eq!(stored[0].resource, entries[0].resource);
+}
+
+#[tokio::test]
+async fn image_system_reads_saved_library_settings_on_each_scan() {
+    let root = tempfile::tempdir().unwrap();
+    file(
+        &root.path().join("metadata.json"),
+        r#"{"KPlugin":{"Name":"Test"}}"#,
+    );
+    file(&root.path().join("contents/images/1920x1080.png"), "image");
+    let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
+    let (_plugin, manager) = manager_with_db(serde_json::json!({}), Some(db.clone()));
+    let plugin = repo::upsert_plugin(&db, "image", "1").await.unwrap();
+    let settings = HashMap::from([("scan_mode".into(), "wallpapers".into())]);
+    let path = root.path().to_str().unwrap().to_owned();
+    let library = repo::add_configured_library(&db, plugin.id, &path, None, &settings)
+        .await
+        .unwrap();
+    let entries = scan(&manager, &[root.path().to_owned()]).await;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].sub_type, "timeline");
+    crate::model::sync::sync_plugin_entries(
+        &db,
+        crate::model::sync::PluginRef {
+            name: "image",
+            version: "1",
+        },
+        &entries,
+        std::slice::from_ref(&path),
+    )
+    .await
+    .unwrap();
+    let stored = repo::load_entries(&db).await.unwrap();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].sub_type, "timeline");
+    assert_eq!(stored[0].resource, entries[0].resource);
+    assert!(stored[0].preview.is_none());
+    repo::set_library_settings(
+        &db,
+        library.id,
+        &HashMap::from([("scan_mode".into(), "files".into())]),
+    )
+    .await
+    .unwrap();
+    manager.scan_source("image", &[path]).await.unwrap();
+    let entries = manager.list();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].sub_type, "");
+    assert!(entries[0].resource.ends_with(".png"));
+}
+
+#[test]
+fn image_system_library_settings_validate_independently() {
+    let (_plugin, manager) = manager(serde_json::json!({}));
+    assert_eq!(
+        manager.library_settings("image", HashMap::new()).unwrap()["scan_mode"],
+        "files"
+    );
+    assert!(manager
+        .library_settings(
+            "image",
+            HashMap::from([("scan_mode".into(), "unknown".into())])
+        )
         .is_err());
-    assert!(image.exists());
     assert!(manager
-        .call_properties("image", &entries[0])
-        .await
-        .unwrap()
-        .unwrap()
-        .contains("waywallen.scheme_color"));
+        .library_settings("image", HashMap::from([("unknown".into(), "files".into())]))
+        .is_err());
 }
 
 #[test]
@@ -191,207 +323,6 @@ fn image_system_data_dirs_defaults_and_rejects_relative_paths() {
 }
 
 #[tokio::test]
-async fn image_system_package_library_keeps_one_persistable_item() {
-    let root = tempfile::tempdir().unwrap();
-    file(&root.path().join("contents/images/1920x1080.png"), b"image");
-    file(&root.path().join("contents/images/3840x2160.png"), b"image");
-    file(
-        &root.path().join("contents/images_dark/1920x1080.png"),
-        b"image",
-    );
-    let (_plugin, manager, _) = manager(serde_json::json!({}));
-    let entries = scan(&manager, &[root.path().to_path_buf()]).await;
-    assert_eq!(entries.len(), 1);
-    assert_eq!(
-        entries[0].resource,
-        root.path().join("contents").to_str().unwrap()
-    );
-    let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
-    let (summary, _) = crate::model::sync::sync_plugin_entries(
-        &db,
-        crate::model::sync::PluginRef {
-            name: "image",
-            version: "0.5.0",
-        },
-        &entries,
-        &[root.path().to_str().unwrap().into()],
-    )
-    .await
-    .unwrap();
-    assert_eq!(summary.dropped, 0);
-    let loaded = crate::model::repo::load_entries(&db).await.unwrap();
-    assert_eq!(loaded.len(), 1);
-    assert_eq!(loaded[0].preview, entries[0].preview);
-    assert_eq!((loaded[0].width, loaded[0].height), (Some(1920), Some(1080)));
-    assert_eq!(loaded[0].can_remove, Some(false));
-}
-
-#[tokio::test]
-async fn image_system_preview_prefers_smallest_closest_widescreen_image() {
-    let root = tempfile::tempdir().unwrap();
-    for name in [
-        "100x100.png",
-        "1920x1080.png",
-        "3840x2160.png",
-        "2560x1600.png",
-        "light.png",
-        "0x100.png",
-        "999999999999x1.png",
-    ] {
-        file(&root.path().join("contents/images").join(name), b"image");
-    }
-    file(
-        &root.path().join("contents/images_dark/320x180.png"),
-        b"image",
-    );
-    let (_plugin, manager, probe) = manager(serde_json::json!({}));
-    let entries = scan(&manager, &[root.path().to_path_buf()]).await;
-    assert_eq!(entries.len(), 1);
-    assert_eq!(
-        entries[0].preview.as_deref(),
-        root.path().join("contents/images/1920x1080.png").to_str()
-    );
-    assert_eq!(
-        (entries[0].width, entries[0].height),
-        (Some(1920), Some(1080))
-    );
-    assert_eq!(probe.0.load(Ordering::Relaxed), 0);
-    std::fs::remove_file(root.path().join("contents/images/1920x1080.png")).unwrap();
-    std::fs::remove_file(root.path().join("contents/images/3840x2160.png")).unwrap();
-    let entries = scan(&manager, &[root.path().to_path_buf()]).await;
-    assert_eq!(
-        (entries[0].width, entries[0].height),
-        (Some(2560), Some(1600))
-    );
-}
-
-#[tokio::test]
-async fn image_system_scans_kde_and_gnome_and_deduplicates_fedora_links() {
-    let root = tempfile::tempdir().unwrap();
-    let backgrounds = root.path().join("backgrounds");
-    let wallpapers = root.path().join("wallpapers");
-    for path in [
-        "backgrounds/gnome/light.png",
-        "backgrounds/gnome/dark.jpg",
-        "backgrounds/gnome/thumbnail.png",
-        "backgrounds/f43/default/day.png",
-        "backgrounds/f43/default/night.png",
-        "backgrounds/unsupported.jxl",
-        "backgrounds/unsupported.svg",
-    ] {
-        file(&root.path().join(path), b"image");
-    }
-    file(
-        &root.path().join("gnome-background-properties/gnome.xml"),
-        r#"<!DOCTYPE wallpapers SYSTEM "gnome-wp-list.dtd">
-<wallpapers><wallpaper deleted="false"><name>GNOME</name><name xml:lang="zh_CN">桌面</name>
-<filename>../backgrounds/gnome/light.png</filename><filename-dark>../backgrounds/gnome/dark.jpg</filename-dark>
-<thumbnail>../backgrounds/gnome/thumbnail.png</thumbnail></wallpaper>
-<wallpaper><name>Fedora</name><filename>../backgrounds/f43/default/background.xml</filename></wallpaper></wallpapers>"#,
-    );
-    file(&backgrounds.join("f43/default/background.xml"), "<background><static><file>day.png</file></static><static><file><size width=\"100\" height=\"100\">night.png</size></file></static><transition><from>day.png</from><to>night.png</to></transition></background>");
-    file(
-        &root.path().join("gnome-background-properties/bad.xml"),
-        "<broken",
-    );
-    file(
-        &wallpapers.join("Mountain/metadata.json"),
-        r#"{"KPlugin":{"Name":"Mountain","Name[zh_CN]":"山峰","Id":"Next"}}"#,
-    );
-    for path in [
-        "Mountain/contents/images/100x100.png",
-        "Mountain/contents/images/200x100.png",
-        "Mountain/contents/images_dark/100x100.png",
-        "Mountain/contents/screenshot.png",
-    ] {
-        file(&wallpapers.join(path), b"image");
-    }
-    file(&wallpapers.join("Broken/metadata.json"), "not json");
-    file(
-        &wallpapers.join("Broken/contents/images/320x200.png"),
-        b"image",
-    );
-    file(&wallpapers.join("album/nested/photo.png"), b"image");
-    file(
-        &wallpapers.join("F43/metadata.json"),
-        r#"{"KPlugin":{"Name":"Fedora","Id":"Next"}}"#,
-    );
-    for (variant, target) in [("images", "day.png"), ("images_dark", "night.png")] {
-        let dir = wallpapers.join("F43/contents").join(variant);
-        std::fs::create_dir_all(&dir).unwrap();
-        for resolution in ["1024x768.png", "3840x2160.png"] {
-            symlink(
-                backgrounds.join("f43/default").join(target),
-                dir.join(resolution),
-            )
-            .unwrap();
-        }
-        symlink("/missing", dir.join("broken.png")).unwrap();
-    }
-    symlink(&backgrounds, backgrounds.join("cycle")).unwrap();
-    let (_plugin, manager, probe) =
-        manager(serde_json::json!({"XDG_DATA_DIRS": root.path(), "LANG": "zh_CN.UTF-8"}));
-    let entries = scan(&manager, &[wallpapers.clone(), backgrounds.clone()]).await;
-    assert_eq!(entries.len(), 8, "{entries:#?}");
-    assert_eq!(probe.0.load(Ordering::Relaxed), 5);
-    assert!(entries
-        .iter()
-        .all(|e| e.width.is_some() && e.height.is_some() && e.size.is_some()));
-    assert!(entries
-        .iter()
-        .all(|e| e.can_remove == Some(e.preview.is_none())));
-    assert!(entries.iter().any(|e| e.name == "桌面 · Dark · 1920×1080"));
-    assert!(entries
-        .iter()
-        .any(|e| e.name == "山峰" && e.preview.is_some()));
-    let package = entries.iter().find(|e| e.name == "山峰").unwrap();
-    assert_eq!((package.width, package.height), (Some(200), Some(100)));
-    let schema = manager
-        .call_properties("image", package)
-        .await
-        .unwrap()
-        .unwrap();
-    let schema: serde_json::Value = serde_json::from_str(&schema).unwrap();
-    assert_eq!(schema["waywallen.image_variant"]["type"], "combo");
-    assert_eq!(schema["waywallen.image_variant"]["value"], "day-night");
-    assert!(entries.iter().any(|e| e.name == "Broken"));
-    assert!(!entries.iter().any(|e| e.resource.contains("screenshot")
-        || e.resource.contains("thumbnail")
-        || e.resource.contains("/F43/contents/images")));
-    let resources: Vec<_> = entries.iter().map(|e| &e.resource).collect();
-    let repeated = scan(&manager, &[backgrounds, wallpapers]).await;
-    assert_eq!(
-        resources,
-        repeated.iter().map(|e| &e.resource).collect::<Vec<_>>()
-    );
-    let db = crate::model::connect_url("sqlite::memory:").await.unwrap();
-    let mut identities = None;
-    for snapshot in [&entries, &repeated] {
-        crate::model::sync::sync_plugin_entries(
-            &db,
-            crate::model::sync::PluginRef {
-                name: "image",
-                version: "0.5.0",
-            },
-            snapshot,
-            &[],
-        )
-        .await
-        .unwrap();
-        let loaded = crate::model::repo::load_entries(&db).await.unwrap();
-        assert_eq!(loaded.len(), 8);
-        assert!(loaded.iter().all(
-            |entry| entry.can_remove == Some(entry.preview.is_none()) && entry.width.is_some()
-        ));
-        let ids: Vec<_> = loaded
-            .into_iter()
-            .map(|entry| (entry.item_id, entry.resource))
-            .collect();
-        assert_eq!(identities.get_or_insert_with(|| ids.clone()), &ids);
-    }
-}
-
-#[tokio::test]
 async fn image_system_preserves_user_depth_and_refreshes_removal_permissions() {
     assert_ne!(
         unsafe { libc::geteuid() },
@@ -409,10 +340,9 @@ async fn image_system_preserves_user_depth_and_refreshes_removal_permissions() {
     ] {
         file(&library.join(relative), b"image");
     }
-    let (_plugin, manager, probe) = manager(serde_json::json!({}));
+    let (_plugin, manager) = manager(serde_json::json!({}));
     let entries = scan(&manager, &[library.clone()]).await;
     assert_eq!(entries.len(), 3);
-    assert_eq!(probe.0.load(Ordering::Relaxed), 0);
     let mut entry = entries
         .iter()
         .find(|entry| entry.resource == path.to_str().unwrap())
@@ -460,7 +390,7 @@ async fn image_system_removes_symlink_not_canonical_target() {
     std::fs::create_dir(&library).unwrap();
     let link = library.join("link.png");
     symlink(&target, &link).unwrap();
-    let (_plugin, manager, _) = manager(serde_json::json!({}));
+    let (_plugin, manager) = manager(serde_json::json!({}));
     let entries = scan(&manager, &[library]).await;
     manager
         .remove_item("image", &entries[0], &[])

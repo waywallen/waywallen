@@ -12,6 +12,7 @@ pub mod model;
 pub mod playback;
 pub mod plugin;
 pub mod probe;
+mod process_stdio;
 mod remote_asset;
 pub mod settings;
 pub mod system;

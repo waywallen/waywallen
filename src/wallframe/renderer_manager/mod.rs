@@ -180,7 +180,7 @@ const STDERR_REASON_BYTES: usize = 512;
 
 fn append_stderr_reason(
     mut reason: String,
-    snapshot: crate::wallframe::process_stdio::StderrSnapshot,
+    snapshot: crate::process_stdio::StderrSnapshot,
 ) -> String {
     let Some(line) = snapshot.last_line_limited(STDERR_REASON_BYTES) else {
         return reason;
@@ -192,7 +192,7 @@ fn append_stderr_reason(
 
 async fn renderer_failure_reason(
     reason: String,
-    stderr: Option<&crate::wallframe::process_stdio::ChildStderrCapture>,
+    stderr: Option<&crate::process_stdio::ChildStderrCapture>,
 ) -> String {
     match stderr {
         Some(stderr) => append_stderr_reason(reason, stderr.drain(STDERR_DRAIN_TIMEOUT).await),
@@ -539,7 +539,7 @@ pub struct RendererHandle {
 
     /// The child process. Kept alive so dropping the manager reaps it.
     child: Arc<TokioMutex<Option<Child>>>,
-    stderr: Option<crate::wallframe::process_stdio::ChildStderrCapture>,
+    stderr: Option<crate::process_stdio::ChildStderrCapture>,
 
     /// Renderer-published state. Clear color and runtime tags are committed
     /// together so readers never observe a partially applied ReportState.
@@ -1074,7 +1074,7 @@ impl RendererManager {
             .with_context(|| format!("spawn {}", renderer_def.bin.display()))?;
         let child_pid = child.id();
         let stderr = child.stderr.take().map(|stderr| {
-            crate::wallframe::process_stdio::ChildStderrCapture::spawn(
+            crate::process_stdio::ChildStderrCapture::spawn(
                 stderr,
                 renderer_process_label(&renderer_def.name, child_pid, &id),
             )

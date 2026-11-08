@@ -197,40 +197,32 @@ MD.Page {
         }
     }
 
-    // Size to content (like the Plugins / Settings pages) and inset via
-    // the list's own Flickable margins rather than outer padding.
-    contentItem: MD.VerticalListView {
+    contentItem: MD.VerticalLazyList {
         id: settingsList
         expand: true
         clip: true
-        topMargin: 4
-        bottomMargin: 24
-        leftMargin: 16
-        rightMargin: 16
-        model: root.flatSchemas
+        extraTopMargin: 4
+        extraBottomMargin: 24
+        extraLeftMargin: 16
+        extraRightMargin: 16
+        source: MD.ListSnapshotSource {
+            id: settingsSource
+            items: root.flatSchemas
+        }
         spacing: 2
 
         // Shown only when an Apply fails. 3 = QAsyncResult::Status::Error.
-        header: MD.Text {
-            width: settingsList.contentWidth
-            visible: setQuery.status === 3
-            height: visible ? implicitHeight + 8 : 0
-            text: setQuery.error
-            color: MD.Token.color.error
-            typescale: MD.Token.typescale.body_small
-            wrapMode: Text.WordWrap
-        }
-
-        section.property: "group"
-        section.delegate: MD.Text {
-            required property string section
-            width: settingsList.contentWidth
-            text: section
-            typescale: MD.Token.typescale.title_small
-            color: MD.Token.color.on_surface_variant
-            topPadding: 16
-            bottomPadding: 6
-            leftPadding: 4
+        header: Item {
+            implicitHeight: errorText.visible ? errorText.implicitHeight + 8 : 0
+            MD.Text {
+                id: errorText
+                width: parent.width
+                visible: setQuery.status === 3
+                text: setQuery.error
+                color: MD.Token.color.error
+                typescale: MD.Token.typescale.body_small
+                wrapMode: Text.WordWrap
+            }
         }
 
         footer: ColumnLayout {
@@ -300,38 +292,59 @@ MD.Page {
             }
         }
 
-        delegate: Rectangle {
-            id: itemRect
-            required property var modelData
-            width: settingsList.contentWidth
-            implicitHeight: fieldCol.implicitHeight + 16
-            color: MD.Token.color.surface_container
+        delegate: Column {
+            id: settingRow
+            required property MD.LazyRow row
+            readonly property var modelData: row.value
+            readonly property bool startsSection: {
+                void (row.revision);
+                return row.index === 0 || settingsSource.valueAt(row.index - 1)?.group !== modelData.group;
+            }
 
-            readonly property real radiusBig: 16
-            readonly property bool roundTop: modelData.position === "single" || modelData.position === "first"
-            readonly property bool roundBottom: modelData.position === "single" || modelData.position === "last"
+            MD.Text {
+                visible: settingRow.startsSection
+                width: parent.width
+                text: settingRow.modelData.group
+                typescale: MD.Token.typescale.title_small
+                color: MD.Token.color.on_surface_variant
+                topPadding: 16
+                bottomPadding: 6
+                leftPadding: 4
+            }
 
-            topLeftRadius: roundTop ? radiusBig : 0
-            topRightRadius: roundTop ? radiusBig : 0
-            bottomLeftRadius: roundBottom ? radiusBig : 0
-            bottomRightRadius: roundBottom ? radiusBig : 0
+            Rectangle {
+                id: itemRect
+                readonly property var modelData: settingRow.modelData
+                width: parent.width
+                implicitHeight: fieldCol.implicitHeight + 16
+                color: MD.Token.color.surface_container
 
-            ColumnLayout {
-                id: fieldCol
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.leftMargin: 16
-                anchors.rightMargin: 16
+                readonly property real radiusBig: 16
+                readonly property bool roundTop: modelData.position === "single" || modelData.position === "first"
+                readonly property bool roundBottom: modelData.position === "single" || modelData.position === "last"
 
-                W.SettingField {
-                    Layout.fillWidth: true
-                    schema: itemRect.modelData.schema
-                    value: root.valueFor(itemRect.modelData.schema.key)
-                    onCommitted: function (key, newValue) {
-                        const next = Object.assign({}, root.pendingValues);
-                        next[key] = newValue;
-                        root.pendingValues = next;
+                topLeftRadius: roundTop ? radiusBig : 0
+                topRightRadius: roundTop ? radiusBig : 0
+                bottomLeftRadius: roundBottom ? radiusBig : 0
+                bottomRightRadius: roundBottom ? radiusBig : 0
+
+                ColumnLayout {
+                    id: fieldCol
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 16
+
+                    W.SettingField {
+                        Layout.fillWidth: true
+                        schema: itemRect.modelData.schema
+                        value: root.valueFor(itemRect.modelData.schema.key)
+                        onCommitted: function (key, newValue) {
+                            const next = Object.assign({}, root.pendingValues);
+                            next[key] = newValue;
+                            root.pendingValues = next;
+                        }
                     }
                 }
             }

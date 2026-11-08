@@ -107,6 +107,7 @@ message Request {
     DisplayPauseSetRequest      display_pause_set = 90;
     WallpaperHideRequest        wallpaper_hide = 91;
     LibraryRenameRequest        library_rename = 92;
+    LibraryEditRequest          library_edit = 93;
   }
 }
 
@@ -201,6 +202,7 @@ message Response {
     DisplayPauseSetResponse      display_pause_set = 90;
     WallpaperHideResponse        wallpaper_hide = 91;
     Empty                        library_rename = 92;
+    Empty                        library_edit = 93;
   }
 }
 
@@ -491,6 +493,7 @@ message SettingSchema {
   PluginMessage label = 13;
   PluginMessage description = 14;
   PluginMessage group_label = 15;
+  repeated PluginMessage choice_labels = 16;
 }
 
 enum SettingValueType {
@@ -505,6 +508,11 @@ enum SettingValueType {
 // ---------------------------------------------------------------------------
 // Wallpapers / sources
 // ---------------------------------------------------------------------------
+
+enum WallpaperSubType {
+  WALLPAPER_SUB_TYPE_NONE = 0;
+  WALLPAPER_SUB_TYPE_TIMELINE = 1;
+}
 
 message WallpaperEntry {
   string id = 1;
@@ -555,6 +563,7 @@ message WallpaperEntry {
   // WallpaperListRequest hidden_filter includes it.
   bool hidden = 21;
   bool update_available = 22;
+  WallpaperSubType sub_type = 23;
 }
 
 message WallpaperLibraryVisibility {
@@ -713,6 +722,7 @@ message SourcePluginInfo {
   repeated SettingSchema settings = 7;
   PluginMessage library_label_text = 8;
   PluginMessage library_hint_text = 9;
+  repeated SettingSchema library_settings = 10;
 }
 
 message WallpaperApplyRequest {
@@ -946,6 +956,7 @@ message CanvasMemberInfo {
   // Absent while the member is offline.
   CanvasSize minimum_scale_to = 4;
   bool aspect_locked = 5;
+  CanvasRect effective_rect = 6;
 }
 
 message CanvasInfo {
@@ -1437,6 +1448,7 @@ message DisplayLayoutSetResponse {
 // ---------------------------------------------------------------------------
 
 message LibraryInstance {
+  map<string, string> settings = 5;
   int64 id = 1;
   string path = 2;
   string plugin_name = 3;
@@ -1449,9 +1461,16 @@ message LibraryListResponse {
 }
 
 message LibraryAddRequest {
+  map<string, string> settings = 4;
   string path = 1;
   string plugin_name = 2;
   optional string name = 3;
+}
+
+message LibraryEditRequest {
+  int64 id = 1;
+  map<string, string> settings = 2;
+  string name = 3;
 }
 
 message LibraryRenameRequest {

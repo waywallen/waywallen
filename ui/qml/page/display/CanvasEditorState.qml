@@ -14,10 +14,13 @@ QtObject {
 
     function rowForMember(member) {
         const rect = member.rect || member || ({});
+        const authored = member.authoredRect || rect;
         const key = String(member.settingsKey || "");
         const matches = (displays || []).filter(display => display.settingsKey === key);
         const width = Math.max(1, Number(rect.width || (matches[0]?.width ?? 1920)));
         const height = Math.max(1, Number(rect.height || (matches[0]?.height ?? 1080)));
+        const authoredWidth = Math.max(1, Number(authored.width || width));
+        const authoredHeight = Math.max(1, Number(authored.height || height));
         return {
             settingsKey: key,
             label: matches.length > 0 ? (matches[0].displayLabel || key) : key,
@@ -25,6 +28,10 @@ QtObject {
             y: Number(rect.y || 0),
             width: width,
             height: height,
+            authoredWidth: authoredWidth,
+            authoredHeight: authoredHeight,
+            requestedWidth: authoredWidth,
+            requestedHeight: authoredHeight,
             minimumScaleTo: member.minimumScaleTo || ({}),
             onlineCount: Number(member.onlineCount ?? matches.length),
             aspectLocked: member.aspectLocked ?? true
@@ -39,18 +46,25 @@ QtObject {
         return (canvas.members || []).map(member => rowForMember(member));
     }
 
-    function serializedState(stateName, stateMembers) {
-        const persistedMembers = stateMembers.map(member => ({
+    function memberInputs(stateMembers) {
+        return stateMembers.map(member => ({
                     settingsKey: String(member.settingsKey || ""),
                     x: Number(member.x || 0),
                     y: Number(member.y || 0),
-                    width: Math.max(1, Number(member.width || 1)),
-                    height: Math.max(1, Number(member.height || 1)),
+                    width: Math.max(1, Number(member.requestedWidth ?? member.width ?? 1)),
+                    height: Math.max(1, Number(member.requestedHeight ?? member.height ?? 1)),
                     aspectLocked: member.aspectLocked ?? true
                 }));
+    }
+
+    function draftMembers() {
+        return memberInputs(members);
+    }
+
+    function serializedState(stateName, stateMembers) {
         return JSON.stringify({
             name: stateName,
-            members: persistedMembers
+            members: memberInputs(stateMembers)
         });
     }
 
@@ -68,8 +82,8 @@ QtObject {
         const height = Number(minimum.height || 0);
         if (width <= 0 || height <= 0) {
             return {
-                width: Math.max(1, Number(member.width || 1)),
-                height: Math.max(1, Number(member.height || 1))
+                width: Math.max(1, Number(member.authoredWidth ?? member.width ?? 1)),
+                height: Math.max(1, Number(member.authoredHeight ?? member.height ?? 1))
             };
         }
         return {
@@ -89,7 +103,7 @@ QtObject {
         }
         return {
             width: width,
-            height: Math.max(minimum.height, Math.round(Number(member.height || 1)))
+            height: Math.max(minimum.height, Math.round(Number(member.requestedHeight ?? member.height ?? 1)))
         };
     }
 
@@ -103,18 +117,25 @@ QtObject {
             };
         }
         return {
-            width: Math.max(minimum.width, Math.round(Number(member.width || 1))),
+            width: Math.max(minimum.width, Math.round(Number(member.requestedWidth ?? member.width ?? 1))),
             height: height
         };
     }
 
     function constrainedMember(member) {
-        const size = (member.aspectLocked ?? true)
-            ? sizeFromWidth(member, member.width)
-            : {
-                width: Math.max(minimumSize(member).width, Math.round(Number(member.width || 1))),
-                height: Math.max(minimumSize(member).height, Math.round(Number(member.height || 1)))
-            };
+        const width = Math.max(1, Number(member.requestedWidth ?? member.width ?? 1));
+        const height = Math.max(1, Number(member.requestedHeight ?? member.height ?? 1));
+        const minimum = member.minimumScaleTo || ({});
+        if (!(minimum.width > 0 && minimum.height > 0))
+            return Object.assign({}, member, {
+                width: width,
+                height: height
+            });
+        // Runtime constraints affect the preview, never the requested configuration.
+        const size = (member.aspectLocked ?? true) ? sizeFromWidth(member, width) : {
+            width: Math.max(minimum.width, width),
+            height: Math.max(minimum.height, height)
+        };
         return Object.assign({}, member, size);
     }
 
@@ -138,11 +159,17 @@ QtObject {
                 const current = currentByKey.get(member.settingsKey);
                 if (!current)
                     return member;
-                return constrainedMember(Object.assign({}, member, {
+                const sizeChanged = member.requestedWidth !== member.authoredWidth || member.requestedHeight !== member.authoredHeight;
+                const updated = Object.assign({}, member, {
                     label: current.label,
                     minimumScaleTo: current.minimumScaleTo,
-                    onlineCount: current.onlineCount
-                }));
+                    onlineCount: current.onlineCount,
+                    authoredWidth: current.authoredWidth,
+                    authoredHeight: current.authoredHeight,
+                    requestedWidth: sizeChanged ? member.requestedWidth : current.requestedWidth,
+                    requestedHeight: sizeChanged ? member.requestedHeight : current.requestedHeight
+                });
+                return constrainedMember(updated);
             });
         const mergeBaseline = rows => rows.map(member => {
                 const current = currentByKey.get(member.settingsKey);
@@ -173,8 +200,16 @@ QtObject {
     }
 
     function accept(revision) {
+        if (Number(revision) > 0 && Number(canvasObject?.revision || 0) >= Number(revision)) {
+            begin(canvasObject);
+            return;
+        }
         if (revision !== undefined && Number(revision) > 0)
             baseRevision = Number(revision);
+        members = members.map(member => Object.assign({}, member, {
+                authoredWidth: member.requestedWidth,
+                authoredHeight: member.requestedHeight
+            }));
         baseline = serializedDraft();
         dirty = false;
     }
@@ -222,17 +257,23 @@ QtObject {
         const key = String(display?.settingsKey || display?.name || "");
         if (!key.length || members.some(member => member.settingsKey === key))
             return;
+        const width = Math.max(1, Number(display.width || 1920));
+        const height = Math.max(1, Number(display.height || 1080));
         const next = members.slice();
         next.push({
             settingsKey: key,
             label: display.displayLabel,
             x: Math.round(Number(x || 0) / 10) * 10,
             y: Math.round(Number(y || 0) / 10) * 10,
-            width: Math.max(1, Number(display.width || 1920)),
-            height: Math.max(1, Number(display.height || 1080)),
+            width: width,
+            height: height,
+            authoredWidth: width,
+            authoredHeight: height,
+            requestedWidth: width,
+            requestedHeight: height,
             minimumScaleTo: {
-                width: Math.max(1, Number(display.width || 1920)),
-                height: Math.max(1, Number(display.height || 1080))
+                width: width,
+                height: height
             },
             onlineCount: 1,
             aspectLocked: true
@@ -254,7 +295,7 @@ QtObject {
         if (index < 0 || index >= members.length)
             return;
         const next = members.slice();
-        next[index] = Object.assign({}, next[index], values);
+        next[index] = constrainedMember(Object.assign({}, next[index], values));
         members = next;
         refreshDirty();
     }
@@ -263,24 +304,31 @@ QtObject {
         const member = members[index];
         if (!member)
             return;
-        replaceAt(index, sizeFromWidth(member, value));
+        const size = sizeFromWidth(member, value);
+        replaceAt(index, {
+            requestedWidth: size.width,
+            requestedHeight: size.height
+        });
     }
 
     function setMemberHeight(index, value) {
         const member = members[index];
         if (!member)
             return;
-        replaceAt(index, sizeFromHeight(member, value));
+        const size = sizeFromHeight(member, value);
+        replaceAt(index, {
+            requestedWidth: size.width,
+            requestedHeight: size.height
+        });
     }
 
     function setMemberAspectLocked(index, locked) {
         const member = members[index];
         if (!member)
             return;
-        const next = Object.assign({}, member, {
+        replaceAt(index, {
             aspectLocked: locked
         });
-        replaceAt(index, locked ? constrainedMember(next) : next);
     }
 
     function resetMemberSize(index) {
@@ -293,8 +341,8 @@ QtObject {
         if (width <= 0 || height <= 0)
             return;
         replaceAt(index, {
-            width: width,
-            height: height
+            requestedWidth: width,
+            requestedHeight: height
         });
     }
 

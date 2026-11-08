@@ -333,7 +333,11 @@ ColumnLayout {
         MD.ComboBox {
             id: cb
             mdState.size: MD.Enum.S
-            model: root.schema.choices
+            model: root.schema.choices.map((value, index) => {
+                const label = root.schema.choiceLabels?.[index];
+                const translated = label ? W.I18n.tr(label) : "";
+                return translated.length > 0 ? translated : value;
+            })
             currentIndex: Math.max(0, root.schema.choices.indexOf(root.value))
             onSelectionChangeRequested: index => root._emit(root.schema.choices[index])
             Connections {

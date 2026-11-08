@@ -10,6 +10,7 @@ pub struct Model {
     pub path: String,
     #[sea_orm(column_name = "type")]
     pub ty: String,
+    pub sub_type: String,
     pub display_name: String,
     pub preview_path: Option<String>,
     pub description: Option<String>,
@@ -21,23 +22,11 @@ pub struct Model {
     pub height: Option<i32>,
     pub content_rating: Option<String>,
     pub can_remove: Option<bool>,
-    /// Milliseconds since UNIX epoch. Set on first INSERT, never
-    /// updated on subsequent upserts of the same `(library_id, path)`.
-    pub create_at: i64,
-    /// Milliseconds since UNIX epoch. Refreshed on every upsert
-    /// (sync) and on every probe pass that actually changed a field.
-    pub update_at: i64,
-    /// Milliseconds since UNIX epoch. Refreshed any time the daemon
-    /// "sees" the item — both scan-sync and probe-task ticks.
-    pub sync_at: i64,
-    /// Milliseconds since UNIX epoch of the last media-probe attempt.
-    /// Cooldown anchor for libavformat-backed probing.
-    pub probed_at: Option<i64>,
-    /// File mtime in milliseconds since UNIX epoch, captured by the
-    /// stat tier of the probe scheduler. Distinct from `update_at`
-    pub modified_at: Option<i64>,
-    /// Cooldown anchor for the stat tier. `None` means never stat'd.
-    pub stat_at: Option<i64>,
+    /// First insertion time, Unix milliseconds.
+    pub added_at: i64,
+    pub seen_scan_id: i64,
+    /// Resource file mtime, Unix nanoseconds.
+    pub file_mtime_ns: Option<i64>,
     /// JSON map of per-item user-property overrides. Each key is the
     /// shader's `u_*` uniform name (matches keys in the renderer's
     pub user_property_overrides: Option<String>,

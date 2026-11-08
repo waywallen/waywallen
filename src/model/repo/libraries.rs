@@ -1,5 +1,32 @@
 use super::*;
 
+pub async fn find_library_by_id(
+    db: &DatabaseConnection,
+    id: i64,
+) -> Result<Option<library::Model>> {
+    library::Entity::find_by_id(id)
+        .one(db)
+        .await
+        .context("select library by id")
+}
+
+pub fn library_settings(library: &library::Model) -> Result<HashMap<String, String>> {
+    serde_json::from_str(&library.settings).context("decode library settings")
+}
+
+pub async fn set_library_settings(
+    db: &DatabaseConnection,
+    id: i64,
+    settings: &HashMap<String, String>,
+) -> Result<library::Model> {
+    let row = find_library_by_id(db, id)
+        .await?
+        .ok_or(Error::LibraryNotFound(id))?;
+    let mut row: library::ActiveModel = row.into();
+    row.settings = Set(serde_json::to_string(settings).context("encode library settings")?);
+    row.update(db).await.context("update library settings")
+}
+
 // library
 
 pub fn normalize_library_ids(ids: &[i64]) -> Result<Vec<i64>> {
@@ -53,6 +80,16 @@ pub async fn add_named_library(
     path: &str,
     name: Option<&str>,
 ) -> Result<library::Model> {
+    add_configured_library(db, plugin_id, path, name, &HashMap::new()).await
+}
+
+pub async fn add_configured_library(
+    db: &DatabaseConnection,
+    plugin_id: i64,
+    path: &str,
+    name: Option<&str>,
+    settings: &HashMap<String, String>,
+) -> Result<library::Model> {
     let path = expand_home_path(path);
     let txn = db.begin().await.context("begin library create")?;
     if let Some(existing) = find_library(&txn, plugin_id, &path).await? {
@@ -80,6 +117,7 @@ pub async fn add_named_library(
         plugin_id: Set(plugin_id),
         path: Set(path.clone()),
         name: Set(name),
+        settings: Set(serde_json::to_string(settings).context("encode library settings")?),
         ..Default::default()
     };
     let library = am
@@ -105,15 +143,26 @@ pub async fn rename_library(
     id: i64,
     name: &str,
 ) -> Result<library::Model> {
+    edit_library(db, id, name, None).await
+}
+
+pub async fn edit_library(
+    db: &DatabaseConnection,
+    id: i64,
+    name: &str,
+    settings: Option<&HashMap<String, String>>,
+) -> Result<library::Model> {
     let name = validate_library_name(name)?;
-    let existing = library::Entity::find_by_id(id)
-        .one(db)
+    let existing = find_library_by_id(db, id)
         .await
-        .context("select library to rename")?
+        .context("select library to edit")?
         .ok_or(Error::LibraryNotFound(id))?;
     let mut am: library::ActiveModel = existing.into();
     am.name = Set(name.to_owned());
-    am.update(db).await.context("rename library")
+    if let Some(settings) = settings {
+        am.settings = Set(serde_json::to_string(settings).context("encode library settings")?);
+    }
+    am.update(db).await.context("edit library")
 }
 
 pub async fn find_library(

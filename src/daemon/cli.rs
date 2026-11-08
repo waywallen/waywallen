@@ -10,6 +10,9 @@ pub struct DaemonConfig {
     #[arg(long = "ui", value_name = "PATH")]
     pub ui_path: Option<PathBuf>,
 
+    #[arg(long = "probe", value_name = "PATH", help = "Path to waywallen-probe")]
+    pub probe_path: Option<PathBuf>,
+
     #[arg(long)]
     pub no_ui: bool,
 
@@ -49,5 +52,20 @@ mod tests {
         let help = error.to_string();
 
         assert!(help.contains("kde-plasma, gnome-shell, layer-shell"));
+        assert!(help.contains("--probe <PATH>"));
+    }
+
+    #[test]
+    fn probe_path_is_optional_and_accepts_spaces() {
+        let defaults = DaemonConfig::try_parse_from(["waywallen"]).unwrap();
+        assert!(defaults.probe_path.is_none());
+        let path = "/tmp/waywallen tools/waywallen-probe";
+        let explicit = DaemonConfig::try_parse_from(["waywallen", "--probe", path]).unwrap();
+        assert_eq!(explicit.probe_path, Some(PathBuf::from(path)));
+    }
+
+    #[test]
+    fn probe_requires_a_path() {
+        assert!(DaemonConfig::try_parse_from(["waywallen", "--probe"]).is_err());
     }
 }

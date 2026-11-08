@@ -416,18 +416,21 @@ Item {
         anchors.fill: parent
         spacing: 0
 
-        MD.VerticalListView {
+        MD.VerticalLazyList {
             id: m_detail_view
             MD.NestedScroll.enabled: root.nestedScrollEnabled
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
-            model: propertyModel
+            source: MD.ItemModelSource {
+                id: propertySource
+                model: propertyModel
+                keyMode: MD.ItemModelSource.PersistentIndexKey
+            }
             spacing: 8
-            leftMargin: 16
-            rightMargin: 16
-            topMargin: 0
-            bottomMargin: 8
+            extraLeftMargin: 16
+            extraRightMargin: 16
+            extraBottomMargin: 8
 
             header: ColumnLayout {
                 width: m_detail_view.contentWidth
@@ -441,6 +444,7 @@ Item {
                     source: root.wp?.preview ?? ""
                     resource: root.wp?.resource ?? ""
                     wpType: root.wp?.wpType ?? ""
+                    timeline: (root.wp?.subType ?? 0) === 1
                     fillMode: Image.PreserveAspectFit
                 }
 
@@ -792,7 +796,6 @@ Item {
                                     onCheckedChangeRequested: wallpaperRotationGroup.applyRotation(root.kRotationValues[3])
                                 }
                             }
-
                         }
 
                         ColumnLayout {
@@ -813,65 +816,27 @@ Item {
                 }
             }
 
-            section.property: "section"
-            section.criteria: ViewSection.FullString
-            section.delegate: ColumnLayout {
-                id: m_prop_section
-                required property string section
-
-                width: m_detail_view.contentWidth
-                spacing: 4
-
-                MD.Divider {
-                    Layout.fillWidth: true
-                    Layout.topMargin: 4
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: 4
-
-                    MD.Text {
-                        Layout.fillWidth: true
-                        text: m_prop_section.section === "property" ? qsTr("Properties") : qsTr("User properties")
-                        typescale: MD.Token.typescale.label_large
-                        color: MD.Token.color.on_surface_variant
-                    }
-
-                    MD.IconButton {
-                        icon.name: MD.Token.icon.restart_alt
-                        mdState.size: MD.Enum.XS
-                        enabled: m_prop_section.section === "property" ? propertyModel.hasPredefinedPropertyOverrides : propertyModel.hasUserPropertyOverrides
-                        onClicked: {
-                            if (m_prop_section.section === "property")
-                                propertyModel.resetPredefinedProperties();
-                            else
-                                propertyModel.resetUserProperties();
-                        }
-                        MD.ToolTip.visible: mdState.interactions.hovered
-                        MD.ToolTip.text: qsTr("Reset to defaults")
-                    }
-                }
-            }
-
             delegate: ColumnLayout {
                 id: m_prop_delegate
-                required property string key
-                required property string label
-                required property string type
-                required property string section
-                required property string kind
-                required property bool supported
-                required property real minVal
-                required property real maxVal
-                required property real stepVal
-                required property string valueSuffix
-                required property string currentValue
-                required property bool hasAlpha
-                required property var optionLabels
-                required property var optionValues
-
-                width: ListView.view ? (ListView.view.width - ListView.view.leftMargin - ListView.view.rightMargin) : 0
+                required property MD.LazyRow row
+                readonly property string key: row.value.key
+                readonly property string label: row.value.label
+                readonly property string type: row.value.type
+                readonly property string section: row.value.section
+                readonly property string kind: row.value.kind
+                readonly property bool supported: row.value.supported
+                readonly property real minVal: row.value.minVal
+                readonly property real maxVal: row.value.maxVal
+                readonly property real stepVal: row.value.stepVal
+                readonly property string valueSuffix: row.value.valueSuffix
+                readonly property string currentValue: row.value.currentValue
+                readonly property bool hasAlpha: row.value.hasAlpha
+                readonly property var optionLabels: row.value.optionLabels
+                readonly property var optionValues: row.value.optionValues
+                readonly property bool startsSection: {
+                    void (row.revision);
+                    return row.index === 0 || propertySource.valueAt(row.index - 1)?.section !== section;
+                }
                 spacing: 2
 
                 function optionIndex(value) {
@@ -881,6 +846,46 @@ Item {
                             return i;
                     }
                     return 0;
+                }
+
+                ColumnLayout {
+                    id: m_prop_section
+                    readonly property string section: m_prop_delegate.section
+
+                    Layout.fillWidth: true
+                    visible: m_prop_delegate.startsSection
+                    spacing: 4
+
+                    MD.Divider {
+                        Layout.fillWidth: true
+                        Layout.topMargin: 4
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        MD.Text {
+                            Layout.fillWidth: true
+                            text: m_prop_section.section === "property" ? qsTr("Properties") : qsTr("User properties")
+                            typescale: MD.Token.typescale.label_large
+                            color: MD.Token.color.on_surface_variant
+                        }
+
+                        MD.IconButton {
+                            icon.name: MD.Token.icon.restart_alt
+                            mdState.size: MD.Enum.XS
+                            enabled: m_prop_section.section === "property" ? propertyModel.hasPredefinedPropertyOverrides : propertyModel.hasUserPropertyOverrides
+                            onClicked: {
+                                if (m_prop_section.section === "property")
+                                    propertyModel.resetPredefinedProperties();
+                                else
+                                    propertyModel.resetUserProperties();
+                            }
+                            MD.ToolTip.visible: mdState.interactions.hovered
+                            MD.ToolTip.text: qsTr("Reset to defaults")
+                        }
+                    }
                 }
 
                 MD.TextEdit {

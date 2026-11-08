@@ -276,6 +276,7 @@ popd
 cd "$PROJECT_DIR/build"
 LINUXDEPLOY_EXECUTABLE_ARGS=(
     --executable "$INSTALL_DIR/bin/waywallen-ui"
+    --executable "$INSTALL_DIR/bin/waywallen-probe"
     --executable "$INSTALL_DIR/bin/waywallen-video-renderer"
 )
 PATH="$TOOLS_DIR:$PATH" \

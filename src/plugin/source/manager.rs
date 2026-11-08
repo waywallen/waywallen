@@ -30,6 +30,7 @@ pub(super) struct PluginHandle {
     info: StdRwLock<LoadedPluginInfo>,
     generation_state: Arc<AtomicU8>,
     prepare: Option<Arc<crate::remote_asset::prepare::Program>>,
+    probe: Option<Arc<crate::probe::program::Program>>,
 }
 
 pub struct DownloadSession {
@@ -112,9 +113,9 @@ impl DownloadSession {
 /// held while cloning handles or replacing snapshots, so callbacks belonging to
 /// different plugins can make progress concurrently.
 pub struct LuaPluginRegistry {
+    scan_lock: tokio::sync::Mutex<()>,
     plugins: StdRwLock<HashMap<String, Arc<PluginHandle>>>,
     catalog: StdRwLock<SourceCatalog>,
-    probe: Arc<dyn MediaProbe>,
     db: StdRwLock<Option<DatabaseConnection>>,
     settings: StdRwLock<Option<Arc<crate::settings::SettingsStore>>>,
     state_store: crate::plugin::state_store::PluginStateStore,
@@ -122,26 +123,23 @@ pub struct LuaPluginRegistry {
 
 pub type SourceManager = LuaPluginRegistry;
 
+pub struct ScanReport {
+    pub successful: HashSet<String>,
+    pub error: Option<Error>,
+}
+
 impl LuaPluginRegistry {
     pub fn new() -> Result<Self> {
-        Self::with_probe(Arc::new(AvFormatProbe::new()))
+        Self::with_state_store(crate::plugin::state_store::PluginStateStore::standard())
     }
 
-    pub fn with_probe(probe: Arc<dyn MediaProbe>) -> Result<Self> {
-        Self::with_probe_and_state_store(
-            probe,
-            crate::plugin::state_store::PluginStateStore::standard(),
-        )
-    }
-
-    pub(crate) fn with_probe_and_state_store(
-        probe: Arc<dyn MediaProbe>,
+    pub(crate) fn with_state_store(
         state_store: crate::plugin::state_store::PluginStateStore,
     ) -> Result<Self> {
         Ok(Self {
+            scan_lock: Default::default(),
             plugins: StdRwLock::new(HashMap::new()),
             catalog: StdRwLock::new(SourceCatalog::default()),
-            probe,
             db: StdRwLock::new(None),
             settings: StdRwLock::new(None),
             state_store,
@@ -262,11 +260,12 @@ impl LuaPluginRegistry {
             entry: path.to_owned(),
             entry_version,
             prepare: None,
+            probe: None,
         })
     }
 
     pub fn load_entry(&self, entry: &crate::plugin::renderer_registry::EntryRef) -> Result<String> {
-        let mut runtime = LuaPluginRuntime::with_probe(self.probe.clone())?;
+        let mut runtime = LuaPluginRuntime::new()?;
         runtime.set_state_store(self.state_store.clone());
         if let Some(db) = self.db.read().expect("plugin DB lock poisoned").clone() {
             runtime.attach_db(db);
@@ -290,6 +289,7 @@ impl LuaPluginRegistry {
             .ok_or_else(|| Error::SourcePluginNotFound(name.clone()))?;
         let generation_state = runtime.generation_state();
         let handle = Arc::new(PluginHandle {
+            probe: entry.probe.clone().map(Arc::new),
             runtime: Arc::new(tokio::sync::Mutex::new(runtime)),
             info: StdRwLock::new(info),
             generation_state,
@@ -309,6 +309,15 @@ impl LuaPluginRegistry {
         }
         plugins.insert(name.clone(), handle);
         Ok(name)
+    }
+
+    pub fn probe_programs(&self) -> HashMap<String, Arc<crate::probe::program::Program>> {
+        self.plugins
+            .read()
+            .expect("plugin registry lock poisoned")
+            .iter()
+            .filter_map(|(name, handle)| handle.probe.clone().map(|p| (name.clone(), p)))
+            .collect()
     }
 
     pub fn download_session(&self, plugin_name: &str) -> Result<DownloadSession> {
@@ -339,6 +348,15 @@ impl LuaPluginRegistry {
     }
 
     pub async fn scan_all(&self, libs_by_plugin: &HashMap<String, Vec<String>>) -> Result<()> {
+        let report = self.scan_all_report(libs_by_plugin).await;
+        report.error.map_or(Ok(()), Err)
+    }
+
+    pub async fn scan_all_report(
+        &self,
+        libs_by_plugin: &HashMap<String, Vec<String>>,
+    ) -> ScanReport {
+        let _scan = self.scan_lock.lock().await;
         let scans = self.handles().into_iter().filter_map(|(name, handle)| {
             let has_source = handle
                 .info
@@ -353,8 +371,11 @@ impl LuaPluginRegistry {
                     let mut runtime = handle.runtime.lock().await;
                     let mut only_this = HashMap::new();
                     only_this.insert(name.clone(), libraries);
-                    runtime.scan_all(&only_this).await?;
-                    Ok::<_, Error>(runtime.list().to_vec())
+                    let result = runtime
+                        .scan_all(&only_this)
+                        .await
+                        .map(|_| runtime.list().to_vec());
+                    (name, result)
                 }
             })
         });
@@ -365,9 +386,13 @@ impl LuaPluginRegistry {
         // are reported afterwards: a scan that failed must not be presented as
         // a scan that simply found nothing.
         let mut failures: Vec<String> = Vec::new();
-        for result in results {
+        let mut successful = HashSet::new();
+        for (name, result) in results {
             match result {
-                Ok(mut plugin_entries) => entries.append(&mut plugin_entries),
+                Ok(mut plugin_entries) => {
+                    successful.insert(name);
+                    entries.append(&mut plugin_entries);
+                }
                 Err(e) => {
                     log::warn!("scan Lua plugin failed: {e}");
                     failures.push(format!("{e:#}"));
@@ -383,12 +408,27 @@ impl LuaPluginRegistry {
             .write()
             .expect("source catalog lock poisoned")
             .replace(entries);
-        if !failures.is_empty() {
-            return Err(Error::Internal(anyhow!(
-                "source scan failed: {}",
-                failures.join("; ")
-            )));
+        ScanReport {
+            successful,
+            error: (!failures.is_empty())
+                .then(|| Error::Internal(anyhow!("source scan failed: {}", failures.join("; ")))),
         }
+    }
+
+    pub async fn scan_source(&self, name: &str, paths: &[String]) -> Result<()> {
+        let _scan = self.scan_lock.lock().await;
+        let handle = self.handle(name)?;
+        let mut runtime = handle.runtime.lock().await;
+        runtime
+            .scan_all(&HashMap::from([(name.to_owned(), paths.to_vec())]))
+            .await?;
+        let mut entries = self.list();
+        entries.retain(|entry| entry.plugin_name != name);
+        entries.extend(runtime.list().iter().cloned());
+        self.catalog
+            .write()
+            .expect("source state lock poisoned")
+            .replace(entries);
         Ok(())
     }
 
@@ -540,7 +580,7 @@ impl LuaPluginRegistry {
             .await
     }
 
-    pub async fn auto_detect_all(&self) -> Result<HashMap<String, Vec<String>>> {
+    pub async fn auto_detect_all(&self) -> Result<HashMap<String, Vec<SourceLibrary>>> {
         let calls = self
             .handles()
             .into_iter()
@@ -824,10 +864,26 @@ impl LuaPluginRegistry {
                 library_label: source.library_label.clone(),
                 library_hint: source.library_hint.clone(),
                 settings: info.settings.clone(),
+                library_settings: source.settings.clone(),
             });
         }
         out.sort_by(|a, b| a.name.cmp(&b.name));
         Ok(out)
+    }
+
+    pub fn library_settings(
+        &self,
+        name: &str,
+        values: HashMap<String, String>,
+    ) -> Result<HashMap<String, String>> {
+        let handle = self.handle(name)?;
+        let info = handle.info.read().expect("plugin info lock poisoned");
+        let source = info
+            .capabilities
+            .source
+            .as_ref()
+            .ok_or_else(|| Error::SourcePluginNotFound(name.into()))?;
+        validate_library_settings(&source.settings, values)
     }
 
     pub fn supports_item_remove(&self, plugin_name: &str) -> bool {

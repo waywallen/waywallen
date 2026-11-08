@@ -12,6 +12,7 @@ const MAX_TAIL_LINES: usize = 64;
 #[derive(Clone)]
 pub(crate) struct ChildStderrCapture {
     tail: Arc<Mutex<StderrTail>>,
+    context: Arc<Mutex<String>>,
     done: watch::Receiver<bool>,
 }
 
@@ -21,9 +22,27 @@ impl ChildStderrCapture {
         R: AsyncRead + Unpin + Send + 'static,
     {
         let tail = Arc::new(Mutex::new(StderrTail::default()));
+        let context = Arc::new(Mutex::new(String::new()));
         let (done_tx, done) = watch::channel(false);
-        tokio::spawn(read_stderr(stderr, target, Arc::clone(&tail), done_tx));
-        Self { tail, done }
+        tokio::spawn(read_stderr(
+            stderr,
+            target,
+            Arc::clone(&tail),
+            Arc::clone(&context),
+            done_tx,
+        ));
+        Self {
+            tail,
+            context,
+            done,
+        }
+    }
+
+    pub(crate) fn set_context(&self, value: String) {
+        *self
+            .context
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = value;
     }
 
     pub(crate) async fn drain(&self, timeout: Duration) -> StderrSnapshot {
@@ -92,6 +111,7 @@ async fn read_stderr<R>(
     mut stderr: R,
     target: String,
     tail: Arc<Mutex<StderrTail>>,
+    context: Arc<Mutex<String>>,
     done: watch::Sender<bool>,
 ) where
     R: AsyncRead + Unpin,
@@ -102,13 +122,13 @@ async fn read_stderr<R>(
     loop {
         match stderr.read(&mut chunk).await {
             Ok(0) => {
-                emit_line(&target, &mut line, truncated, &tail);
+                emit_line(&target, &mut line, truncated, &tail, &context);
                 break;
             }
             Ok(read) => {
                 for byte in &chunk[..read] {
                     if *byte == b'\n' {
-                        emit_line(&target, &mut line, truncated, &tail);
+                        emit_line(&target, &mut line, truncated, &tail, &context);
                         truncated = false;
                     } else if line.len() < MAX_LINE_BYTES {
                         line.push(*byte);
@@ -126,7 +146,13 @@ async fn read_stderr<R>(
     let _ = done.send(true);
 }
 
-fn emit_line(target: &str, line: &mut Vec<u8>, truncated: bool, tail: &Arc<Mutex<StderrTail>>) {
+fn emit_line(
+    target: &str,
+    line: &mut Vec<u8>,
+    truncated: bool,
+    tail: &Arc<Mutex<StderrTail>>,
+    context: &Mutex<String>,
+) {
     if line.last() == Some(&b'\r') {
         line.pop();
     }
@@ -138,7 +164,15 @@ fn emit_line(target: &str, line: &mut Vec<u8>, truncated: bool, tail: &Arc<Mutex
     if message.trim().is_empty() {
         return;
     }
-    log::info!(target: target, "{message}");
+    let context = context
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    if context.is_empty() {
+        log::info!(target: target, "{message}");
+    } else {
+        log::info!(target: target, "{context}: {message}");
+    }
     tail.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .push(message);

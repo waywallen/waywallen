@@ -40,6 +40,8 @@ pub struct PluginMeta {
     #[serde(default)]
     pub prepare: Option<PluginPrepare>,
     #[serde(default)]
+    pub probe: Option<crate::probe::program::Declaration>,
+    #[serde(default)]
     pub i18n: Option<PluginTranslationMeta>,
     /// Declarative file manifest with paths relative to the plugin dir.
     /// Loaded during scanning from the required `files.txt`.
@@ -56,6 +58,15 @@ pub struct PluginMeta {
 /// ship beside its `plugin.toml`. One path per line; blanks ignored.
 pub const PLUGIN_FILES_MANIFEST: &str = "files.txt";
 
+pub(crate) fn read_plugin_files(root: &Path) -> std::io::Result<Vec<String>> {
+    Ok(std::fs::read_to_string(root.join(PLUGIN_FILES_MANIFEST))?
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
 /// Lua entry discovered in a plugin manifest.
 /// Carries the owning plugin metadata and entry ABI version.
 #[derive(Debug, Clone)]
@@ -66,6 +77,7 @@ pub struct EntryRef {
     pub entry: PathBuf,
     pub entry_version: u32,
     pub prepare: Option<PluginPrepare>,
+    pub probe: Option<crate::probe::program::Program>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -786,13 +798,8 @@ pub fn scan_plugins(dir: &Path, system: bool) -> PluginScan {
 
         // Every plugin must ship a newline-separated `files.txt` manifest.
         let files_path = plugin_dir.join(PLUGIN_FILES_MANIFEST);
-        match std::fs::read_to_string(&files_path) {
-            Ok(text) => meta.files.extend(
-                text.lines()
-                    .map(str::trim)
-                    .filter(|l| !l.is_empty())
-                    .map(str::to_owned),
-            ),
+        match read_plugin_files(&plugin_dir) {
+            Ok(files) => meta.files = files,
             Err(e) => log::warn!(
                 "plugin {}: required {} missing or unreadable ({e})",
                 meta.id,
@@ -800,6 +807,26 @@ pub fn scan_plugins(dir: &Path, system: bool) -> PluginScan {
             ),
         }
 
+        let probe = match &meta.probe {
+            Some(declaration) => match crate::probe::program::Program::open(
+                &meta.id,
+                &plugin_dir,
+                declaration,
+                &meta.files,
+            ) {
+                Ok(program) => Some(program),
+                Err(error) => {
+                    let reason = format!("invalid plugin.probe: {error:#}");
+                    log::warn!("skip plugin {}: {reason}", meta.id);
+                    out.incompatible.push(PluginIncompat {
+                        plugin_id: meta.id.clone(),
+                        reason,
+                    });
+                    continue;
+                }
+            },
+            None => None,
+        };
         let prepare = match &meta.prepare {
             Some(definition) => {
                 match resolve_prepare(&plugin_dir, definition, &meta.files, meta.entry_version) {
@@ -849,6 +876,7 @@ pub fn scan_plugins(dir: &Path, system: bool) -> PluginScan {
                         entry: resolve_rel(&plugin_dir, entry),
                         entry_version,
                         prepare: prepare.clone(),
+                        probe: probe.clone(),
                     });
                 }
                 Some(entry_version) => {
@@ -1138,6 +1166,53 @@ fn normalize_path(path: &Path) -> PathBuf {
 mod schema_tests {
     use super::*;
 
+    #[tokio::test]
+    async fn probe_declaration_is_bound_to_the_loaded_source() {
+        let root = tempfile::tempdir().unwrap();
+        let plugin = root.path().join("org.test.probe");
+        std::fs::create_dir(&plugin).unwrap();
+        std::fs::write(plugin.join("plugin.toml"), "[plugin]\nid='org.test.probe'\nname='Probe'\nentry='main.lua'\nentry_version=4\n[plugin.probe]\nentry='probe.lua'\nversion=1\ntypes=['scene']\n").unwrap();
+        std::fs::write(
+            plugin.join("files.txt"),
+            "plugin.toml\nfiles.txt\nmain.lua\nprobe.lua\n",
+        )
+        .unwrap();
+        std::fs::write(plugin.join("main.lua"),"return {info=function() return {name='probe-source',capabilities={source={types={'scene'},scan=true}}} end,source={scan=function() return {} end}}").unwrap();
+        std::fs::write(
+            plugin.join("probe.lua"),
+            "return {probe=function() return {width=1,height=1} end}",
+        )
+        .unwrap();
+        let scan = scan_plugins(root.path(), false);
+        assert_eq!(scan.entries.len(), 1);
+        let manager = crate::plugin::source::SourceManager::with_state_store(
+            crate::plugin::state_store::PluginStateStore::new(
+                root.path().join("state"),
+                root.path().join("legacy"),
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            manager.load_entry(&scan.entries[0]).unwrap(),
+            "probe-source"
+        );
+        let service = crate::probe::media::ProbeService::with_tool(None);
+        service.replace_programs(manager.probe_programs());
+        let programs = service.prepare_programs().await.unwrap();
+        assert!(programs
+            .input_kind("probe-source", "scene", "")
+            .unwrap()
+            .starts_with("lua:"));
+        assert_eq!(
+            programs.input_kind("probe-source", "video", "").as_deref(),
+            Some("media")
+        );
+        std::fs::remove_file(plugin.join("probe.lua")).unwrap();
+        let invalid = scan_plugins(root.path(), false);
+        assert!(invalid.entries.is_empty());
+        assert_eq!(invalid.incompatible.len(), 1);
+    }
+
     fn write_test_plugin(plugins_dir: &Path, id: &str) {
         let plugin_dir = plugins_dir.join(id);
         std::fs::create_dir_all(&plugin_dir).unwrap();
@@ -1168,6 +1243,7 @@ types = ["image"]
             entry: None,
             entry_version: None,
             prepare: None,
+            probe: None,
             i18n: None,
             files: Vec::new(),
             system,

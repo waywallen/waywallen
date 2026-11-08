@@ -514,7 +514,7 @@ MD.Page {
     function applyCanvasDraft() {
         if (!root.selectedCanvasObject || !canvasEditor.dirty)
             return;
-        canvasMutationQuery.updateCanvas(root.selectedCanvasObject.id, canvasEditor.baseRevision, canvasEditor.name.trim(), canvasEditor.members);
+        canvasMutationQuery.updateCanvas(root.selectedCanvasObject.id, canvasEditor.baseRevision, canvasEditor.name.trim(), canvasEditor.draftMembers());
     }
 
     function dropDisplayOnCanvas(canvasObject, displayObject, dropX, dropY, memberBounds) {

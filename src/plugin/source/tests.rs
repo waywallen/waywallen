@@ -1,13 +1,8 @@
 use super::parsing::redact_secrets;
 use super::*;
 use crate::plugin::i18n::LocalizedText;
-use crate::probe::media::{MediaMeta, MediaProbe};
 use std::io::Write;
 use std::time::Duration;
-
-struct FakeProbe {
-    meta: MediaMeta,
-}
 
 #[test]
 fn remote_errors_redact_credentials() {
@@ -144,12 +139,6 @@ return M
         .is_err());
 }
 
-impl MediaProbe for FakeProbe {
-    fn probe_media(&self, _path: &str) -> MediaMeta {
-        self.meta.clone()
-    }
-}
-
 /// Drive an async scan from a sync `#[test]` — these tests don't
 /// touch the DB so a single-thread runtime is fine.
 fn block(fut: impl std::future::Future<Output = ()>) {
@@ -169,13 +158,7 @@ fn block_value<T>(fut: impl std::future::Future<Output = T>) -> T {
 }
 
 #[test]
-fn ctx_probe_callable_from_lua() {
-    let probe = Arc::new(FakeProbe {
-        meta: MediaMeta {
-            width: Some(1920),
-            height: Some(1080),
-        },
-    });
+fn source_context_does_not_expose_media_probe() {
     let dir = tempfile::tempdir().unwrap();
     let plugin_path = dir.path().join("probe_test.lua");
     let mut f = std::fs::File::create(&plugin_path).unwrap();
@@ -193,8 +176,7 @@ function M.info()
 end
 M.source = {{}}
 function M.source.scan(ctx)
-    local m = ctx.probe("/fake/path/video.mp4")
-    if m == nil then error("probe returned nil") end
+    assert(ctx.probe == nil)
     return {{
         {{
             id = "v1",
@@ -203,9 +185,6 @@ function M.source.scan(ctx)
             resource = "/lib/v1.mp4",
             library_root = "/lib",
             metadata = {{}},
-            _probe_size = m.size,
-            _probe_width = m.width,
-            _probe_height = m.height,
         }},
     }}
 end
@@ -214,16 +193,16 @@ return M
     )
     .unwrap();
 
-    let mgr = SourceManager::with_probe(probe as Arc<dyn MediaProbe>).unwrap();
-    mgr.load_plugin(&plugin_path, "test.plugin", "1.0", ENTRY_VERSION)
-        .unwrap();
-    block(async { mgr.scan_all(&HashMap::new()).await.unwrap() });
+    for version in ENTRY_VERSION_V3..=ENTRY_VERSION {
+        let mgr = SourceManager::new().unwrap();
+        mgr.load_plugin(&plugin_path, "test.plugin", "1.0", version)
+            .unwrap();
+        block(async { mgr.scan_all(&HashMap::new()).await.unwrap() });
 
-    let entries = mgr.list();
-    assert_eq!(entries.len(), 1);
-    // The Lua plugin called ctx.probe successfully (it would error() otherwise).
-    // Verify the entry was emitted correctly.
-    assert_eq!(entries[0].resource, "/lib/v1.mp4");
+        let entries = mgr.list();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].resource, "/lib/v1.mp4");
+    }
 }
 
 #[test]
@@ -303,6 +282,13 @@ return M
         "error should name the plugin that failed, got: {err}"
     );
     assert!(mgr.list().is_empty());
+    let healthy = dir.path().join("healthy.lua");
+    std::fs::write(&healthy, "return {info=function() return {name='healthy',capabilities={source={types={'image'},scan=true}}} end,source={scan=function() return {} end}}").unwrap();
+    mgr.load_plugin(&healthy, "org.healthy", "1", ENTRY_VERSION)
+        .unwrap();
+    let report = block_value(mgr.scan_all_report(&HashMap::new()));
+    assert_eq!(report.successful, HashSet::from(["healthy".to_owned()]));
+    assert!(report.error.is_some());
 }
 
 #[test]
@@ -800,6 +786,7 @@ return M
         item_id: 42,
         name: "Wallpaper".to_string(),
         wp_type: "image".to_string(),
+        sub_type: String::new(),
         resource: item_path.to_string_lossy().to_string(),
         preview: None,
         plugin_name: "remove_only".to_string(),
@@ -813,8 +800,8 @@ return M
         width: None,
         height: None,
         content_rating: None,
-        modified_at: None,
-        create_at: 0,
+        file_mtime_ns: None,
+        added_at: 0,
         hidden: false,
         can_remove: None,
     };
@@ -853,6 +840,7 @@ return M
         item_id: 7,
         name: "Wallpaper".to_string(),
         wp_type: "image".to_string(),
+        sub_type: String::new(),
         resource: "/tmp/wallpaper.png".to_string(),
         preview: None,
         plugin_name: "no_remove".to_string(),
@@ -866,8 +854,8 @@ return M
         width: None,
         height: None,
         content_rating: None,
-        modified_at: None,
-        create_at: 0,
+        file_mtime_ns: None,
+        added_at: 0,
         hidden: false,
         can_remove: None,
     };
@@ -1505,9 +1493,7 @@ fn v3_lifecycle_actions_qrlogin_and_subscription_share_plugin_owned_state() {
         state_root.clone(),
         dir.path().to_path_buf(),
     );
-    let manager =
-        SourceManager::with_probe_and_state_store(Arc::new(AvFormatProbe::new()), state_store)
-            .unwrap();
+    let manager = SourceManager::with_state_store(state_store).unwrap();
     let plugin_path = dir.path().join("main.lua");
     std::fs::write(
         &plugin_path,
@@ -1917,14 +1903,12 @@ return M
 "#,
     )
     .unwrap();
-    let manager = SourceManager::with_probe_and_state_store(
-        Arc::new(AvFormatProbe::new()),
-        crate::plugin::state_store::PluginStateStore::new(
+    let manager =
+        SourceManager::with_state_store(crate::plugin::state_store::PluginStateStore::new(
             dir.path().join("state"),
             dir.path().join("legacy"),
-        ),
-    )
-    .unwrap();
+        ))
+        .unwrap();
     manager
         .load_plugin(&path, "org.test", "1", ENTRY_VERSION_V6)
         .unwrap();
@@ -2170,9 +2154,7 @@ fn failed_state_migration_preserves_the_legacy_blob() {
         state_root.clone(),
         dir.path().to_path_buf(),
     );
-    let manager =
-        SourceManager::with_probe_and_state_store(Arc::new(AvFormatProbe::new()), state_store)
-            .unwrap();
+    let manager = SourceManager::with_state_store(state_store).unwrap();
     let entry = dir.path().join("main.lua");
     std::fs::write(
         &entry,
@@ -2247,9 +2229,7 @@ fn subscription_mutation_does_not_scan_source_libraries() {
         state_root.clone(),
         dir.path().to_path_buf(),
     );
-    let manager =
-        SourceManager::with_probe_and_state_store(Arc::new(AvFormatProbe::new()), state_store)
-            .unwrap();
+    let manager = SourceManager::with_state_store(state_store).unwrap();
     let entry = dir.path().join("main.lua");
     std::fs::write(
         &entry,
@@ -2295,6 +2275,7 @@ return M
         item_id: 1,
         name: "Workshop item".to_string(),
         wp_type: "image".to_string(),
+        sub_type: String::new(),
         resource: "item.jpg".to_string(),
         preview: None,
         description: None,
@@ -2306,8 +2287,8 @@ return M
         width: None,
         height: None,
         content_rating: None,
-        modified_at: None,
-        create_at: 0,
+        file_mtime_ns: None,
+        added_at: 0,
         plugin_name: "separate_flows".to_string(),
         library_root: String::new(),
         hidden: false,
@@ -2391,11 +2372,7 @@ return M
     std::fs::write(&first_path, script("first", "first")).unwrap();
     std::fs::write(&second_path, script("second", "second")).unwrap();
 
-    let manager = SourceManager::with_probe_and_state_store(
-        Arc::new(AvFormatProbe::new()),
-        state_store.clone(),
-    )
-    .unwrap();
+    let manager = SourceManager::with_state_store(state_store.clone()).unwrap();
     manager
         .load_plugin(&first_path, "org.first", "1", ENTRY_VERSION_V3)
         .unwrap();
@@ -2414,11 +2391,7 @@ return M
     let failed = block_value(async { manager.call_discover("first", "fail", "", 1, &[]).await });
     assert!(failed.is_err());
 
-    let restored = SourceManager::with_probe_and_state_store(
-        Arc::new(AvFormatProbe::new()),
-        state_store.clone(),
-    )
-    .unwrap();
+    let restored = SourceManager::with_state_store(state_store.clone()).unwrap();
     restored
         .load_plugin(&first_path, "org.first", "1", ENTRY_VERSION_V3)
         .unwrap();
@@ -2432,9 +2405,7 @@ return M
             .await
     })
     .unwrap();
-    let signed_out =
-        SourceManager::with_probe_and_state_store(Arc::new(AvFormatProbe::new()), state_store)
-            .unwrap();
+    let signed_out = SourceManager::with_state_store(state_store).unwrap();
     signed_out
         .load_plugin(&first_path, "org.first", "1", ENTRY_VERSION_V3)
         .unwrap();
@@ -2678,6 +2649,7 @@ return M
         item_id: 1,
         name: "Wallpaper".into(),
         wp_type: "video".into(),
+        sub_type: String::new(),
         resource: "/tmp/wallpaper.mp4".into(),
         preview: None,
         description: None,
@@ -2689,8 +2661,8 @@ return M
         width: None,
         height: None,
         content_rating: None,
-        modified_at: None,
-        create_at: 0,
+        file_mtime_ns: None,
+        added_at: 0,
         plugin_name: "apply_test".into(),
         library_root: "/tmp".into(),
         hidden: false,

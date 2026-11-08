@@ -137,6 +137,9 @@ workspace = true
 [dependencies.qextra]
 workspace = true
 
+[dependencies.waywallen-image-definition]
+workspace = true
+
 [dependencies.wavsen]
 workspace = true
 

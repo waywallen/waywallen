@@ -57,6 +57,7 @@ mod tests {
                     library_id: lib.id,
                     path: "same.png",
                     ty: "image",
+                    sub_type: "",
                     display_name: name,
                     preview_path: None,
                     description: None,
