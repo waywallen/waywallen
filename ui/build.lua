@@ -123,6 +123,7 @@ qt.qml_module({
     "qml/Global.qml",
     "qml/I18n.qml",
     "qml/component/GpuDetails.qml",
+    "qml/component/ThumbnailLoading.qml",
   },
   resources = {
     "assets/waywallen-ui.svg",
