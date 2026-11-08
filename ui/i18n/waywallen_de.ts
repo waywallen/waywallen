@@ -2329,8 +2329,8 @@ Betroffener Bildschirm: #%1</translation>
         <translation>Keine neuen Bibliotheken gefunden</translation>
     </message>
     <message>
-        <source>Edit library</source>
-        <translation>Bibliothek bearbeiten</translation>
+        <source>Open folder</source>
+        <translation>Ordner öffnen</translation>
     </message>
     <message>
         <source>Library name</source>

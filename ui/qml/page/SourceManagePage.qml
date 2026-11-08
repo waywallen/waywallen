@@ -146,10 +146,10 @@ MD.Page {
                 trailing: MD.ActionToolBar {
                     actions: [
                         MD.Action {
-                            enabled: !sourceQuery.querying && !removeQuery.querying
-                            icon.name: MD.Token.icon.edit
-                            text: qsTr("Edit library")
-                            onTriggered: root.editLibrary(sourceItem.modelData)
+                            enabled: sourceItem.fullPath.length > 0
+                            icon.name: MD.Token.icon.folder_open
+                            text: qsTr("Open folder")
+                            onTriggered: MD.Util.openFolderExternally(sourceItem.fullPath)
                         },
                         MD.Action {
                             visible: root.libraryQuery !== null

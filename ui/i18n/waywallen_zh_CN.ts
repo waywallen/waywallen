@@ -2218,8 +2218,8 @@ Related display: #%1</source>
         <translation>未发现新的库</translation>
     </message>
     <message>
-        <source>Edit library</source>
-        <translation>编辑库</translation>
+        <source>Open folder</source>
+        <translation>打开文件夹</translation>
     </message>
     <message>
         <source>Library name</source>

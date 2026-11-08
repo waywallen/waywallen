@@ -2217,8 +2217,8 @@ Related display: #%1</source>
         <translation>Новые библиотеки не найдены</translation>
     </message>
     <message>
-        <source>Edit library</source>
-        <translation>Изменить библиотеку</translation>
+        <source>Open folder</source>
+        <translation>Открыть папку</translation>
     </message>
     <message>
         <source>Library name</source>

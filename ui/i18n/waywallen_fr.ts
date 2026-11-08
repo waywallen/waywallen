@@ -2325,8 +2325,8 @@ Related display: #%1</source>
         <translation>Aucune nouvelle bibliothèque trouvée</translation>
     </message>
     <message>
-        <source>Edit library</source>
-        <translation>Modifier la bibliothèque</translation>
+        <source>Open folder</source>
+        <translation>Ouvrir le dossier</translation>
     </message>
     <message>
         <source>Library name</source>
