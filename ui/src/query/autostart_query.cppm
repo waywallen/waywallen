@@ -17,17 +17,24 @@ export class AutostartGetQuery : public Query,
     QML_ELEMENT
 
     Q_PROPERTY(bool enabled READ enabled NOTIFY enabledChanged FINAL)
+    Q_PROPERTY(bool supported READ supported NOTIFY availabilityChanged FINAL)
+    Q_PROPERTY(QString unavailableReason READ unavailableReason NOTIFY availabilityChanged FINAL)
 
 public:
     AutostartGetQuery(QObject* parent = nullptr);
 
-    bool enabled() const;
-    void reload() override;
+    bool    enabled() const;
+    bool    supported() const { return m_supported; }
+    QString unavailableReason() const { return m_unavailable_reason; }
+    void    reload() override;
 
     Q_SIGNAL void enabledChanged();
+    Q_SIGNAL void availabilityChanged();
 
 private:
-    bool m_enabled = false;
+    bool    m_enabled   = false;
+    bool    m_supported = false;
+    QString m_unavailable_reason;
 };
 
 export class AutostartSetQuery : public Query,

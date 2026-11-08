@@ -566,7 +566,7 @@ pub struct GlobalSettings {
     /// Forward pointer input received by the daemon to subscribed renderers.
     pub pointer_forwarding_enabled: bool,
 
-    /// Last autostart state successfully accepted by the Flatpak portal.
+    /// Last successfully applied login startup preference.
     pub autostart_enabled: bool,
 
     /// Hide the StatusNotifierItem tray icon. Applied live; the

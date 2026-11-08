@@ -1,3 +1,5 @@
+mod desktop;
+
 use ashpd::desktop::background::Background;
 
 use crate::error::{Error, Result};
@@ -42,14 +44,54 @@ pub struct AutostartService {
 }
 
 impl AutostartService {
-    pub fn enabled(&self, settings: &SettingsStore) -> Result<bool> {
-        ensure_flatpak()?;
-        Ok(settings.global().autostart_enabled)
+    pub fn status(&self, settings: &SettingsStore) -> Status {
+        if is_flatpak() {
+            return Status {
+                enabled: settings.global().autostart_enabled,
+                supported: true,
+                unavailable_reason: String::new(),
+            };
+        }
+        let mut enabled = false;
+        match desktop::DesktopAutostart::new().and_then(|entry| {
+            enabled = entry.enabled()?;
+            entry.ensure_writable()?;
+            desktop::launcher()?;
+            Ok(())
+        }) {
+            Ok(()) => Status {
+                enabled,
+                supported: true,
+                unavailable_reason: String::new(),
+            },
+            Err(error) => Status {
+                enabled,
+                supported: false,
+                unavailable_reason: error.to_string(),
+            },
+        }
+    }
+
+    pub fn refresh(&self) -> Result<()> {
+        if is_flatpak() {
+            return Ok(());
+        }
+        match desktop::DesktopAutostart::new() {
+            Ok(entry) => entry.refresh(),
+            Err(Error::FailedPrecondition(_)) => Ok(()),
+            Err(error) => Err(error),
+        }
     }
 
     pub async fn set_enabled(&self, settings: &SettingsStore, enabled: bool) -> Result<bool> {
-        ensure_flatpak()?;
-        self.set_enabled_with(settings, enabled, &XdpPortal).await
+        if is_flatpak() {
+            return self.set_enabled_with(settings, enabled, &XdpPortal).await;
+        }
+        let _guard = self.mutation.lock().await;
+        desktop::DesktopAutostart::new()?.set_enabled(enabled)?;
+        settings.update(|s| s.global.autostart_enabled = enabled);
+        settings.flush_now().await;
+        Ok(enabled)
     }
 
     async fn set_enabled_with<C: PortalClient>(
@@ -73,15 +115,14 @@ impl AutostartService {
     }
 }
 
-fn ensure_flatpak() -> Result<()> {
-    let available = std::env::var_os(FLATPAK_ID_ENV).is_some_and(|id| !id.is_empty());
-    if available {
-        Ok(())
-    } else {
-        Err(Error::FailedPrecondition(
-            "autostart is only available inside Flatpak".to_string(),
-        ))
-    }
+pub struct Status {
+    pub enabled: bool,
+    pub supported: bool,
+    pub unavailable_reason: String,
+}
+
+fn is_flatpak() -> bool {
+    std::env::var_os(FLATPAK_ID_ENV).is_some_and(|id| !id.is_empty())
 }
 
 #[cfg(test)]
