@@ -9,6 +9,7 @@ dependencies:
   - qt6-wayland>=6.10
   - freetype
   - expat
+  - libxml2-devel
 
   # Used to build qtgrpc from source (conda-forge has no Qt6 Protobuf package)
   - libprotobuf

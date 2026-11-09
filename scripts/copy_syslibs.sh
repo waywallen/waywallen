@@ -310,7 +310,7 @@ EOF
 }
 
 install_gbm
-install_libxml2
+# install_libxml2
 install_pipewire
 install_fontconfig
 install_pulse
