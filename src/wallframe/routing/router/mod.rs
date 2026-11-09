@@ -253,6 +253,7 @@ fn resume_retry_delay(failures: u32) -> Duration {
 
 /// Initial-registration payload from `display::endpoint::do_handshake`.
 pub struct DisplayRegistration {
+    pub follow_producer_gpu: bool,
     pub role: DisplayRole,
     pub window_observation_caps: Option<u32>,
     pub name: String,
@@ -4234,6 +4235,7 @@ mod tests {
     fn reg(name: &str, w: u32, h: u32) -> DisplayRegistration {
         use crate::wallframe::dma::negotiate as N;
         DisplayRegistration {
+            follow_producer_gpu: false,
             role: DisplayRole::Desktop,
             window_observation_caps: None,
             name: name.into(),
