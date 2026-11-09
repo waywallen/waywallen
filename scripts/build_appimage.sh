@@ -11,7 +11,7 @@ ENV_NAME="${WAYWALLEN_CONDA_ENV:-waywallen}"
 ENV_PREFIX="${WAYWALLEN_CONDA_PREFIX:-$PROJECT_DIR/build/conda-envs/$ENV_NAME}"
 TMP_DIR="${TMPDIR:-/tmp}"
 WAYWALLEN_DISPLAY_REPO="${WAYWALLEN_DISPLAY_REPO:-https://github.com/waywallen/waywallen-display.git}"
-WAYWALLEN_DISPLAY_REF="${WAYWALLEN_DISPLAY_REF:-66fa1fe2b7fed3386f95a391a11fa7527bfd1a13}"
+WAYWALLEN_DISPLAY_REF="${WAYWALLEN_DISPLAY_REF:-48946b4965c9f746c7d56bb72b66e5ff01c2d6e9}"
 APPDIR="$PROJECT_DIR/build/AppDir"
 INSTALL_DIR="$APPDIR/usr"
 TOOLS_DIR="$PROJECT_DIR/build/_tools"
@@ -330,6 +330,11 @@ for style in "${QUICKCONTROLS2_PRUNE[@]}"; do
     done
     rm -rfv "$APPDIR/usr/qml/QtQuick/Controls/${style}" 2>/dev/null || true
 done
+
+info "Stripping shared libraries"
+pushd "$APPDIR/usr/lib"
+strip --strip-unneeded lib*
+popd
 
 info "Packing AppImage"
 rm -f "$APPIMAGE_OUT" "$ZSYNC_OUT"
