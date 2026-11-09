@@ -3,6 +3,7 @@
 #     <repo>/waywallen-<version>-<architecture>.AppImage
 
 set -euo pipefail
+umask 022
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$PROJECT_DIR/environment.yml"
