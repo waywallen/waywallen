@@ -147,21 +147,24 @@ pub async fn sync_plugin_entries_in_scan(
             repo::mark_item_seen(&tx, persisted.id, scan_id).await?;
             summary.items_upserted += 1;
         }
-        if present_libraries.contains(lib_path) {
+        if dropped == 0 && present_libraries.contains(lib_path) {
             summary.items_deleted +=
                 repo::delete_items_not_seen(&tx, &[lib_model.id], scan_id).await?;
         }
         tx.commit().await?;
     }
 
-    let present: HashSet<&str> = present_libraries.iter().map(String::as_str).collect();
-    let present_ids: Vec<i64> = repo::list_libraries_by_plugin(db, plugin_model.id)
-        .await?
-        .into_iter()
-        .filter(|l| present.contains(l.path.as_str()))
-        .map(|l| l.id)
-        .collect();
-    summary.items_deleted += repo::delete_items_not_seen(db, &present_ids, scan_id).await?;
+    // Dropped entries make the snapshot incomplete, so it cannot drive a sweep.
+    if dropped == 0 {
+        let present: HashSet<&str> = present_libraries.iter().map(String::as_str).collect();
+        let present_ids: Vec<i64> = repo::list_libraries_by_plugin(db, plugin_model.id)
+            .await?
+            .into_iter()
+            .filter(|l| present.contains(l.path.as_str()))
+            .map(|l| l.id)
+            .collect();
+        summary.items_deleted += repo::delete_items_not_seen(db, &present_ids, scan_id).await?;
+    }
 
     Ok((summary, plugin_model))
 }

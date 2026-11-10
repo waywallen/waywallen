@@ -58,6 +58,21 @@ MD.Page {
         id: removeQuery
     }
 
+    W.LibraryRelocateQuery {
+        id: relocateQuery
+    }
+
+    MD.FolderDialog {
+        id: relocateDialog
+        property var libraryId
+        title: qsTr("Choose Library Folder")
+        onAccepted: {
+            relocateQuery.libraryId = libraryId;
+            relocateQuery.path = decodeURIComponent(selectedFolder.toString().replace(/^file:\/\//, ""));
+            relocateQuery.reload();
+        }
+    }
+
     W.SourceListQuery {
         id: sourceQuery
     }
@@ -145,6 +160,15 @@ MD.Page {
 
                 trailing: MD.ActionToolBar {
                     actions: [
+                        MD.Action {
+                            enabled: !relocateQuery.querying
+                            icon.name: MD.Token.icon.folder
+                            text: qsTr("Change library folder")
+                            onTriggered: {
+                                relocateDialog.libraryId = sourceItem.modelData.id;
+                                relocateDialog.open();
+                            }
+                        },
                         MD.Action {
                             enabled: sourceItem.fullPath.length > 0
                             icon.name: MD.Token.icon.folder_open
