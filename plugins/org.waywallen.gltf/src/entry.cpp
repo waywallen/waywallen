@@ -37,6 +37,7 @@ struct Options {
     unsigned                       fps { 30 }, custom_extent { 1080 }, frames { 3 };
     int                            resolution { -2 }, animation {};
     float                          exposure { 1 };
+    Option<bool>                   fxaa;
     bool                           loop { true }, selftest {}, validation {}, snapshot {};
     VkExtent2D                     snapshot_extent { 128, 128 };
 };
@@ -78,6 +79,10 @@ void settings(Options& options, const ww_kv_list_t& values) {
             auto v = number<f32>(value);
             if (v && v->is_finite() && *v >= f32(0.1) && *v <= f32(16))
                 options.exposure = v->to_primitive();
+        } else if (key == "fxaa"_str) {
+            if (value == "auto"_str) options.fxaa = None<bool>();
+            if (value == "on"_str) options.fxaa = Some(true);
+            if (value == "off"_str) options.fxaa = Some(false);
         } else if (key == "loop"_str) {
             if (value == "true"_str) options.loop = true;
             if (value == "false"_str) options.loop = false;
@@ -355,6 +360,7 @@ struct Gpu {
             return None();
         }
         auto values = resolved.unwrap();
+        if (options.fxaa) values.display.fxaa = *options.fxaa;
         auto view   = values.camera->view(float(extent.width) / float(extent.height));
         if (! view) return None();
         auto begun = queue.Begin();
@@ -414,10 +420,11 @@ auto create_gpu(Options& options) -> Option<Box<Gpu>> {
     else if (parent)
         resources.base_directory = rstd::path::PathBuf::from(*parent);
     resources.root = Some(resources.base_directory.clone());
-    auto bound =
-        gltf::BindPresentation(options.presentation.take().unwrap_or(gltf::PresentationSpec {}),
-                               asset.clone(),
-                               rstd::move(resources));
+    gltf::PresentationSpec defaults;
+    defaults.display.fxaa = true;
+    auto bound = gltf::BindPresentation(options.presentation.take().unwrap_or(rstd::move(defaults)),
+                                        asset.clone(),
+                                        rstd::move(resources));
     if (bound.is_err()) {
         report(bound.unwrap_err());
         return None();
