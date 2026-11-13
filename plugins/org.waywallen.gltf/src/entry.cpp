@@ -361,7 +361,7 @@ struct Gpu {
         }
         auto values = resolved.unwrap();
         if (options.fxaa) values.display.fxaa = *options.fxaa;
-        auto view   = values.camera->view(float(extent.width) / float(extent.height));
+        auto view = values.camera->view(float(extent.width) / float(extent.height));
         if (! view) return None();
         auto begun = queue.Begin();
         if (begun.is_err()) return None();
