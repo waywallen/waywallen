@@ -288,8 +288,16 @@ impl LuaPluginRuntime {
     }
 
     fn restore_http_session(&self, plugin_id: &str) -> Result<()> {
-        let Some(snapshot) = self.state_store.load_http_session(plugin_id)? else {
-            return Ok(());
+        // The persisted HTTP session is only a convenience cache. A session that cannot be read
+        // must not abort loading the plugin, otherwise one unreadable file takes the whole source
+        // plugin (and every wallpaper belonging to it) out of service.
+        let snapshot = match self.state_store.load_http_session(plugin_id) {
+            Ok(Some(snapshot)) => snapshot,
+            Ok(None) => return Ok(()),
+            Err(error) => {
+                log::warn!("skip HTTP session for {plugin_id}: {error:#}");
+                return Ok(());
+            }
         };
         self.http_cookie_store.restore(&snapshot).map_err(|error| {
             Error::Internal(anyhow!("restore HTTP session for {plugin_id}: {error}"))
