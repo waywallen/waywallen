@@ -255,6 +255,7 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         ws_port: std::sync::atomic::AtomicU16::new(0),
         scan_in_progress: std::sync::atomic::AtomicBool::new(false),
         scans: Arc::new(crate::application::ScanCoordinator::default()),
+        scan_mutation: tokio::sync::Mutex::new(()),
         ui_path: std::sync::Mutex::new(None),
         xdg_activation_token: std::sync::Mutex::new(None),
         dbus_conn: std::sync::Mutex::new(None),

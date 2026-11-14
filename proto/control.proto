@@ -108,6 +108,7 @@ message Request {
     WallpaperHideRequest        wallpaper_hide = 91;
     LibraryRenameRequest        library_rename = 92;
     LibraryEditRequest          library_edit = 93;
+    LibraryRelocateRequest      library_relocate = 94;
   }
 }
 
@@ -203,6 +204,7 @@ message Response {
     WallpaperHideResponse        wallpaper_hide = 91;
     Empty                        library_rename = 92;
     Empty                        library_edit = 93;
+    Empty                        library_relocate = 94;
   }
 }
 
@@ -1476,6 +1478,11 @@ message LibraryEditRequest {
 message LibraryRenameRequest {
   int64 id = 1;
   string name = 2;
+}
+
+message LibraryRelocateRequest {
+  int64 id = 1;
+  string path = 2;
 }
 
 message LibraryRemoveRequest {

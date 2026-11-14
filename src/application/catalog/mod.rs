@@ -13,7 +13,7 @@ mod query;
 mod remote;
 mod watch;
 
-pub use libraries::{add_library, edit_library, rename_library};
+pub use libraries::{add_library, edit_library, relocate_library, rename_library};
 pub use query::ordered_entry_ids;
 pub use remote::{
     download_remote, publish_remote_download_progress, remote_capability,
@@ -216,6 +216,7 @@ pub(super) async fn run_scan_pass(
     app: &Arc<DaemonContext>,
     scope: super::scan::Scope,
 ) -> Result<usize> {
+    let _scan = app.scan_mutation.lock().await;
     let _invalidate = super::wallpaper_query::InvalidateOnDrop(app.wallpaper_changes.clone());
     use std::sync::atomic::Ordering;
     app.scan_in_progress.store(true, Ordering::SeqCst);

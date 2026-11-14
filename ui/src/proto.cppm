@@ -200,6 +200,7 @@ using proto::LibraryEditRequest;
 using proto::LibraryInstance;
 using proto::LibraryListRequest;
 using proto::LibraryListResponse;
+using proto::LibraryRelocateRequest;
 using proto::LibraryRemoved;
 using proto::LibraryRemoveRequest;
 using proto::LibraryRenameRequest;

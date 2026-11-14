@@ -32,6 +32,7 @@ pub(crate) struct DaemonContext {
     pub(crate) ws_port: std::sync::atomic::AtomicU16,
     pub(crate) scan_in_progress: std::sync::atomic::AtomicBool,
     pub(crate) scans: Arc<crate::application::ScanCoordinator>,
+    pub(crate) scan_mutation: tokio::sync::Mutex<()>,
     pub(crate) ui_path: std::sync::Mutex<Option<PathBuf>>,
     /// Latest tray/host xdg-activation token (SNI `ProvideXdgActivationToken`).
     pub(crate) xdg_activation_token: std::sync::Mutex<Option<String>>,

@@ -86,6 +86,31 @@ private:
     QVariantMap m_settings;
 };
 
+export class LibraryRelocateQuery : public Query,
+                                    public QueryExtra<control::v1::Response, LibraryRelocateQuery> {
+    Q_OBJECT
+    QML_ELEMENT
+
+    Q_PROPERTY(qint64 libraryId READ libraryId WRITE setLibraryId NOTIFY libraryIdChanged)
+    Q_PROPERTY(QString path READ path WRITE setPath NOTIFY pathChanged)
+
+public:
+    LibraryRelocateQuery(QObject* parent = nullptr);
+
+    auto libraryId() const -> qint64;
+    void setLibraryId(qint64 v);
+    auto path() const -> const QString&;
+    void setPath(const QString& v);
+    void reload() override;
+
+    Q_SIGNAL void libraryIdChanged();
+    Q_SIGNAL void pathChanged();
+
+private:
+    qint64  m_library_id = 0;
+    QString m_path;
+};
+
 export class LibraryAutoDetectQuery
     : public Query,
       public QueryExtra<control::v1::Response, LibraryAutoDetectQuery> {

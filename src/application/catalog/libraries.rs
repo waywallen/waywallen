@@ -121,6 +121,37 @@ pub async fn edit_library(
     Ok(())
 }
 
+pub async fn relocate_library(app: &Arc<DaemonContext>, id: i64, path: &str) -> Result<()> {
+    let _scan = app.scan_mutation.lock().await;
+    let _playlist = app.playlist_mutation.lock().await;
+    let path = library_directory(path).await?;
+    let lib = repo::relocate_library(&app.db, id, &path).await?;
+    let plugin = repo::find_plugin_by_id(&app.db, lib.plugin_id)
+        .await?
+        .ok_or_else(|| Error::SourcePluginNotFound(lib.plugin_id.to_string()))?;
+    app.router.upsert_library(LibrarySnapshot {
+        settings: repo::library_settings(&lib)?,
+        id: lib.id,
+        name: lib.name,
+        path: lib.path,
+        plugin_name: plugin.name,
+    });
+    app.wallpaper_changes
+        .send_modify(|generation| *generation += 1);
+    let rescan_app = app.clone();
+    app.tasks.spawn_async(
+        crate::tasks::TaskKind::Generic,
+        "scan/refresh-after-library-relocate",
+        async move {
+            super::refresh_sources(&rescan_app)
+                .await
+                .map(|_| ())
+                .map_err(anyhow::Error::from)
+        },
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

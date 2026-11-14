@@ -2185,6 +2185,11 @@ pub(super) async fn dispatch_inner(
             Res::LibraryRename(pb::Empty {})
         }
 
+        Req::LibraryRelocate(r) => {
+            application::relocate_library(&state, r.id, &r.path).await?;
+            Res::LibraryRelocate(pb::Empty {})
+        }
+
         Req::LibraryAutoDetect(_) => {
             let added = application::auto_detect_libraries(&state).await?;
             Res::LibraryAutoDetect(pb::LibraryAutoDetectResponse {

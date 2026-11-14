@@ -165,6 +165,59 @@ pub async fn edit_library(
     am.update(db).await.context("edit library")
 }
 
+pub async fn relocate_library(
+    db: &DatabaseConnection,
+    id: i64,
+    path: &str,
+) -> Result<library::Model> {
+    use crate::model::entities::playlist_item;
+
+    let txn = db.begin().await.context("begin library relocation")?;
+    let existing = library::Entity::find_by_id(id)
+        .one(&txn)
+        .await
+        .context("select library to relocate")?
+        .ok_or(Error::LibraryNotFound(id))?;
+    let key = library_path_key(path);
+    let libraries = library::Entity::find()
+        .filter(library::Column::PluginId.eq(existing.plugin_id))
+        .filter(library::Column::Id.ne(id))
+        .all(&txn)
+        .await
+        .context("select libraries for relocation")?;
+    if let Some(other) = libraries
+        .into_iter()
+        .find(|other| other.path == path || library_path_key(&other.path) == key)
+    {
+        return Err(Error::InvalidArgument(format!(
+            "Library folder is already registered: {}",
+            other.path
+        )));
+    }
+    let referenced = playlist_item::Entity::find()
+        .find_also_related(item::Entity)
+        .filter(item::Column::LibraryId.eq(id))
+        .all(&txn)
+        .await
+        .context("select playlist wallpapers for relocation")?;
+    for (_, item) in referenced {
+        if let Some(item) = item {
+            let destination = std::path::Path::new(path).join(&item.path);
+            if tokio::fs::metadata(&destination).await.is_err() {
+                return Err(Error::InvalidArgument(format!(
+                    "Library folder is missing a playlist wallpaper: {}",
+                    item.path
+                )));
+            }
+        }
+    }
+    let mut active: library::ActiveModel = existing.into();
+    active.path = Set(path.to_owned());
+    let library = active.update(&txn).await.context("relocate library")?;
+    txn.commit().await.context("commit library relocation")?;
+    Ok(library)
+}
+
 pub async fn find_library(
     db: &impl ConnectionTrait,
     plugin_id: i64,
