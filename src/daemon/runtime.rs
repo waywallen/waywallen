@@ -97,7 +97,7 @@ where
             log::info!("SIGINT received, shutting down");
             false
         }
-        _ = sigterm.recv() => {
+        Some(()) = sigterm.recv() => {
             log::info!("SIGTERM received, shutting down");
             false
         }
@@ -110,9 +110,9 @@ where
             }
             false
         }
-        _ = async {
+        Ok(_) = async {
             let mut receiver = state.shutdown_subscribe();
-            let _ = receiver.wait_for(|requested| *requested).await;
+            receiver.wait_for(|requested| *requested).await
         } => {
             log::info!("shutdown requested");
             false
