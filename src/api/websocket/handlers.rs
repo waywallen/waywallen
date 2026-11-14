@@ -1948,6 +1948,12 @@ pub(super) async fn dispatch_inner(
                 }
             }
 
+            let new_filters = filter_rules_from_pb(
+                r.global
+                    .as_ref()
+                    .map(|global| global.wallpaper_filters.as_slice())
+                    .unwrap_or_default(),
+            )?;
             let new_auto_replay = r
                 .global
                 .as_ref()
@@ -1971,11 +1977,6 @@ pub(super) async fn dispatch_inner(
             let prev_debug_logging = previous_settings.global.debug_logging_enabled;
             state.settings.update(|s| {
                 if let Some(g) = r.global.as_ref() {
-                    let filters: Vec<_> = g
-                        .wallpaper_filters
-                        .iter()
-                        .filter_map(filter_rule_from_pb)
-                        .collect();
                     let filter_logics: Vec<_> = g
                         .wallpaper_filter_logics
                         .iter()
@@ -1987,7 +1988,7 @@ pub(super) async fn dispatch_inner(
                         .filter_map(sort_rule_from_pb)
                         .collect();
                     s.global.wallpaper_filter =
-                        WallpaperFilterState::from_catalog(&filters, &filter_logics);
+                        WallpaperFilterState::from_catalog(&new_filters, &filter_logics);
                     s.global.wallpaper_sorts = WallpaperSortRuleState::vec_from_catalog(&sorts);
                     s.global.wallpaper_skip_types = g.wallpaper_skip_types.clone();
                     s.global.wallpaper_filter_tags = g.wallpaper_filter_tags.clone();

@@ -6,11 +6,7 @@ pub(super) fn selection_from_request(
     use crate::catalog::query::{HiddenFilter, WallpaperSelection};
     let invalid = || Error::InvalidArgument("invalid wallpaper selection".into());
     let selection = WallpaperSelection {
-        filters: r
-            .filters
-            .iter()
-            .map(|f| filter_rule_from_pb(f).ok_or_else(invalid))
-            .collect::<crate::error::Result<_>>()?,
+        filters: filter_rules_from_pb(&r.filters)?,
         logics: r
             .filter_logics
             .iter()
@@ -138,6 +134,23 @@ pub(super) fn playlist_source_to_pb(
             }),
         }),
     }
+}
+
+pub(super) fn filter_rules_from_pb(
+    rules: &[pb::WallpaperFilterRule],
+) -> crate::error::Result<Vec<crate::catalog::FilterRule>> {
+    rules
+        .iter()
+        .enumerate()
+        .map(|(index, rule)| {
+            filter_rule_from_pb(rule).ok_or_else(|| {
+                Error::InvalidArgument(format!(
+                    "invalid wallpaper filter rule {}: check type, condition and value",
+                    index + 1
+                ))
+            })
+        })
+        .collect()
 }
 
 pub(super) fn filter_rule_from_pb(

@@ -80,6 +80,8 @@ public:
     WallpaperFilterRuleModel(QObject* parent = nullptr);
     ~WallpaperFilterRuleModel() override;
 
+    auto roleNames() const -> QHash<int, QByteArray> override;
+    auto data(const QModelIndex& index, int role) const -> QVariant override;
     void fromVariantlist(const QVariantList& v) override;
 };
 

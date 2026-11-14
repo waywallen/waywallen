@@ -316,6 +316,43 @@ fn catalog_filter_mapping_preserves_legacy_tag_payload() {
 }
 
 #[test]
+fn filter_rules_reject_invalid_entries_instead_of_dropping_them() {
+    use crate::catalog::query::{FilterPredicate, FilterRule, IntMatch};
+
+    let rule = FilterRule {
+        group: 0,
+        predicate: FilterPredicate::Height {
+            value: 1800,
+            condition: IntMatch::Greater,
+        },
+    };
+    let valid = filter_rule_to_pb(&rule);
+    assert_eq!(filter_rules_from_pb(&[valid.clone()]).unwrap(), [rule]);
+    assert!(filter_rules_from_pb(&[]).unwrap().is_empty());
+
+    for invalid in [
+        pb::WallpaperFilterRule::default(),
+        pb::WallpaperFilterRule {
+            payload: None,
+            ..valid.clone()
+        },
+        pb::WallpaperFilterRule {
+            payload: Some(pb::wallpaper_filter_rule::Payload::IntFilter(
+                pb::WallpaperIntFilter {
+                    value: 1800,
+                    condition: pb::IntCondition::Unspecified as i32,
+                },
+            )),
+            ..valid.clone()
+        },
+    ] {
+        let error = filter_rules_from_pb(&[valid.clone(), invalid]).unwrap_err();
+        assert!(matches!(error, Error::InvalidArgument(_)));
+        assert!(error.to_string().contains("filter rule 2"));
+    }
+}
+
+#[test]
 fn catalog_query_wire_mapping_round_trips() {
     let rule = crate::catalog::FilterRule {
         group: 2,

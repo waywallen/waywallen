@@ -236,6 +236,43 @@ WallpaperFilterRuleModel::WallpaperFilterRuleModel(QObject* parent): FilterRuleM
 
 WallpaperFilterRuleModel::~WallpaperFilterRuleModel() = default;
 
+auto WallpaperFilterRuleModel::roleNames() const -> QHash<int, QByteArray> {
+    auto roles = FilterRuleModel::roleNames();
+    for (auto it = roles.begin(); it != roles.end();) {
+        const auto property = propertyOfRole(it.key());
+        if (property && ! property->isScriptable())
+            it = roles.erase(it);
+        else
+            ++it;
+    }
+    return roles;
+}
+
+auto WallpaperFilterRuleModel::data(const QModelIndex& index, int role) const -> QVariant {
+    if (! index.isValid() || index.row() < 0 || index.row() >= rowCount()) return {};
+    const auto property = propertyOfRole(role);
+    if (! property) return FilterRuleModel::data(index, role);
+    if (! property->isScriptable()) return {};
+
+    // Reading an inactive Qt Protobuf oneof getter can replace the stored payload.
+    const QByteArray name = property->name();
+    if (name == "stringFilter" || name == "intFilter" || name == "tagFilter") {
+        const auto rule = item(index.row()).value<control::v1::WallpaperFilterRule>();
+        if (name == "stringFilter") {
+            return QVariant::fromValue(rule.hasStringFilter()
+                                           ? rule.stringFilter()
+                                           : control::v1::WallpaperStringFilter {});
+        }
+        if (name == "intFilter") {
+            return QVariant::fromValue(rule.hasIntFilter() ? rule.intFilter()
+                                                           : control::v1::WallpaperIntFilter {});
+        }
+        return QVariant::fromValue(rule.hasTagFilter() ? rule.tagFilter()
+                                                       : control::v1::WallpaperTagFilter {});
+    }
+    return FilterRuleModel::data(index, role);
+}
+
 void WallpaperFilterRuleModel::fromVariantlist(const QVariantList& v) {
     auto view = std::views::transform(v, [](const QVariant& value) {
         return value.value<control::v1::WallpaperFilterRule>();
