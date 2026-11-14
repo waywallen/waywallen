@@ -125,9 +125,16 @@ impl PluginStateStore {
     }
 
     fn save_atomic(&self, plugin_id: &str, path: &Path, bytes: &[u8], kind: &str) -> Result<()> {
+        // Only tighten the permissions of a directory we just created. Re-applying 0700 to an
+        // existing directory rewrites the access control list mask, which silently revokes any
+        // grants made on purpose (for example a login-manager account that reads the state dir
+        // through a shared profile).
+        let root_existed = self.root.is_dir();
         std::fs::create_dir_all(&self.root)
             .with_context(|| format!("create plugin state dir {}", self.root.display()))?;
-        set_user_only_dir(&self.root)?;
+        if !root_existed {
+            set_user_only_dir(&self.root)?;
+        }
 
         let temp = self.root.join(format!(
             ".{}.{}.tmp",
@@ -280,6 +287,22 @@ mod tests {
             assert_eq!(dir_mode, 0o700);
             assert_eq!(file_mode, 0o600);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_state_dir_permissions_are_preserved() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("state");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o750)).unwrap();
+
+        let store = PluginStateStore::new(root.clone(), dir.path().to_path_buf());
+        assert!(store.save_if_changed("org.example", None, "one").unwrap());
+
+        let dir_mode = std::fs::metadata(&root).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dir_mode, 0o750);
     }
 
     #[test]
