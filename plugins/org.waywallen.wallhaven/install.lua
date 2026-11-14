@@ -16,6 +16,7 @@ lito.install({
     { source = "wallhaven/wallpaper.lua", destination = plugin_path("wallhaven/wallpaper.lua") },
     { source = "i18n/de.po", destination = plugin_path("i18n/de.po") },
     { source = "i18n/ru.po", destination = plugin_path("i18n/ru.po") },
+    { source = "i18n/uk.po", destination = plugin_path("i18n/uk.po") },
     { source = "i18n/zh-CN.po", destination = plugin_path("i18n/zh-CN.po") },
   },
   inventories = {

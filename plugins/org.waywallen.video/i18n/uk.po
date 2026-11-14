@@ -1,0 +1,66 @@
+msgid ""
+msgstr "Project-Id-Version: org.waywallen.video 0.6.0\nLanguage: uk\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+#: main.lua:15
+msgid "A directory containing video files. Subdirectories up to two levels deep are also scanned. Supported formats: MP4, MKV, WebM, MOV, AVI, and other common containers."
+msgstr "Каталог із відеофайлами. Також скануються підкаталоги глибиною до двох рівнів. Підтримувані формати: MP4, MKV, WebM, MOV, AVI та інші поширені контейнери."
+
+#: plugin.toml
+msgid "Audio"
+msgstr "Звук"
+
+#: plugin.toml
+msgid "Decoding"
+msgstr "Декодування"
+
+#: plugin.toml video/wallpaper.lua:11
+msgid "Enable audio"
+msgstr "Увімкнути звук"
+
+#: plugin.toml
+msgid "Frame rate"
+msgstr "Частота кадрів"
+
+#: plugin.toml
+msgid "Hardware decoding"
+msgstr "Апаратне декодування"
+
+#: plugin.toml
+msgid "Loop playback"
+msgstr "Повтор відтворення"
+
+#: plugin.toml
+msgid "Playback"
+msgstr "Відтворення"
+
+#: video/wallpaper.lua:16
+msgid "Playback speed"
+msgstr "Швидкість відтворення"
+
+#: plugin.toml
+msgid "Render node"
+msgstr "Вузол рендерингу"
+
+#: plugin.toml
+msgid "Rendering"
+msgstr "Рендеринг"
+
+#: plugin.toml
+msgid "Resolution"
+msgstr "Роздільність"
+
+#: video/wallpaper.lua:6
+msgid "Scheme color"
+msgstr "Колірна схема"
+
+#: plugin.toml
+msgid "Video"
+msgstr "Відео"
+
+#: main.lua:14
+msgid "Video Folder"
+msgstr "Папка з відео"
+
+#: plugin.toml
+msgid "Volume"
+msgstr "Гучність"
