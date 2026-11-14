@@ -5,6 +5,7 @@ module waywallen;
 import qextra;
 import :query.autostart;
 import :app;
+import :util;
 
 using namespace qextra::prelude;
 
@@ -32,7 +33,16 @@ void AutostartGetQuery::reload() {
         if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
-            const bool enabled = rsp.autostartGet().enabled();
+            const auto& state = rsp.autostartGet();
+            const bool  supported =
+                state.hasSupported() ? state.supported() : Util::instance()->isFlatpak();
+            if (self->m_supported != supported ||
+                self->m_unavailable_reason != state.unavailableReason()) {
+                self->m_supported          = supported;
+                self->m_unavailable_reason = state.unavailableReason();
+                Q_EMIT self->availabilityChanged();
+            }
+            const bool enabled = state.enabled();
             if (self->m_enabled == enabled) return;
             self->m_enabled = enabled;
             Q_EMIT self->enabledChanged();

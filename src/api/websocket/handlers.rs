@@ -1706,9 +1706,14 @@ pub(super) async fn dispatch_inner(
             })
         }
 
-        Req::AutostartGet(_) => Res::AutostartGet(pb::AutostartGetResponse {
-            enabled: state.autostart.enabled(&state.settings)?,
-        }),
+        Req::AutostartGet(_) => {
+            let status = state.autostart.status(&state.settings);
+            Res::AutostartGet(pb::AutostartGetResponse {
+                enabled: status.enabled,
+                supported: Some(status.supported),
+                unavailable_reason: status.unavailable_reason,
+            })
+        }
 
         Req::AutostartSet(r) => Res::AutostartSet(pb::AutostartSetResponse {
             enabled: state

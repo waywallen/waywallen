@@ -1916,11 +1916,12 @@ message SettingsChanged {
   map<string, PluginSettings> plugins = 2;
 }
 
-// Flatpak-only login startup integration through
-// org.freedesktop.portal.Background.
+// Login startup through the Flatpak portal or a user desktop entry.
 message AutostartGetRequest {}
 message AutostartGetResponse {
   bool enabled = 1;
+  optional bool supported = 2;
+  string unavailable_reason = 3;
 }
 
 message AutostartSetRequest {

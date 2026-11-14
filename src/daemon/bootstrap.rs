@@ -227,6 +227,10 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         shutdown_tx.subscribe(),
         task_mgr.as_ref(),
     );
+    let autostart = system::autostart::AutostartService::default();
+    if let Err(error) = autostart.refresh() {
+        log::warn!("could not refresh login startup: {error}");
+    }
     let state = Arc::new(DaemonContext {
         renderer_manager: renderer_mgr,
         _audio: audio_service,
@@ -241,7 +245,7 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         source_plugins,
         plugin_translations,
         plugin_mutation: tokio::sync::Mutex::new(()),
-        autostart: system::autostart::AutostartService::default(),
+        autostart,
         router: router.clone(),
         display_backend_status: std::sync::RwLock::new(
             display::spawner::DisplayBackendStatus::default(),
