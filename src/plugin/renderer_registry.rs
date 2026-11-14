@@ -1401,6 +1401,7 @@ types = ["image"]
         for (key, expected) in [
             ("fps", "30"),
             ("exposure", "1"),
+            ("fxaa", "auto"),
             ("animation", "0"),
             ("loop", "true"),
         ] {
@@ -1421,6 +1422,12 @@ types = ["image"]
             coerce_and_validate("animation", "-1", &renderer.settings["animation"]).unwrap(),
             "-1"
         );
+        let fxaa = &renderer.settings["fxaa"];
+        for value in ["on", "off"] {
+            assert_eq!(coerce_and_validate("fxaa", value, fxaa).unwrap(), value);
+        }
+        assert!(coerce_and_validate("fxaa", "invalid", fxaa).is_err());
+        assert!(!fxaa.identity);
         assert!(!renderer.settings["exposure"].identity);
         assert!(!renderer.settings["animation"].identity);
         assert!(!renderer.settings["loop"].identity);
