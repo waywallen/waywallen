@@ -92,11 +92,19 @@ MD.ItemDelegate {
         case "string":
         case "wp_type":
         case "rating":
-            root.model.stringFilter = emptyStringFilter;
-            break;
+            {
+                const value = emptyStringFilter;
+                value.condition = option.kind === "string" ? WC.StringCondition.STRING_CONDITION_CONTAINS : WC.StringCondition.STRING_CONDITION_IS;
+                root.model.stringFilter = value;
+                break;
+            }
         case "int":
-            root.model.intFilter = emptyIntFilter;
-            break;
+            {
+                const value = emptyIntFilter;
+                value.condition = WC.IntCondition.INT_CONDITION_EQUAL;
+                root.model.intFilter = value;
+                break;
+            }
         case "library":
             {
                 const value = emptyIntFilter;
@@ -105,10 +113,16 @@ MD.ItemDelegate {
                 break;
             }
         case "tag":
-            root.model.tagFilter = emptyTagFilter;
-            break;
+            {
+                const value = emptyTagFilter;
+                value.condition = WC.StringCondition.STRING_CONDITION_IS;
+                root.model.tagFilter = value;
+                break;
+            }
         }
         root.model.type = option.value;
+        if (root.currentSpec.syncFromFilter)
+            root.currentSpec.syncFromFilter();
     }
 
     W.StringFilter {

@@ -18,6 +18,7 @@ class FilterRuleModel : public kstore::QGadgetListModel {
     QML_ANONYMOUS
 
     Q_PROPERTY(bool dirty READ dirty NOTIFY dirtyChanged FINAL)
+    Q_PROPERTY(bool valid READ valid NOTIFY draftChanged FINAL)
     Q_PROPERTY(QList<waywallen::control::v1::FilterLogic> filterLogics READ filterLogics WRITE
                    setFilterLogics NOTIFY filterLogicsChanged FINAL)
 
@@ -25,8 +26,11 @@ public:
     FilterRuleModel(kstore::QListInterface* list, QObject* parent = nullptr);
     ~FilterRuleModel() override;
 
-    Q_SIGNAL void apply();
-    Q_SIGNAL void reset();
+    Q_INVOKABLE void apply();
+    Q_SIGNAL void    applied();
+    Q_SIGNAL void    draftChanged();
+    virtual bool     valid() const = 0;
+    Q_SIGNAL void    reset();
 
     Q_INVOKABLE void replaceState(const QList<waywallen::control::v1::WallpaperFilterRule>& filters,
                                   const QList<waywallen::control::v1::FilterLogic>& filterLogics);
@@ -80,6 +84,7 @@ public:
     WallpaperFilterRuleModel(QObject* parent = nullptr);
     ~WallpaperFilterRuleModel() override;
 
+    bool valid() const override;
     auto roleNames() const -> QHash<int, QByteArray> override;
     auto data(const QModelIndex& index, int role) const -> QVariant override;
     void fromVariantlist(const QVariantList& v) override;

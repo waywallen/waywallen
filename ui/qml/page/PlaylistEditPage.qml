@@ -87,7 +87,7 @@ MD.Page {
     }
 
     function flushFilterDraft() {
-        if (smart && filterModel.dirty)
+        if (smart && filterModel.dirty && filterModel.valid)
             filterModel.apply();
     }
 
@@ -177,7 +177,7 @@ MD.Page {
     }
 
     function applyDraft() {
-        if (!canEdit)
+        if (!canEdit || (smart && !filterModel.valid))
             return;
         flushFilterDraft();
         if (!dirty)
@@ -202,7 +202,7 @@ MD.Page {
 
         text: qsTr("Apply")
         icon.name: MD.Token.icon.check
-        enabled: root.canEdit && root.dirty
+        enabled: root.canEdit && root.dirty && (!root.smart || filterModel.valid)
         busy: mutationQuery.querying
         onTriggered: root.applyDraft()
     }
@@ -223,8 +223,8 @@ MD.Page {
 
     W.WallpaperFilterRuleModel {
         id: filterModel
-        onApply: previewQuery.replaceFilterState(items(), filterLogics)
-        onDirtyChanged: if (dirty)
+        onApplied: previewQuery.replaceFilterState(items(), filterLogics)
+        onDraftChanged: if (dirty)
             Qt.callLater(root.flushFilterDraft)
     }
 

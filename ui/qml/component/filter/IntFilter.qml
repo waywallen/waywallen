@@ -18,8 +18,7 @@ QtObject {
         { name: qsTr("less"),          value: WC.IntCondition.INT_CONDITION_LESS },
         { name: qsTr("less equal"),    value: WC.IntCondition.INT_CONDITION_LESS_EQUAL },
         { name: qsTr("greater"),       value: WC.IntCondition.INT_CONDITION_GREATER },
-        { name: qsTr("greater equal"), value: WC.IntCondition.INT_CONDITION_GREATER_EQUAL },
-        { name: qsTr("any"),           value: WC.IntCondition.INT_CONDITION_UNSPECIFIED }
+        { name: qsTr("greater equal"), value: WC.IntCondition.INT_CONDITION_GREATER_EQUAL }
     ]
 
     readonly property Component valueDelegate: Component {

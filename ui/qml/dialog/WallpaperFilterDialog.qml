@@ -221,7 +221,7 @@ MD.Dialog {
                     mdState.size: MD.Enum.XS
                     mdState.type: MD.Enum.BtFilledTonal
                     text: qsTr("Apply")
-                    enabled: !!root.model && root.model.dirty
+                    enabled: !!root.model && root.model.dirty && root.model.valid
                     onClicked: root.model.apply()
                 }
                 Row {
