@@ -27,8 +27,9 @@ pub struct DeCaps {
     pub wayland_display: Option<String>,
     /// True when `XDG_SESSION_TYPE == "wayland"`.
     pub is_wayland_session: bool,
-    /// Placeholder for future `wl_registry` probe — list of global names
-    /// like `"wlr-layer-shell"`, `"linux-dmabuf-v4"`, `"plasma-shell"`.
+    /// Capability tokens from the `wl_registry` probe, like
+    /// `"wlr-layer-shell"` and `"linux-dmabuf-v4"`. Left empty by
+    /// `detect_de`; see [`pick_backend_with_probe`].
     pub probed_globals: Vec<String>,
     pub flatpak_id: Option<String>,
 }
@@ -198,10 +199,27 @@ pub fn pick_backend(reg: &DisplayRegistry, caps: &DeCaps) -> PickOutcome {
         return PickOutcome::None;
     }
 
-    match matching_backends(reg, caps).into_iter().next() {
-        Some(def) => PickOutcome::Matched(def),
-        None => PickOutcome::None,
+    if let Some(def) = matching_backends(reg, caps).into_iter().next() {
+        return PickOutcome::Matched(def);
     }
+
+    // Unknown desktop: take the highest-priority daemon-spawned backend whose
+    // `requires` the compositor advertises. Backends without `requires`
+    // (gnome-shell and friends) never match this way.
+    if caps.probed_globals.is_empty() {
+        return PickOutcome::None;
+    }
+    reg.all()
+        .iter()
+        .filter(|d| matches!(d.spawn, SpawnMode::Daemon) && !d.requires.is_empty())
+        .filter(|d| !d.de.iter().any(|t| t.eq_ignore_ascii_case("kde")))
+        .find(|d| {
+            d.requires
+                .iter()
+                .all(|r| caps.probed_globals.iter().any(|g| g == r))
+        })
+        .map(|d| PickOutcome::Matched(d.clone()))
+        .unwrap_or(PickOutcome::None)
 }
 
 /// Non-KDE backends applicable to `caps`, in pick order: highest priority
@@ -278,6 +296,39 @@ pub fn fallback_backends(
         .skip_while(|d| d.name != picked.name)
         .skip(1)
         .collect()
+}
+
+/// [`pick_backend`], but when nothing matched by desktop name, ask `probe`
+/// for the compositor's capabilities and try again. Recognised desktops and
+/// KDE never reach the probe.
+pub fn pick_backend_with_probe(
+    reg: &DisplayRegistry,
+    caps: &DeCaps,
+    probe: impl FnOnce(&DeCaps) -> Vec<String>,
+) -> PickOutcome {
+    let outcome = pick_backend(reg, caps);
+    if !matches!(outcome, PickOutcome::None) || caps.is_kde() || !caps.probed_globals.is_empty() {
+        return outcome;
+    }
+    let probed_globals = probe(caps);
+    if probed_globals.is_empty() {
+        return outcome;
+    }
+    log::info!(
+        "no display backend matched xdg_desktop={:?}; compositor advertises {:?}",
+        caps.xdg_desktop,
+        probed_globals
+    );
+    let caps = DeCaps {
+        probed_globals,
+        ..caps.clone()
+    };
+    pick_backend(reg, &caps)
+}
+
+/// Probe the Wayland compositor named by `caps.wayland_display`.
+pub fn probe_wayland(caps: &DeCaps) -> Vec<String> {
+    super::wl_probe::probe_capabilities(caps.wayland_display.as_deref())
 }
 
 /// Convenience: log the outcome at info level with enough detail to
@@ -744,6 +795,110 @@ mod tests {
             other => panic!("expected Matched(gnome-shell), got {other:?}"),
         }
         assert!(!should_daemon_spawn(&outcome));
+    }
+
+    fn layer_shell_caps() -> Vec<String> {
+        vec!["wlr-layer-shell".into(), "linux-dmabuf-v4".into()]
+    }
+
+    #[test]
+    fn unknown_desktop_picks_layer_shell_from_probed_globals() {
+        // MATE, Cinnamon and Xfce on Wayland skip the X11 client and reach
+        // the probe like any other unknown desktop (Cinnamon 6.8 has layer-shell).
+        for desktop in [
+            &["dde"][..],
+            &["budgie"],
+            &["xfce"],
+            &["lxqt"],
+            &["x-cinnamon"],
+            &["mate"],
+            &[],
+        ] {
+            let caps = DeCaps {
+                xdg_desktop: desktop.iter().map(|s| s.to_string()).collect(),
+                wayland_display: Some("wayland-0".into()),
+                is_wayland_session: true,
+                ..Default::default()
+            };
+            assert!(matches!(
+                pick_backend(&registry(), &caps),
+                PickOutcome::None
+            ));
+            match pick_backend_with_probe(&registry(), &caps, |_| layer_shell_caps()) {
+                PickOutcome::Matched(d) => assert_eq!(d.name, "layer-shell"),
+                other => panic!("expected Matched(layer-shell) for {desktop:?}, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn unknown_desktop_without_required_globals_stays_unmatched() {
+        let caps = DeCaps {
+            xdg_desktop: vec!["x-cinnamon".into()],
+            is_wayland_session: true,
+            ..Default::default()
+        };
+        for probed in [
+            vec![],
+            vec!["linux-dmabuf-v4".to_string()],
+            vec!["wlr-layer-shell".to_string()],
+        ] {
+            let outcome = pick_backend_with_probe(&registry(), &caps, |_| probed.clone());
+            assert!(
+                matches!(outcome, PickOutcome::None),
+                "{probed:?}: {outcome:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn known_desktops_and_kde_never_probe() {
+        for desktop in ["kde", "gnome", "sway", "hyprland"] {
+            let caps = DeCaps {
+                xdg_desktop: vec![desktop.into()],
+                ..Default::default()
+            };
+            let probe = |_: &DeCaps| -> Vec<String> { panic!("probed on {desktop}") };
+            assert!(!matches!(
+                pick_backend_with_probe(&registry(), &caps, probe),
+                PickOutcome::None
+            ));
+        }
+
+        // KDE without its plugin keeps running without a backend, even if
+        // KWin advertises layer-shell.
+        let mut reg = DisplayRegistry::new();
+        reg.register(registry().find("layer-shell").unwrap().clone());
+        let caps = DeCaps {
+            xdg_desktop: vec!["kde".into()],
+            ..Default::default()
+        };
+        let outcome = pick_backend_with_probe(&reg, &caps, |_| layer_shell_caps());
+        assert!(matches!(outcome, PickOutcome::None));
+    }
+
+    #[test]
+    fn probed_fallback_skips_backends_without_requires() {
+        let caps = DeCaps {
+            xdg_desktop: vec!["pantheon".into()],
+            probed_globals: layer_shell_caps(),
+            ..Default::default()
+        };
+        let mut reg = DisplayRegistry::new();
+        reg.register(def(
+            "external-shell",
+            &["pantheon-x"],
+            100,
+            SpawnMode::External,
+        ));
+        reg.register(def("no-requires", &["other"], 90, SpawnMode::Daemon));
+        assert!(matches!(pick_backend(&reg, &caps), PickOutcome::None));
+
+        reg.register(registry().find("layer-shell").unwrap().clone());
+        match pick_backend(&reg, &caps) {
+            PickOutcome::Matched(d) => assert_eq!(d.name, "layer-shell"),
+            other => panic!("expected Matched(layer-shell), got {other:?}"),
+        }
     }
 
     #[test]
