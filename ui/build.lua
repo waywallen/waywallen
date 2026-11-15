@@ -29,6 +29,7 @@ qt.translations({
     "i18n/waywallen_de.ts",
     "i18n/waywallen_fr.ts",
     "i18n/waywallen_es.ts",
+    "i18n/waywallen_uk.ts",
   },
   resource_prefix = "/i18n",
 })
