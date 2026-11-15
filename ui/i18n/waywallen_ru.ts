@@ -2545,12 +2545,12 @@ Unsaved frame state may be lost.</source>
     <message>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="125"/>
         <source>Fill cell</source>
-        <translation>Заполнить ячейку</translation>
+        <translation>На всю ячейку</translation>
     </message>
     <message>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="131"/>
         <source>Fixed</source>
-        <translation>Фиксированное</translation>
+        <translation>Фиксированный</translation>
     </message>
     <message>
         <location filename="../qml/page/wallpaper/TweakSheet.qml" line="141"/>
