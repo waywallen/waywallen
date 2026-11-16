@@ -34,7 +34,7 @@ function M.info()
                     {
                         key = "api_key",
                         label = tr("API key"),
-                        description = tr("Copy the API key from Wallhaven Account Settings."),
+                        description = tr("Copy the API key from Wallhaven Account Settings: https://wallhaven.cc/settings/account"),
                         placeholder = tr("Wallhaven API key"),
                         secret = true,
                         required = true,
