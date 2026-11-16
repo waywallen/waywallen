@@ -314,6 +314,8 @@ auto App::presentationManager() const -> PresentationManager* {
     return d->m_presentation_mgr.as_mut_ptr();
 }
 
+auto App::version() const -> QString { return QStringLiteral(LITO_PKG_VERSION); }
+
 auto App::networkCacheSize() const -> qint64 {
     Q_D(const App);
     return d->m_network_cache_size;
