@@ -50,7 +50,11 @@ fn select_display_backend(
     requested: Option<&str>,
 ) -> anyhow::Result<display::spawner::PickOutcome> {
     let Some(name) = requested else {
-        return Ok(display::spawner::pick_backend(registry, caps));
+        return Ok(display::spawner::pick_backend_with_probe(
+            registry,
+            caps,
+            display::spawner::probe_wayland,
+        ));
     };
     let Some(def) = registry.find(name) else {
         let available = registry
