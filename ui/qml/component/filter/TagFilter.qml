@@ -31,10 +31,6 @@ QtObject {
         {
             name: qsTr("has none"),
             value: WC.StringCondition.STRING_CONDITION_IS_NOT
-        },
-        {
-            name: qsTr("any"),
-            value: WC.StringCondition.STRING_CONDITION_UNSPECIFIED
         }
     ]
 

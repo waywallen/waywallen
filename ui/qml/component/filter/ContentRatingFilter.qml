@@ -20,8 +20,7 @@ QtObject {
 
     readonly property var conditionModel: [
         { name: qsTr("is"),     value: WC.StringCondition.STRING_CONDITION_IS },
-        { name: qsTr("is not"), value: WC.StringCondition.STRING_CONDITION_IS_NOT },
-        { name: qsTr("any"),    value: WC.StringCondition.STRING_CONDITION_UNSPECIFIED }
+        { name: qsTr("is not"), value: WC.StringCondition.STRING_CONDITION_IS_NOT }
     ]
 
     readonly property var ratingOptions: {

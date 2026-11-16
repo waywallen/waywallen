@@ -1,5 +1,6 @@
 module;
 #include "waywallen/model/filter_rule_model.moc.h"
+#include "waywallen/model/wallpaper_filter_validation.hpp"
 module waywallen;
 import :model.filter_rule;
 import qextra;
@@ -14,9 +15,6 @@ FilterRuleModel::FilterRuleModel(kstore::QListInterface* list, QObject* parent)
     connect(this, &QAbstractItemModel::rowsRemoved, this, &FilterRuleModel::markDirty);
     connect(this, &FilterRuleModel::filterLogicsChanged, this, &FilterRuleModel::markDirty);
 
-    connect(this, &FilterRuleModel::apply, this, [this]() {
-        setDirty(false);
-    });
     connect(this, &FilterRuleModel::reset, this, [this]() {
         setDirty(false);
     });
@@ -156,14 +154,13 @@ void FilterRuleModel::appendRuleInGroup(int group) {
     const int row  = findInsertPosition(group);
     if (! insertRows(row, 1)) return;
     if (role < 0) return;
-    QVariant   v          = item(row);
-    const auto metaType   = v.metaType();
-    const auto metaObject = metaType.metaObject();
-    if (! metaObject) return;
-    const int index = metaObject->indexOfProperty("group");
-    if (index < 0) return;
-    metaObject->property(index).writeOnGadget(v.data(), group);
-    setItem(row, v);
+    control::v1::WallpaperFilterRule rule;
+    rule.setGroup(group);
+    rule.setType(control::v1::WallpaperFilterType::WALLPAPER_FILTER_TYPE_NAME);
+    control::v1::WallpaperStringFilter filter;
+    filter.setCondition(control::v1::StringCondition::STRING_CONDITION_CONTAINS);
+    rule.setStringFilter(filter);
+    setItem(row, QVariant::fromValue(rule));
 }
 
 void FilterRuleModel::appendNewGroup() {
@@ -228,13 +225,30 @@ void FilterRuleModel::setDirty(bool v) {
     Q_EMIT dirtyChanged();
 }
 
-void FilterRuleModel::markDirty() { setDirty(true); }
+void FilterRuleModel::markDirty() {
+    setDirty(true);
+    Q_EMIT draftChanged();
+}
+
+void FilterRuleModel::apply() {
+    if (! valid()) return;
+    setDirty(false);
+    Q_EMIT applied();
+}
 
 WallpaperFilterRuleModel::WallpaperFilterRuleModel(QObject* parent): FilterRuleModel(this, parent) {
     updateRoleNames(control::v1::WallpaperFilterRule::staticMetaObject, this, {});
 }
 
 WallpaperFilterRuleModel::~WallpaperFilterRuleModel() = default;
+
+bool WallpaperFilterRuleModel::valid() const {
+    QList<control::v1::WallpaperFilterRule> rules;
+    for (const auto& value : items()) {
+        rules.append(value.value<control::v1::WallpaperFilterRule>());
+    }
+    return detail::wallpaperFilterStateValid(rules, filterLogics());
+}
 
 auto WallpaperFilterRuleModel::roleNames() const -> QHash<int, QByteArray> {
     auto roles = FilterRuleModel::roleNames();

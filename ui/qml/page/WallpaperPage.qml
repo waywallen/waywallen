@@ -1158,7 +1158,7 @@ MD.Page {
                 wallpaperQuery.reload();
         }
 
-        onApply: {
+        onApplied: {
             doQuery();
             root._persistGlobalChange(g => {
                 g.wallpaperFilters = items();
