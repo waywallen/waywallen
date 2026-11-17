@@ -704,7 +704,7 @@ mod tests {
 
     #[test]
     fn wlroots_desktops_pick_layer_shell() {
-        for desktop in ["hyprland", "sway", "niri", "cosmic", "wayfire"] {
+        for desktop in ["hyprland", "sway", "niri", "cosmic", "wayfire", "umbriel"] {
             let caps = DeCaps {
                 xdg_desktop: vec![desktop.into()],
                 ..Default::default()
