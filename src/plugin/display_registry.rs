@@ -96,6 +96,7 @@ pub fn builtin_display_defs() -> Vec<DisplayDef> {
                 "river".to_string(),
                 "cosmic".to_string(),
                 "wayfire".to_string(),
+                "umbriel".to_string(),
             ],
             priority: 50,
             requires: vec!["wlr-layer-shell".to_string(), "linux-dmabuf-v4".to_string()],
