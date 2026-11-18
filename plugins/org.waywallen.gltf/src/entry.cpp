@@ -544,7 +544,7 @@ auto create_gpu(Options& options) -> Option<Box<Gpu>> {
 
 struct PointerInput {
     static constexpr uint64_t revision = 1;
-    static constexpr unsigned left = 0x110, right = 0x111, middle = 0x112;
+    static constexpr unsigned left = 0x110, middle = 0x112;
     struct Drag {
         unsigned button;
         float    x, y;
@@ -570,7 +570,7 @@ struct PointerInput {
         if (event.state == WAYWALLEN_POINTER_BUTTON_STATE_RELEASED) {
             if (drag && drag->button == event.button) reset();
         } else if (event.state == WAYWALLEN_POINTER_BUTTON_STATE_PRESSED &&
-                   (event.button == left || event.button == right || event.button == middle)) {
+                   (event.button == left || event.button == middle)) {
             reset();
             if (valid(event.x, event.y)) drag = Some(Drag { event.button, event.x, event.y });
         }

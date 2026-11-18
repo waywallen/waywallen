@@ -779,6 +779,8 @@ fn run_renderer(binary: &str, model: &str, profile: Option<&str>, case: RenderCa
     motion(&stream, x, y);
     assert_no_frames(&stream, Duration::from_millis(100));
     button(&stream, x, y, 0x110, PointerButtonState::Pressed);
+    button(&stream, x, y, 0x111, PointerButtonState::Pressed);
+    button(&stream, x, y, 0x111, PointerButtonState::Released);
     motion(&stream, x + 35.0, y + 15.0);
     button(
         &stream,
@@ -800,24 +802,34 @@ fn run_renderer(binary: &str, model: &str, profile: Option<&str>, case: RenderCa
     motion(&stream, f32::NAN, y);
     assert_no_frames(&stream, Duration::from_millis(100));
 
-    let mut previous_hash = rotated_hash;
-    for pan_button in [0x111, 0x112] {
-        button(&stream, x, y, pan_button, PointerButtonState::Pressed);
-        motion(&stream, x + 12.0, y - 8.0);
-        button(
-            &stream,
-            x + 12.0,
-            y - 8.0,
-            pan_button,
-            PointerButtonState::Released,
-        );
-        let (panned, panned_fence) = receive_frame(&stream, &mut sequence);
-        let panned_hash = pixel_hash(&pool, &old_buffers, &panned, &panned_fence);
-        assert_ne!(previous_hash, panned_hash, "drag did not pan the model");
-        previous_hash = panned_hash;
-        release(&drm, &timeline, &panned, &panned_fence);
-        assert_no_frames(&stream, Duration::from_millis(100));
-    }
+    button(&stream, x, y, 0x111, PointerButtonState::Pressed);
+    motion(&stream, x + 12.0, y - 8.0);
+    button(
+        &stream,
+        x + 12.0,
+        y - 8.0,
+        0x111,
+        PointerButtonState::Released,
+    );
+    assert_no_frames(&stream, Duration::from_millis(100));
+
+    button(&stream, x, y, 0x112, PointerButtonState::Pressed);
+    motion(&stream, x + 12.0, y - 8.0);
+    button(
+        &stream,
+        x + 12.0,
+        y - 8.0,
+        0x112,
+        PointerButtonState::Released,
+    );
+    let (panned, panned_fence) = receive_frame(&stream, &mut sequence);
+    let previous_hash = pixel_hash(&pool, &old_buffers, &panned, &panned_fence);
+    assert_ne!(
+        rotated_hash, previous_hash,
+        "middle drag did not pan the model"
+    );
+    release(&drm, &timeline, &panned, &panned_fence);
+    assert_no_frames(&stream, Duration::from_millis(100));
     send(
         &stream,
         ControlMsg::SettingChanged {
