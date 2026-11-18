@@ -72,8 +72,13 @@ impl ArtCache {
     async fn new(dir: PathBuf) -> Self {
         if let Err(error) = tokio::fs::create_dir_all(&dir).await {
             log::warn!("mpris art cache unavailable at {}: {error}", dir.display());
-        } else if let Err(error) = cleanup_art_cache(&dir).await {
-            log::warn!("mpris art cache cleanup failed: {error:#}");
+        } else {
+            if let Err(error) = cleanup_partial_art_files(&dir).await {
+                log::warn!("mpris partial art cleanup failed: {error:#}");
+            }
+            if let Err(error) = cleanup_art_cache(&dir).await {
+                log::warn!("mpris art cache cleanup failed: {error:#}");
+            }
         }
         Self {
             dir,
@@ -795,7 +800,7 @@ fn hex_val(b: u8) -> Option<u8> {
 fn is_cacheable_art_uri(raw: &str) -> bool {
     is_data_image_uri(raw)
         || reqwest::Url::parse(raw)
-            .map(|url| url.scheme() == "https")
+            .map(|url| matches!(url.scheme(), "http" | "https"))
             .unwrap_or(false)
 }
 
@@ -986,6 +991,16 @@ async fn cleanup_art_cache(dir: &Path) -> Result<()> {
     cleanup_art_cache_with_limit(dir, MAX_ART_CACHE_BYTES).await
 }
 
+async fn cleanup_partial_art_files(dir: &Path) -> Result<()> {
+    let mut entries = tokio::fs::read_dir(dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        if entry.file_name().to_string_lossy().starts_with(".part-") {
+            tokio::fs::remove_file(entry.path()).await?;
+        }
+    }
+    Ok(())
+}
+
 async fn cleanup_art_cache_with_limit(dir: &Path, max_bytes: u64) -> Result<()> {
     let mut entries = match tokio::fs::read_dir(dir).await {
         Ok(entries) => entries,
@@ -998,7 +1013,7 @@ async fn cleanup_art_cache_with_limit(dir: &Path, max_bytes: u64) -> Result<()> 
         let path = entry.path();
         let name = entry.file_name();
         if name.to_string_lossy().starts_with(".part-") {
-            let _ = tokio::fs::remove_file(path).await;
+            // A parallel download may still be writing this file.
             continue;
         }
         let metadata = entry.metadata().await?;
