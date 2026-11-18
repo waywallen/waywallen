@@ -10,14 +10,12 @@ use crate::{
     api, application, event_process, events, model, playback, plugin, settings, system, tasks,
 };
 
-/// Resolve the UI executable path.  Order:
-/// 1. Explicit `--ui PATH`
-fn resolve_ui_path(explicit: Option<PathBuf>) -> Option<PathBuf> {
+fn resolve_executable_path(name: &str, explicit: Option<PathBuf>) -> Option<PathBuf> {
     if let Some(p) = explicit {
         return Some(p);
     }
     if let Ok(exe) = std::env::current_exe() {
-        let sibling = exe.parent()?.join("waywallen-ui");
+        let sibling = exe.parent()?.join(name);
         if sibling.exists() {
             return Some(sibling);
         }
@@ -71,7 +69,9 @@ fn select_display_backend(
 }
 
 pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
-    let ui_bin: Option<PathBuf> = resolve_ui_path(cli.ui_path.clone());
+    let ui_bin = resolve_executable_path("waywallen-ui", cli.ui_path.clone());
+    let web_helper_bin =
+        resolve_executable_path("waywallen-web-helper", cli.web_helper_path.clone());
     let display_caps = display::spawner::detect_de();
     let display_pick = if cli.no_display {
         None
@@ -216,6 +216,7 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         source_mgr.clone(),
         events.sender(),
         shutdown_tx.subscribe(),
+        web_helper_bin,
     );
 
     let (rotation_handle, rotation_rx) = playback::rotation::make_handle();

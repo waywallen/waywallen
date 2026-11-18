@@ -10,6 +10,13 @@ pub struct DaemonConfig {
     #[arg(long = "ui", value_name = "PATH")]
     pub ui_path: Option<PathBuf>,
 
+    #[arg(
+        long = "web-helper",
+        value_name = "PATH",
+        help = "Path to waywallen-web-helper"
+    )]
+    pub web_helper_path: Option<PathBuf>,
+
     #[arg(long = "probe", value_name = "PATH", help = "Path to waywallen-probe")]
     pub probe_path: Option<PathBuf>,
 

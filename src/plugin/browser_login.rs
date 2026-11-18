@@ -35,6 +35,7 @@ impl BrowserLoginManager {
         sources: Arc<SourceManager>,
         events: broadcast::Sender<GlobalEvent>,
         shutdown: watch::Receiver<bool>,
+        tool: Option<PathBuf>,
     ) -> Arc<Self> {
         Arc::new(Self {
             sources,
@@ -42,7 +43,7 @@ impl BrowserLoginManager {
             shutdown,
             sessions: Mutex::new(HashMap::new()),
             slot: Arc::new(Semaphore::new(1)),
-            tool: None,
+            tool,
         })
     }
 
@@ -55,8 +56,7 @@ impl BrowserLoginManager {
         let tool = self
             .tool
             .clone()
-            .or_else(locate_tool)
-            .context("waywallen-web-helper was not found; install it or add it to PATH")?;
+            .context("waywallen-web-helper was not found; install it next to waywallen or set --web-helper PATH")?;
         let id = uuid::Uuid::new_v4().to_string();
         let cancel = CancellationToken::new();
         let done = CancellationToken::new();
@@ -398,26 +398,4 @@ impl Drop for Child {
     fn drop(&mut self) {
         self.kill();
     }
-}
-
-fn locate_tool() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("WAYWALLEN_WEB_HELPER_BIN") {
-        return Some(path.into());
-    }
-    let executable = |path: &PathBuf| {
-        use std::os::unix::fs::PermissionsExt;
-        path.metadata()
-            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-    };
-    if let Ok(current) = std::env::current_exe() {
-        if let Some(parent) = current.parent() {
-            let path = parent.join("waywallen-web-helper");
-            if executable(&path) {
-                return Some(path);
-            }
-        }
-    }
-    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-        .map(|path| path.join("waywallen-web-helper"))
-        .find(executable)
 }
