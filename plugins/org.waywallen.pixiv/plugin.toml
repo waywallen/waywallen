@@ -1,0 +1,9 @@
+[plugin]
+id = "org.waywallen.pixiv"
+name = "Pixiv"
+version = "0.1.0"
+entry = "main.lua"
+entry_version = 8
+
+[plugin.i18n]
+directory = "i18n"

@@ -67,6 +67,7 @@ Waywallen собирается с помощью [Lito](https://github.com/litoc
 - Плагин glTF
 - Плагин [Wallhaven](https://wallhaven.cc/)
 - Плагин [Sketchfab](https://sketchfab.com/)
+- Плагин [Pixiv](https://www.pixiv.net/)
 
 ### Сторонние плагины
 

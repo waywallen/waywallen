@@ -33,23 +33,23 @@ struct RemoteRow {
     Q_PROPERTY(quint64 downloadTotalBytes MEMBER downloadTotalBytes)
 
 public:
-    QString     sourceId;
-    QString     itemId;
-    QString     title;
-    QString     previewUrl;
-    QVariantMap previewHeaders;
-    QString     author;
-    QString     authorAvatarUrl;
-    QVariantMap authorAvatarHeaders;
-    QString     wpType;
-    int         acquisitionState { 0 };
-    quint32     width { 0 };
-    quint32     height { 0 };
+    QString      sourceId;
+    QString      itemId;
+    QString      title;
+    QString      previewUrl;
+    QVariantMap  previewHeaders;
+    QString      author;
+    QString      authorAvatarUrl;
+    QVariantMap  authorAvatarHeaders;
+    QString      wpType;
+    int          acquisitionState { 0 };
+    quint32      width { 0 };
+    quint32      height { 0 };
     QVariantList badges;
-    bool        downloadTransferActive { false };
-    quint64     downloadReceivedBytes { 0 };
-    quint64     downloadTotalBytes { 0 };
-    bool        operator==(const RemoteRow&) const = default;
+    bool         downloadTransferActive { false };
+    quint64      downloadReceivedBytes { 0 };
+    quint64      downloadTotalBytes { 0 };
+    bool         operator==(const RemoteRow&) const = default;
 };
 
 inline auto remoteKey(const QString& sourceId, const QString& itemId) -> QString {

@@ -127,9 +127,10 @@ Q_SIGNALS:
     void qrLoginProgress(const QString& sessionId, const QString& pluginId, const QString& actionId,
                          int state, const QString& qrImage, const QVariant& displayValue,
                          const QVariant& error, const QVariant& title, const QVariant& instruction);
-    void browserLoginProgress(const QString& sessionId, const QString& pluginId, const QString& actionId,
-                              int state, const QVariant& displayValue, const QVariant& error,
-                              const QVariant& title, const QVariant& instruction);
+    void browserLoginProgress(const QString& sessionId, const QString& pluginId,
+                              const QString& actionId, int state, const QVariant& displayValue,
+                              const QVariant& error, const QVariant& title,
+                              const QVariant& instruction);
     void pluginStateChanged();
     void playlistChanged();
     void pluginChanged();

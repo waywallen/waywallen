@@ -17,7 +17,8 @@ using namespace qextra::prelude;
 namespace waywallen
 {
 
-namespace {
+namespace
+{
 auto resourceHeadersFromPb(const auto& headers) -> QVariantMap {
     QVariantMap result;
     for (auto header = headers.cbegin(); header != headers.cend(); ++header)
@@ -63,7 +64,8 @@ void RemoteAvailabilityQuery::reload() {
                         options.push_back(QVariantMap {
                             { u"key"_s, option.key() },
                             { u"label"_s, option.label() },
-                            { u"labelText"_s, pluginMessageFromPb(option.labelText(), option.label()) },
+                            { u"labelText"_s,
+                              pluginMessageFromPb(option.labelText(), option.label()) },
                         });
                     }
                     row[u"options"_s] = options;
@@ -119,8 +121,8 @@ void RemoteAvailabilityQuery::reload() {
                         { u"sorts"_s, convertSorts(options.sorts()) },
                     };
                 }
-                m[u"tags"_s]             = tags;
-                m[u"filters"_s]          = filters;
+                m[u"tags"_s]    = tags;
+                m[u"filters"_s] = filters;
                 QVariantList badges;
                 for (const auto& badge : src.badges()) {
                     badges.push_back(QVariantMap {
@@ -128,7 +130,7 @@ void RemoteAvailabilityQuery::reload() {
                         { u"labelText"_s, pluginMessageFromPb(badge.labelText(), badge.label()) },
                     });
                 }
-                m[u"badges"_s] = badges;
+                m[u"badges"_s]           = badges;
                 m[u"contentDir"_s]       = src.contentDir();
                 m[u"ownerPluginId"_s]    = src.ownerPluginId();
                 m[u"displayName"_s]      = src.displayName();
@@ -442,7 +444,8 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
                 QVariantList badges;
                 for (const auto& badge : it.badges()) {
                     badges.push_back(QVariantMap {
-                        { u"id"_s, badge.id_proto() }, { u"text"_s, badge.text() },
+                        { u"id"_s, badge.id_proto() },
+                        { u"text"_s, badge.text() },
                     });
                 }
                 rows.push_back(AppStore::instance()->mergeRemoteRow(model::RemoteRow {
@@ -565,16 +568,16 @@ void RemoteDetailsQuery::reload() {
             co_return;
         }
         {
-            self->m_author            = dr.author();
-            self->m_author_avatar_url = dr.authorAvatarUrl();
+            self->m_author                = dr.author();
+            self->m_author_avatar_url     = dr.authorAvatarUrl();
             self->m_author_avatar_headers = resourceHeadersFromPb(dr.authorAvatarHeaders());
-            self->m_author_url        = dr.authorUrl();
-            self->m_author_id         = dr.authorId();
-            self->m_description       = dr.description();
-            self->m_size              = dr.size();
-            self->m_width             = static_cast<int>(dr.width());
-            self->m_height            = static_cast<int>(dr.height());
-            self->m_web_url           = dr.webUrl();
+            self->m_author_url            = dr.authorUrl();
+            self->m_author_id             = dr.authorId();
+            self->m_description           = dr.description();
+            self->m_size                  = dr.size();
+            self->m_width                 = static_cast<int>(dr.width());
+            self->m_height                = static_cast<int>(dr.height());
+            self->m_web_url               = dr.webUrl();
             self->m_tags.clear();
             for (const auto& t : dr.tags()) self->m_tags.push_back(t);
             for (const auto& field : dr.fields()) {

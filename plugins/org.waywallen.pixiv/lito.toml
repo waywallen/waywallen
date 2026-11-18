@@ -1,0 +1,3 @@
+[package]
+name = "waywallen-pixiv-plugin"
+version.workspace = true

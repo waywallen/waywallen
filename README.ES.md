@@ -66,6 +66,7 @@ Waywallen se construye con [Lito](https://github.com/litocpp/lito) (por favor, d
 - Plugin de glTF
 - Plugin de [Wallhaven](https://wallhaven.cc/)
 - Plugin de [Sketchfab](https://sketchfab.com/)
+- Plugin de [Pixiv](https://www.pixiv.net/)
 
 ### Plugins de terceros
 

@@ -67,6 +67,7 @@ Waywallen 使用 [Lito](https://github.com/litocpp/lito) 构建（请为它点�
 - glTF 插件
 - [Wallhaven](https://wallhaven.cc/) 插件
 - [Sketchfab](https://sketchfab.com/) 插件
+- [Pixiv](https://www.pixiv.net/) 插件
 
 ### 第三方插件
 

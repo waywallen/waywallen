@@ -1,0 +1,9 @@
+plugin.toml
+main.lua
+pixiv/api.lua
+pixiv/browser.lua
+pixiv/session.lua
+pixiv/session_login.lua
+pixiv/map.lua
+pixiv/discover.lua
+i18n/zh-CN.po
