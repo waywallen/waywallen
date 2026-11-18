@@ -163,6 +163,8 @@ auto global_to_map(const proto::GlobalSettings& g) -> QVariantMap {
     m[u"pointerForwardingEnabled"_s]  = g.pointerForwardingEnabled();
     m[u"pluginUpdateNotifications"_s] = ! g.disablePluginUpdateNotifications();
     m[u"duplicateRenderers"_s]        = g.duplicateRenderersForSameWallpaper();
+    m[u"systemWallpaperEnabled"_s]    = g.hasSystemWallpaperEnabled() && g.systemWallpaperEnabled();
+    m[u"systemWallpaperAuto"_s]       = g.systemWallpaperAuto();
     const auto has_renderer           = g.hasRenderer();
     m[u"renderer.enable_audio"_s] =
         ! has_renderer || ! g.renderer().hasEnableAudio() || g.renderer().enableAudio();
@@ -262,6 +264,10 @@ auto map_to_global(const QVariantMap& m) -> proto::GlobalSettings {
     if (m.contains(u"duplicateRenderers"_s)) {
         g.setDuplicateRenderersForSameWallpaper(m.value(u"duplicateRenderers"_s).toBool());
     }
+    if (m.contains(u"systemWallpaperEnabled"_s)) {
+        g.setSystemWallpaperEnabled(m.value(u"systemWallpaperEnabled"_s).toBool());
+    }
+    g.setSystemWallpaperAuto(m.value(u"systemWallpaperAuto"_s).toBool());
     if (m.contains(u"renderer.enable_audio"_s) || m.contains(u"renderer.volume"_s)) {
         proto::GlobalRendererSettings renderer;
         if (m.contains(u"renderer.enable_audio"_s)) {
@@ -411,6 +417,41 @@ void SettingsSetQuery::reload() {
 
         self->inspect_set(result, [](const proto::Response&) {
         });
+        co_return;
+    });
+}
+
+SystemWallpaperSnapshotsQuery::SystemWallpaperSnapshotsQuery(QObject* parent): Query(parent) {}
+
+auto SystemWallpaperSnapshotsQuery::clear() const -> bool { return m_clear; }
+void SystemWallpaperSnapshotsQuery::setClear(bool value) {
+    if (m_clear == value) return;
+    m_clear = value;
+    Q_EMIT clearChanged();
+}
+auto SystemWallpaperSnapshotsQuery::retake() const -> bool { return m_retake; }
+void SystemWallpaperSnapshotsQuery::setRetake(bool value) {
+    if (m_retake == value) return;
+    m_retake = value;
+    Q_EMIT retakeChanged();
+}
+
+void SystemWallpaperSnapshotsQuery::reload() {
+    const auto revision = beginRequest();
+    setStatus(Status::Querying);
+    auto backend = App::instance()->backend();
+    auto inner = proto::SystemWallpaperSnapshotsRequest {};
+    inner.setClear(m_clear);
+    inner.setRetake(m_retake);
+    auto req = proto::Request {};
+    req.setSystemWallpaperSnapshots(std::move(inner));
+
+    auto self = QWatcher { this };
+    spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
+        auto result = co_await backend->send(std::move(req));
+        if (! co_await QAsyncResult::qexecutor()) co_return;
+        if (! self || ! self->isCurrentRequest(revision)) co_return;
+        self->inspect_set(result, [](const proto::Response&) {});
         co_return;
     });
 }

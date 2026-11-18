@@ -13,6 +13,7 @@
 | Vulkan headers | ≥ 1.1 | **build-time**, provides `vulkan/vulkan.h`: `vulkan-headers` (Arch/Fedora) · `libvulkan-dev` (Debian/Ubuntu) |
 | Qt6 | ≥ 6.10 | Quick, DBus, Protobuf, ProtobufQuick, QuickControls2, WebSockets |
 | GBM | - | Development package |
+| EGL / GLES2 headers | - | Wallpaper frame capture: `libegl-dev` and `libgles-dev` (Debian/Ubuntu), or the corresponding development packages |
 | ffmpeg | - | Development packages used by the renderer plugins |
 
 ## Build, install, run
@@ -118,6 +119,11 @@ C++ types listed in `module.qmltypes` itself.
 
 Packages should consume the staged install tree. Lito is the public project build interface; CMake
 is only used internally by source dependency providers.
+
+The AppImage build pins a `waywallen-display` revision with the system background provider.
+For a paired local build, set `WAYWALLEN_DISPLAY_REPO` to the local display Git repository
+and `WAYWALLEN_DISPLAY_REF` to the revision to build. Merge the display change first
+and verify that the pinned commit is reachable from the public display repository before release.
 
 The UI looks for a new release on GitHub and links to its download page. This is the `update-check`
 feature of `waywallen-ui`, on by default. Where a package manager delivers the updates, pass

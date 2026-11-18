@@ -27,6 +27,7 @@ dependencies:
 
   - libvulkan-headers
   - libvulkan-loader
+  - libegl-devel
   - libgles-devel
   - lz4-c
   - libva-utils

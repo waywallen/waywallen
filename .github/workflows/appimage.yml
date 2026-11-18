@@ -38,7 +38,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             curl ca-certificates git bzip2 file xz-utils \
             build-essential pkg-config glslang-tools \
-            libfuse2 libxkbcommon0 libgl1 libegl1 libpulse-dev \
+            libfuse2 libxkbcommon0 libgl1 libegl1 libegl-dev libpulse-dev \
             libglib2.0-0 libgles-dev libgbm-dev libfreetype-dev libxml2-dev \
             libpipewire-0.3-dev libarchive-tools zsync
 

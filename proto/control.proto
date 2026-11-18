@@ -110,6 +110,7 @@ message Request {
     LibraryEditRequest          library_edit = 93;
     LibraryRelocateRequest      library_relocate = 94;
     BrowserLoginCancelRequest   browser_login_cancel = 98;
+    SystemWallpaperSnapshotsRequest system_wallpaper_snapshots = 99;
   }
 }
 
@@ -207,6 +208,7 @@ message Response {
     Empty                        library_edit = 93;
     Empty                        library_relocate = 94;
     BrowserLoginCancelResponse   browser_login_cancel = 98;
+    SystemWallpaperSnapshotsResponse system_wallpaper_snapshots = 99;
   }
 }
 
@@ -1600,8 +1602,14 @@ message Event {
     CanvasSnapshot         canvas_snapshot           = 25;
     WallpaperPresentationSnapshot wallpaper_presentation_snapshot = 26;
     WallpaperHiddenChanged wallpaper_hidden_changed = 27;
+    SystemWallpaperFailed  system_wallpaper_failed    = 28;
     BrowserLoginProgress   browser_login_progress    = 30;
   }
+}
+
+message SystemWallpaperFailed {
+  string wallpaper_id = 1;
+  string error = 2;
 }
 
 enum WallpaperPresentationState {
@@ -1875,6 +1883,12 @@ message GlobalSettings {
 
   // Animation shown when a display switches to a different wallpaper.
   TransitionConfig transition = 28;
+
+  // Absent preserves the current value for clients predating this setting.
+  optional bool system_wallpaper_enabled = 32;
+  // True follows the display integration's safe default, overriding the bool above.
+  // Responses include the effective bool and whether this automatic mode is active.
+  bool system_wallpaper_auto = 33;
 }
 
 enum AutoAction {
@@ -1953,6 +1967,15 @@ message PluginSettings {
 }
 
 message SettingsGetRequest {}
+// Manage system wallpaper snapshots. The two actions are mutually exclusive.
+message SystemWallpaperSnapshotsRequest {
+  bool clear = 1;
+  bool retake = 2;
+}
+message SystemWallpaperSnapshotsResponse {
+  string directory = 1;
+}
+
 message SettingsGetResponse {
   GlobalSettings global = 1;
   // Keyed by runtime component name (renderer name or Lua source name).

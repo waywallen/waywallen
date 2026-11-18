@@ -241,6 +241,7 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
     if let Err(error) = autostart.refresh() {
         log::warn!("could not refresh login startup: {error}");
     }
+    let (system_wallpaper, system_wallpaper_changes) = tokio::sync::watch::channel(None);
     let state = Arc::new(DaemonContext {
         renderer_manager: renderer_mgr,
         _audio: audio_service,
@@ -279,10 +280,22 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         probe: probe.clone(),
         playlists: playback::playlist::Engine::new(),
         wallpaper_changes: tokio::sync::watch::channel(0).0,
+        system_wallpaper,
+        system_wallpaper_cache: Arc::default(),
         playlist_mutation: tokio::sync::Mutex::new(()),
         no_tray: cli.no_tray,
         tray: tokio::sync::Mutex::new(None),
     });
+
+    {
+        let app = state.clone();
+        state
+            .tasks
+            .spawn_async(tasks::TaskKind::Service, "wallpaper/system", async move {
+                system::wallpaper::run(app, system_wallpaper_changes).await;
+                Ok(())
+            });
+    }
 
     // Auto-rotation service. Runs until shutdown, parked on a watch
     // channel until the user activates a playlist.

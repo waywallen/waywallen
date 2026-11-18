@@ -20,6 +20,10 @@ pub struct RemoteDownloadTransfer {
 /// Transient process-wide notifications.
 #[derive(Debug, Clone)]
 pub enum GlobalEvent {
+    SystemWallpaperFailed {
+        wallpaper_id: String,
+        error: String,
+    },
     /// Source plugins finished loading and the initial DB sync ran.
     /// Dependent startup work can now read source/plugin state.
     SourcesReady,

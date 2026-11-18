@@ -81,4 +81,28 @@ private:
     QVariantMap m_plugins;
 };
 
+export class SystemWallpaperSnapshotsQuery : public Query,
+    public QueryExtra<control::v1::Response, SystemWallpaperSnapshotsQuery> {
+    Q_OBJECT
+    QML_ELEMENT
+
+    Q_PROPERTY(bool clear READ clear WRITE setClear NOTIFY clearChanged FINAL)
+    Q_PROPERTY(bool retake READ retake WRITE setRetake NOTIFY retakeChanged FINAL)
+
+public:
+    SystemWallpaperSnapshotsQuery(QObject* parent = nullptr);
+    auto clear() const -> bool;
+    void setClear(bool value);
+    auto retake() const -> bool;
+    void setRetake(bool value);
+    void reload() override;
+
+    Q_SIGNAL void clearChanged();
+    Q_SIGNAL void retakeChanged();
+
+private:
+    bool m_clear = false;
+    bool m_retake = false;
+};
+
 } // namespace waywallen

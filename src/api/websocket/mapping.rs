@@ -1069,6 +1069,8 @@ pub(super) fn global_to_pb(g: &crate::settings::GlobalSettings) -> pb::GlobalSet
         }),
         disable_plugin_update_notifications: !g.plugin_update_notifications,
         duplicate_renderers_for_same_wallpaper: g.duplicate_renderers_for_same_wallpaper,
+        system_wallpaper_enabled: Some(g.effective_system_wallpaper_enabled()),
+        system_wallpaper_auto: g.system_wallpaper_enabled.is_none(),
         renderer: Some(pb::GlobalRendererSettings {
             enable_audio: Some(g.renderer.enable_audio),
             volume: Some(g.renderer.effective_volume()),
@@ -1526,6 +1528,17 @@ pub(super) fn global_event_to_pb(e: &GlobalEvent, state: &Arc<DaemonContext>) ->
                 error: progress.error,
                 message: progress.message.clone(),
             })),
+        }),
+        GlobalEvent::SystemWallpaperFailed {
+            wallpaper_id,
+            error,
+        } => Some(pb::Event {
+            payload: Some(pb::event::Payload::SystemWallpaperFailed(
+                pb::SystemWallpaperFailed {
+                    wallpaper_id: wallpaper_id.clone(),
+                    error: error.clone(),
+                },
+            )),
         }),
         GlobalEvent::PluginRestartFailed { plugin_id, error } => Some(pb::Event {
             payload: Some(pb::event::Payload::PluginRestartFailed(
