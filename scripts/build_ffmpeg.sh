@@ -69,7 +69,7 @@ DECODERS=(
     # audio (probe-only)
     aac mp3 opus vorbis flac pcm_s16le pcm_s16be
 )
-ENCODERS=()  # waywallen never encodes
+ENCODERS=(png)
 DEMUXERS=(
     mov matroska
     # wavsen.image uses custom AVIO, including image2 -> image2pipe fallback.
