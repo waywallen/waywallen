@@ -8,6 +8,10 @@ QtObject {
 
     readonly property var fields: ["tag", "content_rating", "wp_type"]
     readonly property var rules: readRules(settings.rulesJson)
+    readonly property var _compiledRules: rules.map(rule => ({
+        rule,
+        pattern: [...rule.value.toLowerCase()]
+    }))
     readonly property bool enabled: settings.enabled
     property int serial: 0
     readonly property Settings settings: Settings {
@@ -61,25 +65,49 @@ QtObject {
     function removeRule(id) {
         settings.rulesJson = JSON.stringify(rules.filter(rule => rule.id !== id));
     }
+    function matchesPattern(value, pattern) {
+        const chars = [...String(value ?? "").toLowerCase()];
+        let index = 0;
+        let patternIndex = 0;
+        let star = -1;
+        let retry = 0;
+        while (index < chars.length) {
+            if (pattern[patternIndex] === "*") {
+                star = patternIndex++;
+                retry = index;
+            } else if (pattern[patternIndex] === "?" || pattern[patternIndex] === chars[index]) {
+                ++index;
+                ++patternIndex;
+            } else if (star >= 0) {
+                patternIndex = star + 1;
+                index = ++retry;
+            } else {
+                return false;
+            }
+        }
+        while (pattern[patternIndex] === "*")
+            ++patternIndex;
+        return patternIndex === pattern.length;
+    }
     function labelsFor(item) {
         if (!enabled || !item)
             return [];
         const labels = [];
-        for (const rule of rules) {
+        for (const compiled of _compiledRules) {
+            const rule = compiled.rule;
             if (rule.enabled === false)
                 continue;
-            const expected = rule.value.toLowerCase();
             let matched = false;
             if (rule.field === "tag") {
                 for (const tag of item.tags ?? []) {
-                    if (String(tag).toLowerCase() === expected) {
+                    if (matchesPattern(tag, compiled.pattern)) {
                         matched = true;
                         break;
                     }
                 }
             } else {
                 const value = rule.field === "content_rating" ? item.contentRating : item.wpType;
-                matched = String(value ?? "").toLowerCase() === expected;
+                matched = matchesPattern(value, compiled.pattern);
             }
             if (matched && labels.indexOf(rule.text) < 0)
                 labels.push(rule.text);

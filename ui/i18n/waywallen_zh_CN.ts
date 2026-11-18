@@ -3583,7 +3583,7 @@ Unsaved frame state may be lost.</source>
     <message><source>Content rating</source><translation>内容分级</translation></message>
     <message><source>Wallpaper type</source><translation>壁纸类型</translation></message>
     <message><source>Tag</source><translation>标签</translation></message>
-    <message><source>Rules match exactly, ignoring case. A tag rule matches any tag on the wallpaper.</source><translation>规则进行忽略大小写的精确匹配。标签规则匹配壁纸的任一标签。</translation></message>
+    <message><source>Rules ignore case and match the whole value. Use * for any number of characters and ? for one character. A tag rule matches any tag on the wallpaper.</source><translation>规则忽略大小写并匹配完整值。* 匹配任意数量的字符，? 匹配单个字符。标签规则匹配壁纸的任一标签。</translation></message>
     <message><source>%1: %2 → %3</source><translation>%1：%2 → %3</translation></message>
     <message><source>Edit</source><translation>编辑</translation></message>
     <message><source>Remove</source><translation>移除</translation></message>

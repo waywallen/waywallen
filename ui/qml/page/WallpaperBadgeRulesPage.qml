@@ -48,7 +48,7 @@ MD.Page {
 
             MD.Text {
                 Layout.fillWidth: true
-                text: qsTr("Rules match exactly, ignoring case. A tag rule matches any tag on the wallpaper.")
+                text: qsTr("Rules ignore case and match the whole value. Use * for any number of characters and ? for one character. A tag rule matches any tag on the wallpaper.")
                 typescale: MD.Token.typescale.body_small
                 wrapMode: Text.WordWrap
             }
