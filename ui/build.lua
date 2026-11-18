@@ -131,6 +131,7 @@ qt.qml_module({
     "qml/I18n.qml",
     "qml/component/GpuDetails.qml",
     "qml/component/ThumbnailLoading.qml",
+    "qml/page/DiscoverState.qml",
   },
   resources = {
     "assets/waywallen-ui.svg",

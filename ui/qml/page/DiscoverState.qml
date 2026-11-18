@@ -1,3 +1,4 @@
+pragma Singleton
 pragma ComponentBehavior: Bound
 import QtCore
 import QtQml
@@ -6,7 +7,7 @@ QtObject {
     id: root
 
     property string settingsCategory: "DiscoverView"
-    property bool persistent: true
+    signal filtersChanged(string sourceId)
 
     readonly property Settings settings: Settings {
         category: root.settingsCategory
@@ -21,8 +22,6 @@ QtObject {
     }
 
     function setSelectedSourceId(sourceId) {
-        if (!persistent)
-            return;
         const value = String(sourceId ?? "");
         if (settings.selectedSourceId !== value)
             settings.selectedSourceId = value;
@@ -52,8 +51,6 @@ QtObject {
     }
 
     function filterValuesFor(sourceId) {
-        if (!persistent)
-            return [];
         const values = readFilters()[sourceId];
         return Array.isArray(values) ? normalize(values) : [];
     }
@@ -69,8 +66,6 @@ QtObject {
     }
 
     function excludedTagsFor(sourceId) {
-        if (!persistent)
-            return [];
         try {
             const state = JSON.parse(settings.excludedTagsJson);
             const values = state?.[sourceId];
@@ -81,13 +76,13 @@ QtObject {
     }
 
     function setExcludedTagsFor(sourceId, values) {
-        if (!persistent)
-            return;
-        if (sourceId.length === 0)
-            return;
+        setFilterSelectionFor(sourceId, filterValuesFor(sourceId), values);
+    }
+
+    function valuesJson(json, sourceId, values) {
         let state = {};
         try {
-            const parsed = JSON.parse(settings.excludedTagsJson);
+            const parsed = JSON.parse(json);
             if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
                 state = parsed;
         } catch (error) {
@@ -97,41 +92,41 @@ QtObject {
             state[sourceId] = normalized;
         else
             delete state[sourceId];
-        settings.excludedTagsJson = JSON.stringify(state);
+        return JSON.stringify(state);
     }
 
     function matchModesFor(sourceId) {
-        if (!persistent)
-            return {};
         const value = readMatchModes()[sourceId];
         return value && typeof value === "object" && !Array.isArray(value) ? value : {};
     }
 
     function setMatchModesFor(sourceId, modes) {
-        if (!persistent)
-            return;
         if (sourceId.length === 0)
             return;
         const state = readMatchModes();
         state[sourceId] = modes;
         const next = JSON.stringify(state);
-        if (settings.matchModesJson !== next)
-            settings.matchModesJson = next;
+        if (settings.matchModesJson === next)
+            return;
+        settings.matchModesJson = next;
+        filtersChanged(sourceId);
     }
 
     function setFilterValuesFor(sourceId, values) {
-        if (!persistent)
-            return;
+        setFilterSelectionFor(sourceId, values, excludedTagsFor(sourceId));
+    }
+
+    function setFilterSelectionFor(sourceId, values, excluded) {
         if (sourceId.length === 0)
             return;
-        const state = readFilters();
-        const normalized = normalize(values);
-        if (normalized.length > 0)
-            state[sourceId] = normalized;
-        else
-            delete state[sourceId];
-        const next = JSON.stringify(state);
-        if (settings.filtersJson !== next)
-            settings.filtersJson = next;
+        const included = normalize(values);
+        const exclusions = normalize(excluded).filter(value => included.indexOf(value) < 0);
+        const nextValues = valuesJson(settings.filtersJson, sourceId, included);
+        const nextExcluded = valuesJson(settings.excludedTagsJson, sourceId, exclusions);
+        if (settings.filtersJson === nextValues && settings.excludedTagsJson === nextExcluded)
+            return;
+        settings.filtersJson = nextValues;
+        settings.excludedTagsJson = nextExcluded;
+        filtersChanged(sourceId);
     }
 }

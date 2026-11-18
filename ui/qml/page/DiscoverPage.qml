@@ -53,6 +53,7 @@ MD.Page {
         onSubscriptionRefreshRequested: root.refreshDetailSubscription()
     }
     readonly property var detailRow: detailOpen ? detailStore.item : null
+    readonly property QtObject discoverState: W.DiscoverState
     property var discoverTweakSheet: null
     property W.TweakState discoverTweakState: discoverTweakStateComponent.createObject(root, {
         settingsCategory: "DiscoverView"
@@ -239,7 +240,8 @@ MD.Page {
             searchQuery.query = "";
             m_search_field.text = "";
         }
-        discoverState.setSelectedSourceId(id);
+        if (!root.artistMode)
+            discoverState.setSelectedSourceId(id);
         loadDiscoverTweakState(id);
         sortOptions = (root.artistMode ? s.artistOptions?.sorts ?? s.sorts : s.sorts) ?? [];
         sortIndex = 0;
@@ -257,17 +259,28 @@ MD.Page {
         }
         const canBrowse = currentSourceLoginAction() === null;
         searchQuery.browsingEnabled = canBrowse;
-        const candidateTags = sourceChanged ? discoverState.filterValuesFor(id) : searchQuery.tags;
-        const nextTags = pruneTags(candidateTags, s.filters ?? []);
+        syncFilters();
+        searchQuery.sourceId = id;
+        detailsQuery.sourceId = id;
+        applySort();
+        if (sourceChanged || !canBrowse) {
+            detailOpen = false;
+            detailsQuery.itemId = "";
+            m_grid.currentIndex = -1;
+        }
+    }
+    function syncFilters() {
+        const s = currentSourceConfig();
+        if (!s)
+            return;
+        const id = root.sourceId;
+        const nextTags = pruneTags(discoverState.filterValuesFor(id), s.filters ?? []);
         if (!sameList(searchQuery.tags, nextTags))
             searchQuery.tags = nextTags;
-        discoverState.setFilterValuesFor(id, nextTags);
-        const candidateExcluded = sourceChanged ? discoverState.excludedTagsFor(id) : searchQuery.excludedTags;
         const exclusionFilters = (s.filters ?? []).filter(filter => filter.supportsExclusion);
-        const nextExcluded = pruneTags(candidateExcluded, exclusionFilters).filter(tag => nextTags.indexOf(tag) < 0);
+        const nextExcluded = pruneTags(discoverState.excludedTagsFor(id), exclusionFilters).filter(tag => nextTags.indexOf(tag) < 0);
         searchQuery.excludedTags = nextExcluded;
-        discoverState.setExcludedTagsFor(id, nextExcluded);
-        const savedModes = sourceChanged ? discoverState.matchModesFor(id) : searchQuery.filterMatchModes;
+        const savedModes = discoverState.matchModesFor(id);
         const modes = {};
         for (const filter of s.filters ?? []) {
             const allowed = filter.matchModes ?? [];
@@ -277,15 +290,6 @@ MD.Page {
             }
         }
         searchQuery.filterMatchModes = modes;
-        discoverState.setMatchModesFor(id, modes);
-        searchQuery.sourceId = id;
-        detailsQuery.sourceId = id;
-        applySort();
-        if (sourceChanged || !canBrowse) {
-            detailOpen = false;
-            detailsQuery.itemId = "";
-            m_grid.currentIndex = -1;
-        }
     }
     function sortLabel() {
         if (sortOptions.length === 0)
@@ -636,10 +640,6 @@ MD.Page {
 
         W.TweakState {}
     }
-    W.DiscoverState {
-        id: discoverState
-        persistent: !root.artistMode
-    }
     W.RemoteStoreItem {
         id: detailStore
     }
@@ -713,6 +713,14 @@ MD.Page {
         id: searchQuery
         artistId: root.artistId
     }
+    Connections {
+        target: root.discoverState
+
+        function onFiltersChanged(sourceId) {
+            if (sourceId === root.sourceId)
+                root.syncFilters();
+        }
+    }
     W.RemoteFilterDialog {
         id: m_filter_dialog
 
@@ -727,19 +735,14 @@ MD.Page {
         y: (overlayHeight - height) / 2
 
         onApply: function (values) {
-            searchQuery.tags = values;
             discoverState.setFilterValuesFor(root.sourceId, values);
         }
         onApplyBoth: function (values, excluded) {
-            searchQuery.tags = values;
-            searchQuery.excludedTags = excluded;
-            discoverState.setFilterValuesFor(root.sourceId, values);
-            discoverState.setExcludedTagsFor(root.sourceId, excluded);
+            discoverState.setFilterSelectionFor(root.sourceId, values, excluded);
         }
         onApplyMatchMode: function (filterId, mode) {
             const modes = Object.assign({}, searchQuery.filterMatchModes);
             modes[filterId] = mode;
-            searchQuery.filterMatchModes = modes;
             discoverState.setMatchModesFor(root.sourceId, modes);
         }
     }
