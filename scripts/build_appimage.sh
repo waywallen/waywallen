@@ -11,7 +11,7 @@ ENV_NAME="${WAYWALLEN_CONDA_ENV:-waywallen}"
 ENV_PREFIX="${WAYWALLEN_CONDA_PREFIX:-$PROJECT_DIR/build/conda-envs/$ENV_NAME}"
 TMP_DIR="${TMPDIR:-/tmp}"
 WAYWALLEN_DISPLAY_REPO="${WAYWALLEN_DISPLAY_REPO:-https://github.com/waywallen/waywallen-display.git}"
-WAYWALLEN_DISPLAY_REF="${WAYWALLEN_DISPLAY_REF:-48946b4965c9f746c7d56bb72b66e5ff01c2d6e9}"
+WAYWALLEN_DISPLAY_REF="${WAYWALLEN_DISPLAY_REF:-dff45f79ac0dacf3aae7a1c70455df1204588eca}"
 APPDIR="$PROJECT_DIR/build/AppDir"
 INSTALL_DIR="$APPDIR/usr"
 TOOLS_DIR="$PROJECT_DIR/build/_tools"
@@ -201,7 +201,7 @@ info "Building and installing waywallen into AppDir: $APPDIR"
 pushd "$PROJECT_DIR"
 "$LITO_BIN" install \
     --no-config \
-    --locked \
+    --features luato/vendored \
     --profile release \
     --prefix "$INSTALL_DIR" \
     --config "tools.cmake.search-path=[\"$CONDA_PREFIX\"]"

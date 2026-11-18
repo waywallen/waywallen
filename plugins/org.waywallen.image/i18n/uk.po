@@ -15,7 +15,7 @@ msgid "Scan image files or desktop wallpaper definitions such as KDE and GNOME w
 msgstr "Сканувати зображення або описи шпалер робочого столу KDE і GNOME."
 
 msgid ""
-msgstr "Project-Id-Version: org.waywallen.image 0.6.0\nLanguage: uk\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: org.waywallen.image 0.6.1\nLanguage: uk\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 #: image/wallpaper.lua
 msgid "Wallpaper variant"

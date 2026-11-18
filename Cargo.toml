@@ -7,7 +7,7 @@ strip = "symbols"
 
 [package]
 name = "waywallen"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2021"
 build = "build.rs"
 

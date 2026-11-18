@@ -10,7 +10,8 @@ build
 .cache
 /bin
 /install/
-*.AppImage
+/*.AppImage
+/*.zsync
 CMakeUserPresets.json
 /waywallen-test*.md
 /.cargo

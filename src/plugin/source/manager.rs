@@ -1035,7 +1035,6 @@ impl LuaPluginRegistry {
     ) -> Arc<tokio::sync::Mutex<LuaPluginRuntime>> {
         self.handle(plugin_name).unwrap().runtime.clone()
     }
-
 }
 
 // ---------------------------------------------------------------------------

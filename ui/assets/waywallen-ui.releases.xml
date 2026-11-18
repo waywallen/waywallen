@@ -1,3 +1,37 @@
+<release version="0.6.1" date="2026-11-18">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Pixiv plugin with rankings, bookmarks, artist pages.</li>
+      <li>Discover artist page.</li>
+      <li>Optional WebKitGTK browser helper for plugin.</li>
+      <li>Configure wallpaper badges with wildcard rules and show badges supplied by remote sources.</li>
+      <li>Expose MPRIS playback position and duration through v2 media snapshots.</li>
+      <li>Add Spanish UI translations. #383 by @ZineHari</li>
+      <li>Add Ukrainian UI and plugin translations. #395 by @wehrwolfmann</li>
+    </ul>
+    <p>Improved:</p>
+    <ul>
+      <li>Share Discover content filters with artist pages and support secondary sort choices.</li>
+      <li>Support native and AppImage login startup. #380 by @MR-kartoshki</li>
+      <li>Detect layer-shell support from Wayland protocols on unknown desktops. #397 by @wehrwolfmann</li>
+      <li>Recognize Umbriel as a layer-shell desktop. #404 by @AkiraLyu</li>
+      <li>Expose FXAA settings for glTF wallpapers. #389 by @MR-kartoshki</li>
+      <li>Resolve HTTP album artwork for media-aware wallpapers.</li>
+    </ul>
+    <p>Fixed:</p>
+    <ul>
+      <li>Keep MPRIS playback state and metadata consistent when player properties change.</li>
+      <li>Ignore conflict right-click camera input in glTF wallpapers.</li>
+      <li>Preserve playlist entries when relocating libraries. #377 by @MR-kartoshki</li>
+      <li>Preserve plugin state directory permissions and tolerate unreadable HTTP sessions. #390 by @Neclyon</li>
+      <li>Validate filter drafts before applying them. #398 by @mattysss</li>
+      <li>Correct Russian layout mode labels. #394 by @wehrwolfmann</li>
+      <li>Keep wallpaper badge rule dialogs above the tweak sheet.</li>
+      <li>Include PNG encoding support in AppImage FFmpeg builds.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.6.0" date="2026-11-08">
   <description>
     <p>Added:</p>
