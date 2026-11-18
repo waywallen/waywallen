@@ -22,6 +22,7 @@ struct RemoteRow {
     Q_PROPERTY(QVariantMap previewHeaders MEMBER previewHeaders)
     Q_PROPERTY(QString author MEMBER author)
     Q_PROPERTY(QString authorAvatarUrl MEMBER authorAvatarUrl)
+    Q_PROPERTY(QVariantMap authorAvatarHeaders MEMBER authorAvatarHeaders)
     Q_PROPERTY(QString wpType MEMBER wpType)
     Q_PROPERTY(int acquisitionState MEMBER acquisitionState)
     Q_PROPERTY(quint32 width MEMBER width)
@@ -38,6 +39,7 @@ public:
     QVariantMap previewHeaders;
     QString     author;
     QString     authorAvatarUrl;
+    QVariantMap authorAvatarHeaders;
     QString     wpType;
     int         acquisitionState { 0 };
     quint32     width { 0 };

@@ -1251,6 +1251,7 @@ message RemoteItem {
   optional uint32 width = 9;
   optional uint32 height = 10;
   map<string, string> preview_headers = 11;
+  map<string, string> author_avatar_headers = 12;
 }
 
 message RemoteSearchRequest {
@@ -1312,6 +1313,7 @@ message RemoteDetailsResponse {
   string author_url = 11;
   // Nonempty only when the source supports artist-scoped searches.
   string author_id = 12;
+  map<string, string> author_avatar_headers = 13;
 }
 
 message RemoteDetailField {

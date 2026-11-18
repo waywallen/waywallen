@@ -11,6 +11,7 @@ W.DiscoverPage {
     required artistId
     required property string artistName
     property string artistAvatarUrl: ""
+    property var artistAvatarHeaders: ({})
     property string artistUrl: ""
 
     title: qsTr("Artist")
@@ -23,6 +24,7 @@ W.DiscoverPage {
             Layout.preferredWidth: 56
             Layout.preferredHeight: 56
             source: root.artistAvatarUrl
+            sourceHeaders: root.artistAvatarHeaders
             maxSize: Qt.size(112, 112)
             fillMode: Image.PreserveAspectCrop
             radius: 28

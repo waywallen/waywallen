@@ -17,6 +17,15 @@ using namespace qextra::prelude;
 namespace waywallen
 {
 
+namespace {
+auto resourceHeadersFromPb(const auto& headers) -> QVariantMap {
+    QVariantMap result;
+    for (auto header = headers.cbegin(); header != headers.cend(); ++header)
+        result.insert(header.key(), header.value());
+    return result;
+}
+} // namespace
+
 RemoteAvailabilityQuery::RemoteAvailabilityQuery(QObject* parent): Query(parent) {}
 
 auto RemoteAvailabilityQuery::sources() const -> const QVariantList& { return m_sources; }
@@ -412,18 +421,15 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
             QList<model::RemoteRow> rows;
             rows.reserve(sr.items().size());
             for (const auto& it : sr.items()) {
-                QVariantMap previewHeaders;
-                const auto  headers = it.previewHeaders();
-                for (auto header = headers.cbegin(); header != headers.cend(); ++header)
-                    previewHeaders.insert(header.key(), header.value());
                 rows.push_back(AppStore::instance()->mergeRemoteRow(model::RemoteRow {
                     it.sourceId(),
                     it.id_proto(),
                     it.title(),
                     it.previewUrl(),
-                    previewHeaders,
+                    resourceHeadersFromPb(it.previewHeaders()),
                     it.author(),
                     it.authorAvatarUrl(),
+                    resourceHeadersFromPb(it.authorAvatarHeaders()),
                     it.wpType(),
                     it.downloaded() ? 3 : 0,
                     it.hasWidth() ? it.width() : 0,
@@ -474,6 +480,9 @@ void RemoteDetailsQuery::setItemId(const QString& v) {
 }
 auto RemoteDetailsQuery::author() const -> const QString& { return m_author; }
 auto RemoteDetailsQuery::authorAvatarUrl() const -> const QString& { return m_author_avatar_url; }
+auto RemoteDetailsQuery::authorAvatarHeaders() const -> const QVariantMap& {
+    return m_author_avatar_headers;
+}
 auto RemoteDetailsQuery::authorUrl() const -> const QString& { return m_author_url; }
 auto RemoteDetailsQuery::authorId() const -> const QString& { return m_author_id; }
 auto RemoteDetailsQuery::description() const -> const QString& { return m_description; }
@@ -488,6 +497,7 @@ void RemoteDetailsQuery::reload() {
     const auto revision = beginRequest();
     m_author.clear();
     m_author_avatar_url.clear();
+    m_author_avatar_headers.clear();
     m_author_url.clear();
     m_author_id.clear();
     m_description.clear();
@@ -532,6 +542,7 @@ void RemoteDetailsQuery::reload() {
         {
             self->m_author            = dr.author();
             self->m_author_avatar_url = dr.authorAvatarUrl();
+            self->m_author_avatar_headers = resourceHeadersFromPb(dr.authorAvatarHeaders());
             self->m_author_url        = dr.authorUrl();
             self->m_author_id         = dr.authorId();
             self->m_description       = dr.description();

@@ -3151,6 +3151,7 @@ impl LuaPluginRuntime {
                 preview_headers: resource_headers(&row, "preview_headers", &context)?,
                 author: Self::require_string(&row, "author", &context)?,
                 author_avatar_url: Self::optional_string(&row, "author_avatar_url", &context)?,
+                author_avatar_headers: resource_headers(&row, "author_avatar_headers", &context)?,
                 wp_type: {
                     let value = Self::optional_string(&row, "wp_type", &context)?;
                     if value.is_empty() {
@@ -3308,6 +3309,11 @@ impl LuaPluginRuntime {
             author_avatar_url: Self::optional_string(
                 &result,
                 "author_avatar_url",
+                "module.discover.details result",
+            )?,
+            author_avatar_headers: resource_headers(
+                &result,
+                "author_avatar_headers",
                 "module.discover.details result",
             )?,
             author_url: Self::optional_discover_url(

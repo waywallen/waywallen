@@ -28,7 +28,7 @@ MD.Page {
         typeLabels: pluginQuery.typeLabels || ({})
 
         onBack: detailPresenter.dismiss()
-        onArtistRequested: (id, name, avatarUrl, webUrl) => {
+        onArtistRequested: (id, name, avatarUrl, avatarHeaders, webUrl) => {
             if (!root.detailRow || id === root.artistId)
                 return;
             root.MD.MProp.page.pushItem('waywallen.ui/ArtistPage', {
@@ -36,6 +36,7 @@ MD.Page {
                 artistId: id,
                 artistName: name,
                 artistAvatarUrl: avatarUrl,
+                artistAvatarHeaders: avatarHeaders,
                 artistUrl: webUrl
             });
         }

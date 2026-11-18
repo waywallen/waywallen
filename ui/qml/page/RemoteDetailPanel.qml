@@ -17,10 +17,9 @@ Item {
         const own = String(root.item?.author ?? "");
         return own.length > 0 ? own : String(root.details?.author ?? "");
     }
-    readonly property string authorAvatarUrl: {
-        const own = String(root.item?.authorAvatarUrl ?? "");
-        return own.length > 0 ? own : String(root.details?.authorAvatarUrl ?? "");
-    }
+    readonly property var authorAvatarData: String(root.item?.authorAvatarUrl ?? "").length > 0 ? root.item : root.details
+    readonly property string authorAvatarUrl: String(root.authorAvatarData?.authorAvatarUrl ?? "")
+    readonly property var authorAvatarHeaders: root.authorAvatarData?.authorAvatarHeaders ?? ({})
     readonly property string authorUrl: String(root.details?.authorUrl ?? "")
     readonly property string authorId: String(root.details?.authorId ?? "")
     readonly property bool authorInteractive: authorId.length > 0 || authorUrl.length > 0
@@ -36,7 +35,7 @@ Item {
     property int subscriptionState: 0
 
     signal back
-    signal artistRequested(string id, string name, string avatarUrl, string webUrl)
+    signal artistRequested(string id, string name, string avatarUrl, var avatarHeaders, string webUrl)
     signal showInfo
     signal downloadRequested
     signal removeRequested
@@ -45,7 +44,7 @@ Item {
 
     function openAuthor() {
         if (authorId.length > 0)
-            artistRequested(authorId, authorName, authorAvatarUrl, authorUrl);
+            artistRequested(authorId, authorName, authorAvatarUrl, authorAvatarHeaders, authorUrl);
         else if (authorUrl.length > 0)
             MD.Util.openUrlExternally(authorUrl);
     }
@@ -159,6 +158,7 @@ Item {
                         Layout.maximumHeight: 32
                         visible: root.authorAvatarUrl.length > 0
                         source: root.authorAvatarUrl
+                        sourceHeaders: root.authorAvatarHeaders
                         maxSize: Qt.size(64, 64)
                         fillMode: Image.PreserveAspectCrop
                         radius: 16
