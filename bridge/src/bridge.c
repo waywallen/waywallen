@@ -548,6 +548,9 @@ int ww_bridge_recv_control(int sock, ww_bridge_control_t* out) {
         rc = ww_evt_in_pointer_axis_decode(body, body_len, &out->u.pointer_axis);
         break;
     case WW_EVT_IN_MPRIS: rc = ww_evt_in_mpris_decode(body, body_len, &out->u.mpris); break;
+    case WW_EVT_IN_MPRIS_V2:
+        rc = ww_evt_in_mpris_v2_decode(body, body_len, &out->u.mpris_v2);
+        break;
     case WW_EVT_IN_EVENT_SUBSCRIPTIONS_APPLIED:
         rc = ww_evt_in_event_subscriptions_applied_decode(
             body, body_len, &out->u.event_subscriptions_applied);
@@ -591,6 +594,7 @@ void ww_bridge_control_free(ww_bridge_control_t* msg) {
     case WW_EVT_IN_POINTER_BUTTON: ww_evt_in_pointer_button_free(&msg->u.pointer_button); break;
     case WW_EVT_IN_POINTER_AXIS: ww_evt_in_pointer_axis_free(&msg->u.pointer_axis); break;
     case WW_EVT_IN_MPRIS: ww_evt_in_mpris_free(&msg->u.mpris); break;
+    case WW_EVT_IN_MPRIS_V2: ww_evt_in_mpris_v2_free(&msg->u.mpris_v2); break;
     case WW_EVT_IN_EVENT_SUBSCRIPTIONS_APPLIED:
         ww_evt_in_event_subscriptions_applied_free(&msg->u.event_subscriptions_applied);
         break;

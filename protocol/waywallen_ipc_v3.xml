@@ -137,6 +137,18 @@
     <field name="previous_art_url" type="string"/>
   </struct>
 
+  <struct name="mpris_timeline">
+    <!-- Unknown position/duration is -1; positions are sampled at send time. -->
+    <field name="position_us" type="i64"/>
+    <field name="duration_us" type="i64"/>
+    <field name="rate" type="f64"/>
+  </struct>
+
+  <struct name="mpris_v2_snapshot">
+    <field name="media" type="mpris_snapshot"/>
+    <field name="timeline" type="mpris_timeline"/>
+  </struct>
+
   <struct name="event_subscription">
     <field name="revision" type="u64"/>
     <field name="kinds" type="array" element="string"/>
@@ -370,6 +382,10 @@
 
   <event_in name="configure_render_target" opcode="17" encoding="tagged">
     <arg name="config" type="render_target_config" tag="1"/>
+  </event_in>
+
+  <event_in name="mpris_v2" opcode="18">
+    <arg name="snapshot" type="mpris_v2_snapshot"/>
   </event_in>
 
   <!-- renderer -> daemon -->

@@ -253,6 +253,17 @@ typedef struct waywallen_mpris_snapshot {
     char * previous_art_url;
 } waywallen_mpris_snapshot_t;
 
+typedef struct waywallen_mpris_timeline {
+    int64_t position_us;
+    int64_t duration_us;
+    double rate;
+} waywallen_mpris_timeline_t;
+
+typedef struct waywallen_mpris_v2_snapshot {
+    waywallen_mpris_snapshot_t media;
+    waywallen_mpris_timeline_t timeline;
+} waywallen_mpris_v2_snapshot_t;
+
 typedef struct waywallen_pointer_axis {
     float x;
     float y;
@@ -369,6 +380,8 @@ void waywallen_event_subscription_result_free(waywallen_event_subscription_resul
 void waywallen_frame_free(waywallen_frame_t *value);
 void waywallen_init_rejection_free(waywallen_init_rejection_t *value);
 void waywallen_mpris_snapshot_free(waywallen_mpris_snapshot_t *value);
+void waywallen_mpris_timeline_free(waywallen_mpris_timeline_t *value);
+void waywallen_mpris_v2_snapshot_free(waywallen_mpris_v2_snapshot_t *value);
 void waywallen_pointer_axis_free(waywallen_pointer_axis_t *value);
 void waywallen_pointer_button_free(waywallen_pointer_button_t *value);
 void waywallen_pointer_motion_free(waywallen_pointer_motion_t *value);
@@ -400,6 +413,7 @@ typedef enum ww_event_in_op {
     WW_EVT_IN_REQUEST_FRAME = 15,
     WW_EVT_IN_SET_LOG_LEVEL = 16,
     WW_EVT_IN_CONFIGURE_RENDER_TARGET = 17,
+    WW_EVT_IN_MPRIS_V2 = 18,
 } ww_event_in_op_t;
 
 typedef enum ww_event_op {
@@ -484,6 +498,10 @@ typedef struct ww_evt_in_set_log_level_t {
 typedef struct ww_evt_in_configure_render_target_t {
     waywallen_render_target_config_t config;
 } ww_evt_in_configure_render_target_t;
+
+typedef struct ww_evt_in_mpris_v2_t {
+    waywallen_mpris_v2_snapshot_t snapshot;
+} ww_evt_in_mpris_v2_t;
 
 typedef struct ww_evt_ready_t {
     waywallen_drm_node_t drm_node;
@@ -624,6 +642,11 @@ int  ww_evt_in_configure_render_target_encode(const ww_evt_in_configure_render_t
 int  ww_evt_in_configure_render_target_decode(const uint8_t *buf, size_t len, ww_evt_in_configure_render_target_t *out);
 void ww_evt_in_configure_render_target_free(ww_evt_in_configure_render_target_t *m);
 uint32_t ww_evt_in_configure_render_target_expected_fds(const ww_evt_in_configure_render_target_t *m);
+
+int  ww_evt_in_mpris_v2_encode(const ww_evt_in_mpris_v2_t *m, ww_buf_t *out);
+int  ww_evt_in_mpris_v2_decode(const uint8_t *buf, size_t len, ww_evt_in_mpris_v2_t *out);
+void ww_evt_in_mpris_v2_free(ww_evt_in_mpris_v2_t *m);
+uint32_t ww_evt_in_mpris_v2_expected_fds(const ww_evt_in_mpris_v2_t *m);
 
 int  ww_evt_ready_encode(const ww_evt_ready_t *m, ww_buf_t *out);
 int  ww_evt_ready_decode(const uint8_t *buf, size_t len, ww_evt_ready_t *out);

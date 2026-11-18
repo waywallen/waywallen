@@ -15,6 +15,7 @@ use zbus::fdo::{DBusProxy, PropertiesProxy};
 use zbus::zvariant::OwnedValue;
 
 use crate::tasks::TaskKind;
+use crate::wallframe::ipc::proto::MprisTimeline;
 use crate::wallframe::renderer_manager::{
     MprisSnapshot, RendererEventKind, RendererId, RendererSubscriptionSnapshot,
 };
@@ -36,10 +37,58 @@ const MAX_ART_FAILURES: usize = 128;
 const ART_FAILURE_TTL: Duration = Duration::from_secs(30);
 const MAX_ART_URI_BYTES: usize = 4096;
 
+#[derive(Debug, Clone, PartialEq)]
+struct TimelineAnchor {
+    position_us: Option<i64>,
+    duration_us: Option<i64>,
+    rate: f64,
+    sampled_at: Instant,
+}
+
+impl TimelineAnchor {
+    fn snapshot(&self, state: u32, now: Instant) -> MprisTimeline {
+        let position_us = self.position_us.map(|position| {
+            let elapsed = if state == STATE_PLAYING {
+                now.saturating_duration_since(self.sampled_at).as_secs_f64() * self.rate
+            } else {
+                0.0
+            };
+            let position = (position as f64 + elapsed * 1_000_000.0).max(0.0) as i64;
+            self.duration_us
+                .map_or(position, |duration| position.min(duration))
+        });
+        MprisTimeline {
+            position_us: position_us.unwrap_or(-1),
+            duration_us: self.duration_us.unwrap_or(-1),
+            rate: self.rate,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+struct PlayerSnapshot {
+    media: MprisSnapshot,
+    timeline: Option<TimelineAnchor>,
+    track_id: String,
+}
+
+impl PlayerSnapshot {
+    fn timeline_at(&self, now: Instant) -> MprisTimeline {
+        self.timeline.as_ref().map_or(
+            MprisTimeline {
+                position_us: -1,
+                duration_us: -1,
+                rate: 1.0,
+            },
+            |timeline| timeline.snapshot(self.media.state, now),
+        )
+    }
+}
+
 enum PlayerMsg {
     Snapshot {
         name: String,
-        snapshot: MprisSnapshot,
+        snapshot: PlayerSnapshot,
     },
     Gone(String),
     ArtReady {
@@ -275,8 +324,8 @@ async fn run(app: Arc<DaemonContext>) -> Result<()> {
     let mut shutdown = app.shutdown_subscribe();
     let mut subscriptions = app.renderer_manager.subscribe_subscriptions();
     let mut tasks: BTreeMap<String, PlayerTask> = BTreeMap::new();
-    let mut players: BTreeMap<String, MprisSnapshot> = BTreeMap::new();
-    let mut current = MprisSnapshot::default();
+    let mut players: BTreeMap<String, PlayerSnapshot> = BTreeMap::new();
+    let mut current = PlayerSnapshot::default();
     let mut art_cache = ArtCache::new(crate::settings::mpris_art_cache_dir()).await;
     let mut known_subscribers = BTreeMap::new();
     let mut discovered = 0usize;
@@ -330,7 +379,7 @@ async fn run(app: Arc<DaemonContext>) -> Result<()> {
                 let mut refresh_art = false;
                 match msg {
                     PlayerMsg::Snapshot { name, snapshot } => {
-                        log::trace!("snapshot from {name}: {}", snapshot_debug(&snapshot));
+                        log::trace!("snapshot from {name}: {}", snapshot_debug(&snapshot.media));
                         players.insert(name, snapshot);
                     }
                     PlayerMsg::Gone(name) => {
@@ -346,8 +395,8 @@ async fn run(app: Arc<DaemonContext>) -> Result<()> {
                         success,
                     } => {
                         let accepted = art_cache.finished(&key, request_id, success);
-                        let completed_current = is_cacheable_art_uri(&current.art_url)
-                            && art_key(&current.art_url) == key;
+                        let completed_current = is_cacheable_art_uri(&current.media.art_url)
+                            && art_key(&current.media.art_url) == key;
                         refresh_art = accepted && (success || !completed_current);
                     }
                 }
@@ -457,14 +506,6 @@ async fn watch_player(
     tx: mpsc::Sender<PlayerMsg>,
     mut shutdown: watch::Receiver<bool>,
 ) {
-    let proxy = match zbus::Proxy::new(&conn, name.as_str(), MPRIS_PATH, MPRIS_PLAYER_IFACE).await {
-        Ok(proxy) => proxy,
-        Err(e) => {
-            log::warn!("player proxy unavailable for {name}: {e}");
-            let _ = tx.send(PlayerMsg::Gone(name)).await;
-            return;
-        }
-    };
     let props_builder = match PropertiesProxy::builder(&conn).destination(name.as_str()) {
         Ok(builder) => builder,
         Err(e) => {
@@ -481,7 +522,11 @@ async fn watch_player(
             return;
         }
     };
-    let props = match props_builder.build().await {
+    let props = match props_builder
+        .cache_properties(zbus::proxy::CacheProperties::No)
+        .build()
+        .await
+    {
         Ok(proxy) => proxy,
         Err(e) => {
             log::warn!("properties proxy unavailable for {name}: {e}");
@@ -498,19 +543,54 @@ async fn watch_player(
         }
     };
 
+    let player: zbus::Proxy<'_> = match zbus::proxy::Builder::new(&conn)
+        .destination(name.as_str())
+        .and_then(|builder| builder.path(MPRIS_PATH))
+        .and_then(|builder| builder.interface(MPRIS_PLAYER_IFACE))
+    {
+        Ok(builder) => match builder
+            .cache_properties(zbus::proxy::CacheProperties::No)
+            .build()
+            .await
+        {
+            Ok(proxy) => proxy,
+            Err(error) => {
+                log::warn!("player proxy unavailable for {name}: {error}");
+                return;
+            }
+        },
+        Err(error) => {
+            log::warn!("player proxy failed for {name}: {error}");
+            return;
+        }
+    };
+    let mut seeks = match player.receive_signal("Seeked").await {
+        Ok(stream) => stream,
+        Err(error) => {
+            log::warn!("Seeked subscription failed for {name}: {error}");
+            return;
+        }
+    };
+
     log::debug!("watching player {name}");
     let mut last_art_url = String::new();
     let mut previous_art_url = String::new();
-    if let Some(snapshot) =
-        read_player_snapshot(&proxy, &mut last_art_url, &mut previous_art_url).await
-    {
-        log::trace!("initial snapshot for {name}: {}", snapshot_debug(&snapshot));
-        let _ = tx
-            .send(PlayerMsg::Snapshot {
-                name: name.clone(),
-                snapshot,
-            })
-            .await;
+    let mut last_snapshot = None;
+    match read_player_snapshot(&props, None, None, &mut last_art_url, &mut previous_art_url).await {
+        Ok(snapshot) => {
+            log::trace!(
+                "initial snapshot for {name}: {}",
+                snapshot_debug(&snapshot.media)
+            );
+            last_snapshot = Some(snapshot.clone());
+            let _ = tx
+                .send(PlayerMsg::Snapshot {
+                    name: name.clone(),
+                    snapshot,
+                })
+                .await;
+        }
+        Err(error) => log::warn!("initial snapshot failed for {name}: {error:#}"),
     }
 
     loop {
@@ -522,25 +602,60 @@ async fn watch_player(
             }
             signal = changes.next() => {
                 let Some(signal) = signal else { break; };
-                if signal
-                    .args()
-                    .map(|args| args.interface_name.as_str() != MPRIS_PLAYER_IFACE)
-                    .unwrap_or(false)
-                {
+                let args = match signal.args() {
+                    Ok(args) => args,
+                    Err(error) => {
+                        log::warn!("bad PropertiesChanged signal for {name}: {error}");
+                        continue;
+                    }
+                };
+                if args.interface_name.as_str() != MPRIS_PLAYER_IFACE {
+                    continue;
+                }
+                let media_changed = args.changed_properties.keys()
+                    .any(|name| player_snapshot_property(name))
+                    || args.invalidated_properties.iter()
+                        .any(|name| player_snapshot_property(name));
+                if !media_changed {
                     continue;
                 }
                 log::trace!("PropertiesChanged for {name}");
-                if let Some(snapshot) =
-                    read_player_snapshot(&proxy, &mut last_art_url, &mut previous_art_url).await
-                {
-                    log::trace!(
-                        "updated snapshot for {name}: {}",
-                        snapshot_debug(&snapshot)
-                    );
-                    let _ = tx.send(PlayerMsg::Snapshot {
-                        name: name.clone(),
-                        snapshot,
-                    }).await;
+                match read_player_snapshot(&props, last_snapshot.as_ref(), None, &mut last_art_url, &mut previous_art_url).await {
+                    Ok(snapshot) => {
+                        log::trace!(
+                            "updated snapshot for {name}: {}",
+                            snapshot_debug(&snapshot.media)
+                        );
+                        last_snapshot = Some(snapshot.clone());
+                        let _ = tx.send(PlayerMsg::Snapshot {
+                            name: name.clone(),
+                            snapshot,
+                        }).await;
+                    }
+                    Err(error) => {
+                        log::warn!("snapshot refresh failed for {name}, keeping last snapshot: {error:#}");
+                    }
+                }
+            }
+            signal = seeks.next() => {
+                let Some(signal) = signal else { break; };
+                let position = match signal.body().deserialize::<(i64,)>() {
+                    Ok((position,)) if position >= 0 => position,
+                    _ => {
+                        log::warn!("bad Seeked signal for {name}");
+                        continue;
+                    }
+                };
+                let seek = (position, Instant::now());
+                match read_player_snapshot(&props, last_snapshot.as_ref(), Some(seek), &mut last_art_url, &mut previous_art_url).await {
+                    Ok(snapshot) => {
+                        last_snapshot = Some(snapshot.clone());
+                        let _ = tx.send(PlayerMsg::Snapshot {
+                            name: name.clone(),
+                            snapshot,
+                        }).await;
+                    }
+                    Err(error) => log::warn!("Seeked refresh failed for {name}, keeping last snapshot: {error:#}"),
                 }
             }
         }
@@ -548,18 +663,89 @@ async fn watch_player(
 }
 
 async fn read_player_snapshot(
-    proxy: &zbus::Proxy<'_>,
+    props: &PropertiesProxy<'_>,
+    previous: Option<&PlayerSnapshot>,
+    seek: Option<(i64, Instant)>,
     last_art_url: &mut String,
     previous_art_url: &mut String,
-) -> Option<MprisSnapshot> {
-    let status = proxy
-        .get_property::<String>("PlaybackStatus")
+) -> Result<PlayerSnapshot> {
+    // A separate Proxy cache can lag behind PropertiesChanged notifications.
+    // GetAll reads one complete snapshot without that cache or split reads.
+    let properties = props
+        .get_all(Some(MPRIS_PLAYER_IFACE.try_into()?).into())
         .await
-        .unwrap_or_else(|_| "Stopped".to_string());
-    let metadata = proxy
-        .get_property::<HashMap<String, OwnedValue>>("Metadata")
-        .await
+        .context("read player properties")?;
+    player_snapshot_from_properties(properties, previous, seek, last_art_url, previous_art_url)
+}
+
+fn player_snapshot_property(name: &str) -> bool {
+    matches!(name, "PlaybackStatus" | "Metadata" | "Rate" | "Position")
+}
+
+fn player_snapshot_from_properties(
+    mut properties: HashMap<String, OwnedValue>,
+    previous: Option<&PlayerSnapshot>,
+    seek: Option<(i64, Instant)>,
+    last_art_url: &mut String,
+    previous_art_url: &mut String,
+) -> Result<PlayerSnapshot> {
+    let status = properties
+        .remove("PlaybackStatus")
+        .ok_or_else(|| anyhow!("missing PlaybackStatus"))?;
+    let status = String::try_from(status).context("decode PlaybackStatus")?;
+    let state = playback_state_from_status(&status).ok_or_else(|| {
+        anyhow!(
+            "unsupported PlaybackStatus {:?}",
+            truncate_log_text(&status)
+        )
+    })?;
+    let metadata = properties
+        .remove("Metadata")
+        .ok_or_else(|| anyhow!("missing Metadata"))?;
+    let metadata = HashMap::<String, OwnedValue>::try_from(metadata).context("decode Metadata")?;
+
+    let now = Instant::now();
+    let track_id = metadata
+        .get("mpris:trackid")
+        .and_then(|value| value.try_clone().ok())
+        .and_then(|value| zbus::zvariant::OwnedObjectPath::try_from(value).ok())
+        .map(|path| path.to_string())
         .unwrap_or_default();
+    let previous =
+        previous.filter(|previous| !track_id.is_empty() && previous.track_id == track_id);
+    let rate = properties
+        .get("Rate")
+        .and_then(|value| f64::try_from(value).ok())
+        .filter(|rate| rate.is_finite() && *rate != 0.0)
+        .unwrap_or(1.0);
+    let duration_us = metadata
+        .get("mpris:length")
+        .and_then(|value| i64::try_from(value).ok())
+        .filter(|duration| *duration > 0);
+    let position_us = properties
+        .get("Position")
+        .and_then(|value| i64::try_from(value).ok())
+        .filter(|position| *position >= 0);
+    let (position_us, sampled_at) = if let Some(position) = position_us {
+        (Some(position), now)
+    } else if let Some((position, sampled_at)) = seek {
+        (Some(position), sampled_at)
+    } else {
+        (
+            previous.and_then(|previous| {
+                let position = previous.timeline_at(now).position_us;
+                (position >= 0).then_some(position)
+            }),
+            now,
+        )
+    };
+    let timeline = (state != STATE_STOPPED && (position_us.is_some() || duration_us.is_some()))
+        .then_some(TimelineAnchor {
+            position_us,
+            duration_us,
+            rate,
+            sampled_at,
+        });
 
     let art_url = normalize_metadata_art_url(&metadata_string(&metadata, "mpris:artUrl"));
     if art_url != *last_art_url {
@@ -569,22 +755,26 @@ async fn read_player_snapshot(
         *last_art_url = art_url.clone();
     }
 
-    Some(MprisSnapshot {
-        state: playback_state_from_status(&status),
-        title: metadata_string(&metadata, "xesam:title"),
-        artist: metadata_string_list(&metadata, "xesam:artist"),
-        album: metadata_string(&metadata, "xesam:album"),
-        album_artist: metadata_string_list(&metadata, "xesam:albumArtist"),
-        art_url,
-        previous_art_url: previous_art_url.clone(),
+    Ok(PlayerSnapshot {
+        timeline,
+        track_id,
+        media: MprisSnapshot {
+            state,
+            title: metadata_string(&metadata, "xesam:title"),
+            artist: metadata_string_list(&metadata, "xesam:artist"),
+            album: metadata_string(&metadata, "xesam:album"),
+            album_artist: metadata_string_list(&metadata, "xesam:albumArtist"),
+            art_url,
+            previous_art_url: previous_art_url.clone(),
+        },
     })
 }
 
-fn choose_snapshot(players: &BTreeMap<String, MprisSnapshot>) -> MprisSnapshot {
+fn choose_snapshot(players: &BTreeMap<String, PlayerSnapshot>) -> PlayerSnapshot {
     players
         .values()
-        .find(|s| s.state == STATE_PLAYING)
-        .or_else(|| players.values().find(|s| snapshot_has_media(s)))
+        .find(|s| s.media.state == STATE_PLAYING)
+        .or_else(|| players.values().find(|s| snapshot_has_media(&s.media)))
         .or_else(|| players.values().next())
         .cloned()
         .unwrap_or_default()
@@ -598,16 +788,27 @@ fn snapshot_has_media(s: &MprisSnapshot) -> bool {
         || !s.art_url.is_empty()
 }
 
-type MprisSubscribers = BTreeMap<RendererId, u64>;
+type MprisSubscribers = BTreeMap<RendererId, (Option<u64>, Option<u64>)>;
 
 fn mpris_subscribers(snapshot: &RendererSubscriptionSnapshot) -> MprisSubscribers {
-    snapshot
-        .subscribers_with_membership_generation(RendererEventKind::Mpris)
-        .into_iter()
-        .collect()
+    let mut subscribers = MprisSubscribers::new();
+    for (id, generation) in
+        snapshot.subscribers_with_membership_generation(RendererEventKind::Mpris)
+    {
+        subscribers.entry(id).or_default().0 = Some(generation);
+    }
+    for (id, generation) in
+        snapshot.subscribers_with_membership_generation(RendererEventKind::MprisV2)
+    {
+        subscribers.entry(id).or_default().1 = Some(generation);
+    }
+    subscribers
 }
 
-fn updated_subscribers(previous: &MprisSubscribers, current: &MprisSubscribers) -> Vec<RendererId> {
+fn updated_subscribers<T: PartialEq>(
+    previous: &BTreeMap<RendererId, T>,
+    current: &BTreeMap<RendererId, T>,
+) -> Vec<RendererId> {
     current
         .iter()
         .filter_map(|(id, revision)| (previous.get(id) != Some(revision)).then(|| id.clone()))
@@ -618,7 +819,7 @@ async fn publish_current_snapshot(
     app: &DaemonContext,
     subscriptions: &mut watch::Receiver<RendererSubscriptionSnapshot>,
     known_subscribers: &mut MprisSubscribers,
-    snapshot: &MprisSnapshot,
+    snapshot: &PlayerSnapshot,
     art_cache: &mut ArtCache,
     tx: &mpsc::Sender<PlayerMsg>,
 ) {
@@ -634,7 +835,7 @@ async fn publish_current_snapshot(
 async fn publish_to_renderers(
     app: &DaemonContext,
     art_cache: &mut ArtCache,
-    raw_snapshot: &MprisSnapshot,
+    raw_snapshot: &PlayerSnapshot,
     ids: &[RendererId],
     reason: &str,
     tx: &mpsc::Sender<PlayerMsg>,
@@ -642,14 +843,30 @@ async fn publish_to_renderers(
     if ids.is_empty() {
         return;
     }
-    let snapshot = art_cache.prepare_snapshot(raw_snapshot, tx).await;
+    let snapshot = art_cache.prepare_snapshot(&raw_snapshot.media, tx).await;
     log::debug!(
         "publishing {reason} snapshot to {} renderer(s): {}",
         ids.len(),
         snapshot_debug(&snapshot)
     );
     for id in ids {
-        if let Err(e) = app.renderer_manager.send_mpris(id, snapshot.clone()).await {
+        let result = if app
+            .renderer_manager
+            .subscription_snapshot()
+            .wire_revision_for(id, RendererEventKind::MprisV2)
+            .is_some()
+        {
+            app.renderer_manager
+                .send_mpris_v2(
+                    id,
+                    snapshot.clone(),
+                    raw_snapshot.timeline_at(Instant::now()),
+                )
+                .await
+        } else {
+            app.renderer_manager.send_mpris(id, snapshot.clone()).await
+        };
+        if let Err(e) = result {
             log::warn!("failed to send snapshot to renderer {id}: {e:#}");
         }
     }
@@ -659,11 +876,12 @@ fn is_mpris_name(name: &str) -> bool {
     name.starts_with(MPRIS_PREFIX) && name.len() > MPRIS_PREFIX.len()
 }
 
-fn playback_state_from_status(status: &str) -> u32 {
+fn playback_state_from_status(status: &str) -> Option<u32> {
     match status {
-        "Playing" => STATE_PLAYING,
-        "Paused" => STATE_PAUSED,
-        _ => STATE_STOPPED,
+        "Playing" => Some(STATE_PLAYING),
+        "Paused" => Some(STATE_PAUSED),
+        "Stopped" => Some(STATE_STOPPED),
+        _ => None,
     }
 }
 
@@ -1085,10 +1303,10 @@ mod tests {
 
     #[test]
     fn maps_playback_status() {
-        assert_eq!(playback_state_from_status("Stopped"), STATE_STOPPED);
-        assert_eq!(playback_state_from_status("Playing"), STATE_PLAYING);
-        assert_eq!(playback_state_from_status("Paused"), STATE_PAUSED);
-        assert_eq!(playback_state_from_status("Other"), STATE_STOPPED);
+        assert_eq!(playback_state_from_status("Stopped"), Some(STATE_STOPPED));
+        assert_eq!(playback_state_from_status("Playing"), Some(STATE_PLAYING));
+        assert_eq!(playback_state_from_status("Paused"), Some(STATE_PAUSED));
+        assert_eq!(playback_state_from_status("Other"), None);
     }
 
     #[test]
@@ -1096,21 +1314,27 @@ mod tests {
         let mut players = BTreeMap::new();
         players.insert(
             "org.mpris.MediaPlayer2.paused".to_string(),
-            MprisSnapshot {
-                state: STATE_PAUSED,
-                title: "Paused".to_string(),
-                ..MprisSnapshot::default()
+            PlayerSnapshot {
+                media: MprisSnapshot {
+                    state: STATE_PAUSED,
+                    title: "Paused".to_string(),
+                    ..MprisSnapshot::default()
+                },
+                ..PlayerSnapshot::default()
             },
         );
         players.insert(
             "org.mpris.MediaPlayer2.playing".to_string(),
-            MprisSnapshot {
-                state: STATE_PLAYING,
-                title: "Playing".to_string(),
-                ..MprisSnapshot::default()
+            PlayerSnapshot {
+                media: MprisSnapshot {
+                    state: STATE_PLAYING,
+                    title: "Playing".to_string(),
+                    ..MprisSnapshot::default()
+                },
+                ..PlayerSnapshot::default()
             },
         );
-        assert_eq!(choose_snapshot(&players).title, "Playing");
+        assert_eq!(choose_snapshot(&players).media.title, "Playing");
     }
 
     #[test]

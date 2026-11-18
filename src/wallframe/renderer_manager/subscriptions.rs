@@ -4,6 +4,7 @@ use super::*;
 pub enum RendererEventKind {
     Pointer,
     Mpris,
+    MprisV2,
     Audio,
 }
 
@@ -12,6 +13,7 @@ impl RendererEventKind {
         match self {
             Self::Pointer => "pointer",
             Self::Mpris => "mpris",
+            Self::MprisV2 => "mpris-v2",
             Self::Audio => "audio",
         }
     }
@@ -20,6 +22,7 @@ impl RendererEventKind {
         match value {
             "pointer" => Some(Self::Pointer),
             "mpris" => Some(Self::Mpris),
+            "mpris-v2" => Some(Self::MprisV2),
             "audio" => Some(Self::Audio),
             _ => None,
         }
@@ -290,6 +293,7 @@ impl RendererSubscriptionRegistry {
             for kind in [
                 RendererEventKind::Pointer,
                 RendererEventKind::Mpris,
+                RendererEventKind::MprisV2,
                 RendererEventKind::Audio,
             ] {
                 if current.subscription.kinds.contains(&kind) != subscription.kinds.contains(&kind)

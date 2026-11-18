@@ -1046,6 +1046,57 @@ void waywallen_mpris_snapshot_free(waywallen_mpris_snapshot_t *value) {
     memset(value, 0, sizeof(*value));
 }
 
+static int w_mpris_timeline(ww_buf_t *b, const waywallen_mpris_timeline_t *v) {
+    int rc;
+    if ((rc = w_i64(b, v->position_us))) return rc;
+    if ((rc = w_i64(b, v->duration_us))) return rc;
+    if ((rc = w_f64(b, v->rate))) return rc;
+    return WW_OK;
+}
+
+static int rd_mpris_timeline(ww_rd_t *r, waywallen_mpris_timeline_t *v) {
+    int rc;
+    if ((rc = rd_i64(r, &v->position_us))) return rc;
+    if ((rc = rd_i64(r, &v->duration_us))) return rc;
+    if ((rc = rd_f64(r, &v->rate))) return rc;
+    return WW_OK;
+}
+
+static void free_mpris_timeline(waywallen_mpris_timeline_t *v) {
+    (void)v;
+}
+
+void waywallen_mpris_timeline_free(waywallen_mpris_timeline_t *value) {
+    if (!value) return;
+    free_mpris_timeline(value);
+    memset(value, 0, sizeof(*value));
+}
+
+static int w_mpris_v2_snapshot(ww_buf_t *b, const waywallen_mpris_v2_snapshot_t *v) {
+    int rc;
+    if ((rc = w_mpris_snapshot(b, &v->media))) return rc;
+    if ((rc = w_mpris_timeline(b, &v->timeline))) return rc;
+    return WW_OK;
+}
+
+static int rd_mpris_v2_snapshot(ww_rd_t *r, waywallen_mpris_v2_snapshot_t *v) {
+    int rc;
+    if ((rc = rd_mpris_snapshot(r, &v->media))) return rc;
+    if ((rc = rd_mpris_timeline(r, &v->timeline))) return rc;
+    return WW_OK;
+}
+
+static void free_mpris_v2_snapshot(waywallen_mpris_v2_snapshot_t *v) {
+    free_mpris_snapshot(&v->media);
+    free_mpris_timeline(&v->timeline);
+}
+
+void waywallen_mpris_v2_snapshot_free(waywallen_mpris_v2_snapshot_t *value) {
+    if (!value) return;
+    free_mpris_v2_snapshot(value);
+    memset(value, 0, sizeof(*value));
+}
+
 static int w_pointer_axis(ww_buf_t *b, const waywallen_pointer_axis_t *v) {
     int rc;
     if ((rc = w_f32(b, v->x))) return rc;
@@ -2479,6 +2530,39 @@ void ww_evt_in_configure_render_target_free(ww_evt_in_configure_render_target_t 
 }
 
 uint32_t ww_evt_in_configure_render_target_expected_fds(const ww_evt_in_configure_render_target_t *m) {
+    (void)m;
+    return 0;
+}
+
+int ww_evt_in_mpris_v2_encode(const ww_evt_in_mpris_v2_t *m, ww_buf_t *out) {
+    int rc;
+    (void)m;
+    if ((rc = w_mpris_v2_snapshot(out, &m->snapshot))) return rc;
+    return WW_OK;
+}
+
+int ww_evt_in_mpris_v2_decode(const uint8_t *buf, size_t len, ww_evt_in_mpris_v2_t *out) {
+    memset(out, 0, sizeof(*out));
+    ww_rd_t r = { buf, 0, len };
+    int rc;
+    if ((rc = rd_mpris_v2_snapshot(&r, &out->snapshot))) goto fail;
+    if (r.pos != r.len) {
+        int rc2 = WW_ERR_TRAILING;
+        (void)rc2;
+        ww_evt_in_mpris_v2_free(out);
+        return WW_ERR_TRAILING;
+    }
+    return WW_OK;
+fail:
+    ww_evt_in_mpris_v2_free(out);
+    return rc;
+}
+
+void ww_evt_in_mpris_v2_free(ww_evt_in_mpris_v2_t *m) {
+    free_mpris_v2_snapshot(&m->snapshot);
+}
+
+uint32_t ww_evt_in_mpris_v2_expected_fds(const ww_evt_in_mpris_v2_t *m) {
     (void)m;
     return 0;
 }

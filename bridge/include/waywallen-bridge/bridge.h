@@ -337,6 +337,7 @@ typedef struct ww_bridge_control {
         ww_evt_in_pointer_button_t              pointer_button;
         ww_evt_in_pointer_axis_t                pointer_axis;
         ww_evt_in_mpris_t                       mpris;
+        ww_evt_in_mpris_v2_t                    mpris_v2;
         ww_evt_in_event_subscriptions_applied_t event_subscriptions_applied;
         ww_evt_in_audio_window_t                audio_window;
         ww_evt_in_shutdown_t                    shutdown;

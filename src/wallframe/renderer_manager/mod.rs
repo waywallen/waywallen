@@ -17,9 +17,9 @@ use uuid::Uuid;
 use crate::wallframe::ipc::proto::{
     AudioWindow, BufferDirective, BufferFormat, BufferMemorySource, BufferPath, ControlMsg,
     EventMsg, EventSubscriptionResult, EventSubscriptionStatus, LogLevel, MediaPlaybackState,
-    PointerAxis, PointerButton, PointerMotion, RendererInit, RendererState, WireMprisSnapshot,
-    RENDERER_STATE_FIELD_CLEAR_COLOR, RENDERER_STATE_FIELD_RUNTIME_TAGS,
-    RENDERER_STATE_KNOWN_FIELDS,
+    MprisTimeline, MprisV2Snapshot, PointerAxis, PointerButton, PointerMotion, RendererInit,
+    RendererState, WireMprisSnapshot, RENDERER_STATE_FIELD_CLEAR_COLOR,
+    RENDERER_STATE_FIELD_RUNTIME_TAGS, RENDERER_STATE_KNOWN_FIELDS,
 };
 use crate::wallframe::ipc::uds::{recv_event, send_control};
 
@@ -311,6 +311,24 @@ impl Default for MprisSnapshot {
             album_artist: String::new(),
             art_url: String::new(),
             previous_art_url: String::new(),
+        }
+    }
+}
+
+impl From<MprisSnapshot> for WireMprisSnapshot {
+    fn from(snapshot: MprisSnapshot) -> Self {
+        Self {
+            state: match snapshot.state {
+                1 => MediaPlaybackState::Playing,
+                2 => MediaPlaybackState::Paused,
+                _ => MediaPlaybackState::Stopped,
+            },
+            title: snapshot.title,
+            artist: snapshot.artist,
+            album: snapshot.album,
+            album_artist: snapshot.album_artist,
+            art_url: snapshot.art_url,
+            previous_art_url: snapshot.previous_art_url,
         }
     }
 }
@@ -1591,18 +1609,31 @@ impl RendererManager {
             id,
             &handle,
             ControlMsg::Mpris {
-                snapshot: WireMprisSnapshot {
-                    state: match snapshot.state {
-                        1 => MediaPlaybackState::Playing,
-                        2 => MediaPlaybackState::Paused,
-                        _ => MediaPlaybackState::Stopped,
-                    },
-                    title: snapshot.title,
-                    artist: snapshot.artist,
-                    album: snapshot.album,
-                    album_artist: snapshot.album_artist,
-                    art_url: snapshot.art_url,
-                    previous_art_url: snapshot.previous_art_url,
+                snapshot: snapshot.into(),
+            },
+        )
+        .await
+    }
+
+    pub async fn send_mpris_v2(
+        &self,
+        id: &str,
+        media: MprisSnapshot,
+        timeline: MprisTimeline,
+    ) -> Result<()> {
+        let Some(handle) = self.get(id).await else {
+            return Ok(());
+        };
+        if !self.subscribed_to(id, RendererEventKind::MprisV2) {
+            return Ok(());
+        }
+        self.send_control_to_handle(
+            id,
+            &handle,
+            ControlMsg::MprisV2 {
+                snapshot: MprisV2Snapshot {
+                    media: media.into(),
+                    timeline,
                 },
             },
         )
