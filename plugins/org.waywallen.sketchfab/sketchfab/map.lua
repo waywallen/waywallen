@@ -222,6 +222,7 @@ function M.details(model)
         author = author.name or author.username or "",
         author_avatar_url = author.avatar or "",
         author_url = author.url or "",
+        author_id = author.username or "",
         description = model.description or "",
         size = "",
         web_url = model.web_url or "",

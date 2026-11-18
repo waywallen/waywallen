@@ -294,6 +294,10 @@
 <context>
     <name>DiscoverPage</name>
     <message>
+        <source>This source is no longer available.</source>
+        <translation>此来源已不可用。</translation>
+    </message>
+    <message>
         <source>Retry</source>
         <translation>重试</translation>
     </message>
@@ -3239,6 +3243,14 @@ Unsaved frame state may be lost.</source>
 <context>
     <name>Window</name>
     <message>
+        <source>Back</source>
+        <translation>返回</translation>
+    </message>
+    <message>
+        <source>Menu</source>
+        <translation>菜单</translation>
+    </message>
+    <message>
         <location filename="../qml/Window.qml" line="45"/>
         <source>Changelog</source>
         <translation>更新日志</translation>
@@ -3536,6 +3548,24 @@ Unsaved frame state may be lost.</source>
     <message>
         <source>Delete group</source>
         <translation>删除分组</translation>
+    </message>
+</context>
+<context>
+    <name>ArtistPage</name>
+    <message>
+        <source>Artist</source>
+        <translation>作者</translation>
+    </message>
+    <message>
+        <source>Open web page</source>
+        <translation>打开网页</translation>
+    </message>
+</context>
+<context>
+    <name>NavigationStack</name>
+    <message>
+        <source>Failed to open page</source>
+        <translation>无法打开页面</translation>
     </message>
 </context>
 </TS>

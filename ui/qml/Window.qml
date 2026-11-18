@@ -129,12 +129,22 @@ MD.ApplicationWindow {
         m_content.switchTo(pageComponents[currentPage], {}, pageCacheable[currentPage]);
     }
 
+    function selectPage(index) {
+        m_navigation.reset();
+        currentPage = index;
+    }
+
+    Shortcut {
+        sequences: [StandardKey.Back, "Alt+Left"]
+        enabled: m_navigation.canBack
+        onActivated: m_navigation.back()
+    }
+
     function openWallpaper(wallpaperId) {
         pendingWallpaperId = String(wallpaperId || "");
         if (pendingWallpaperId.length === 0)
             return;
-        if (currentPage !== 0)
-            currentPage = 0;
+        selectPage(0);
         Qt.callLater(deliverPendingWallpaper);
     }
 
@@ -242,7 +252,7 @@ MD.ApplicationWindow {
                         expanded = useEmbed
 
                     onCurrentIndexChangeRequested: function (index) {
-                        win.currentPage = index;
+                        win.selectPage(index);
                     }
 
                     // Logo + a menu-toggle button (the rail's default header
@@ -255,8 +265,10 @@ MD.ApplicationWindow {
                             id: m_menu_btn
                             x: MD.Util.lerp((m_rail.collapsedWidth - width) / 2, 32 - (width - 24) / 2, m_rail.expansionProgress)
                             y: 4
-                            icon.name: m_rail.useLarge ? MD.Token.icon.menu_open : MD.Token.icon.menu
-                            onClicked: m_rail.toggle()
+                            icon.name: m_navigation.canBack ? MD.Token.icon.arrow_back : m_rail.useLarge ? MD.Token.icon.menu_open : MD.Token.icon.menu
+                            onClicked: m_navigation.canBack ? m_navigation.back() : m_rail.toggle()
+                            MD.ToolTip.text: m_navigation.canBack ? qsTr("Back") : qsTr("Menu")
+                            MD.ToolTip.visible: mdState.interactions.hovered
                         }
 
                         Image {
@@ -384,22 +396,30 @@ MD.ApplicationWindow {
             }
 
             // --- Page content ---
-            MD.PageContainer {
-                id: m_content
+            W.NavigationStack {
+                id: m_navigation
                 Layout.fillHeight: true
                 Layout.fillWidth: true
                 clip: true
-                initialItem: Item {}
+                pageContext: m_page_ctx
+                onPageLoadFailed: error => W.Global.toastError(error)
 
-                onCurrentItemChanged: Qt.callLater(win.deliverPendingWallpaper)
-
-                MD.MProp.page: m_page_ctx
+                initialItem: MD.PageContainer {
+                    id: m_content
+                    initialItem: Item {}
+                    onCurrentItemChanged: Qt.callLater(win.deliverPendingWallpaper)
+                }
 
                 MD.PageContext {
                     id: m_page_ctx
                     showHeader: false
                     backgroundRadius: win.isCompact ? 0 : MD.Token.shape.corner.large
                     showBackground: !win.isCompact
+                    leadingAction: MD.Action {
+                        icon.name: MD.Token.icon.arrow_back
+                        text: qsTr("Back")
+                        onTriggered: m_navigation.back()
+                    }
                 }
             }
         }
@@ -433,7 +453,7 @@ MD.ApplicationWindow {
                                 icon.name: parent.modelData.icon
                                 text: parent.modelData.name
                                 selected: win.currentPage === parent.index
-                                onSelectionRequested: win.currentPage = parent.index
+                                onSelectionRequested: win.selectPage(parent.index)
                             }
                         }
                     }

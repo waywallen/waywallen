@@ -74,6 +74,7 @@ function M.details(detail)
     return {
         author = uploader_name(detail),
         author_avatar_url = uploader_avatar(detail),
+        author_id = uploader_name(detail),
         description = description,
         size = tostring(detail.file_size or ""),
         width = detail.dimension_x,

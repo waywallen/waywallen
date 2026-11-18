@@ -751,11 +751,37 @@ impl LuaPluginRegistry {
         modes: &HashMap<String, String>,
         excluded: &[String],
     ) -> Result<DiscoverSearchResult> {
+        self.call_discover_for_artist(
+            plugin_name,
+            query,
+            sort,
+            page,
+            tags,
+            cursor,
+            modes,
+            excluded,
+            "",
+        )
+        .await
+    }
+
+    pub async fn call_discover_for_artist(
+        &self,
+        plugin_name: &str,
+        query: &str,
+        sort: &str,
+        page: u32,
+        tags: &[String],
+        cursor: &str,
+        modes: &HashMap<String, String>,
+        excluded: &[String],
+        artist_id: &str,
+    ) -> Result<DiscoverSearchResult> {
         self.handle(plugin_name)?
             .runtime
             .lock()
             .await
-            .call_discover_with_exclusions(
+            .call_discover_for_artist(
                 plugin_name,
                 query,
                 sort,
@@ -764,6 +790,7 @@ impl LuaPluginRegistry {
                 cursor,
                 modes,
                 excluded,
+                artist_id,
             )
             .await
     }
@@ -951,10 +978,6 @@ impl LuaPluginRegistry {
         self.handle(plugin_name).unwrap().runtime.clone()
     }
 
-    #[cfg(test)]
-    pub(crate) async fn set_test_callback_timeout(&self, plugin_name: &str, timeout: Duration) {
-        self.test_runtime(plugin_name).lock().await.callback_timeout = timeout;
-    }
 }
 
 // ---------------------------------------------------------------------------

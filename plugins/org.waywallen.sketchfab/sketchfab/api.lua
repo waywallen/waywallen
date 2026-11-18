@@ -200,6 +200,12 @@ function M.search(ctx, params, headers)
         downloadable = "true",
         restricted = "false",
     }
+    if params.artist_id then
+        if not params.artist_id:match("^[%w_.%-]+$") then
+            error("Invalid Sketchfab artist id")
+        end
+        query.user = params.artist_id
+    end
     if params.sort and params.sort ~= "" and params.sort ~= "relevance" then
         query.sort_by = sorts[params.sort]
         if not query.sort_by then

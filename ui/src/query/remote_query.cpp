@@ -211,6 +211,7 @@ RemoteSearchQuery::RemoteSearchQuery(QObject* parent): QueryList(parent) {
     connect(this, &RemoteSearchQuery::statusChanged, this, &RemoteSearchQuery::stateChanged);
     connect(this, &RemoteSearchQuery::sourceIdChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(this, &RemoteSearchQuery::queryChanged, this, &RemoteSearchQuery::invalidateSearch);
+    connect(this, &RemoteSearchQuery::artistIdChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(this, &RemoteSearchQuery::sortKeyChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(this, &RemoteSearchQuery::tagsChanged, this, &RemoteSearchQuery::invalidateSearch);
     connect(
@@ -227,6 +228,13 @@ void RemoteSearchQuery::setSourceId(const QString& v) {
         m_source_id = v;
         Q_EMIT sourceIdChanged();
     }
+}
+
+auto RemoteSearchQuery::artistId() const -> const QString& { return m_artist_id; }
+void RemoteSearchQuery::setArtistId(const QString& v) {
+    if (m_artist_id == v) return;
+    m_artist_id = v;
+    Q_EMIT artistIdChanged();
 }
 
 auto RemoteSearchQuery::query() const -> const QString& { return m_query; }
@@ -353,6 +361,7 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
     auto inner = proto::RemoteSearchRequest {};
     inner.setSourceId(m_source_id);
     inner.setQuery(m_query);
+    inner.setArtistId(m_artist_id);
     inner.setSortKey(m_sort_key);
     inner.setPage(page);
     inner.setRequiredTags(m_tags);
@@ -451,6 +460,7 @@ void RemoteDetailsQuery::setItemId(const QString& v) {
 auto RemoteDetailsQuery::author() const -> const QString& { return m_author; }
 auto RemoteDetailsQuery::authorAvatarUrl() const -> const QString& { return m_author_avatar_url; }
 auto RemoteDetailsQuery::authorUrl() const -> const QString& { return m_author_url; }
+auto RemoteDetailsQuery::authorId() const -> const QString& { return m_author_id; }
 auto RemoteDetailsQuery::description() const -> const QString& { return m_description; }
 auto RemoteDetailsQuery::size() const -> const QString& { return m_size; }
 auto RemoteDetailsQuery::width() const -> int { return m_width; }
@@ -464,6 +474,7 @@ void RemoteDetailsQuery::reload() {
     m_author.clear();
     m_author_avatar_url.clear();
     m_author_url.clear();
+    m_author_id.clear();
     m_description.clear();
     m_size.clear();
     m_width  = 0;
@@ -507,6 +518,7 @@ void RemoteDetailsQuery::reload() {
             self->m_author            = dr.author();
             self->m_author_avatar_url = dr.authorAvatarUrl();
             self->m_author_url        = dr.authorUrl();
+            self->m_author_id         = dr.authorId();
             self->m_description       = dr.description();
             self->m_size              = dr.size();
             self->m_width             = static_cast<int>(dr.width());

@@ -54,6 +54,7 @@ function M.info()
             discover = {
                 search = true,
                 details = true,
+                artists = true,
                 download = true,
                 sorts = {
                     { key = "trend", label = tr("Trending") },

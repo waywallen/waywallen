@@ -1419,7 +1419,7 @@ pub(super) async fn dispatch_inner(
             };
             let result = state
                 .source_manager
-                .call_discover_with_exclusions(
+                .call_discover_for_artist(
                     &source_id,
                     &r.query,
                     &sort_key,
@@ -1428,6 +1428,7 @@ pub(super) async fn dispatch_inner(
                     &r.cursor,
                     &r.filter_match_modes,
                     &r.excluded_tags,
+                    &r.artist_id,
                 )
                 .await;
             match result {
@@ -1596,6 +1597,7 @@ pub(super) async fn dispatch_inner(
                         author_avatar_url: String::new(),
                         fields: Vec::new(),
                         author_url: String::new(),
+                        author_id: String::new(),
                     }));
                 }
             };
@@ -1612,6 +1614,7 @@ pub(super) async fn dispatch_inner(
                     author: details.author,
                     author_avatar_url: details.author_avatar_url,
                     author_url: details.author_url,
+                    author_id: details.author_id,
                     fields: details
                         .fields
                         .into_iter()
@@ -1636,6 +1639,7 @@ pub(super) async fn dispatch_inner(
                     author_avatar_url: String::new(),
                     fields: Vec::new(),
                     author_url: String::new(),
+                    author_id: String::new(),
                 }),
             }
         }

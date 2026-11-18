@@ -205,6 +205,15 @@ function M.search(ctx, params)
         error("Log in to Wallhaven with an API key to browse NSFW wallpapers")
     end
 
+    if params.artist_id then
+        if not params.artist_id:match("^[%w_.%-]+$") then
+            error("Invalid Wallhaven artist id")
+        end
+        if query:find("@", 1, true) or query:match("%f[%w]id:%d+") then
+            error("Artist searches cannot be combined with uploader or exact tag queries")
+        end
+        query = append_query(query, "@" .. params.artist_id)
+    end
     local q = {
         q = query,
         categories = (general and "1" or "0") .. (anime and "1" or "0") .. (people and "1" or "0"),

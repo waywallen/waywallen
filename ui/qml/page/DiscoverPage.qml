@@ -7,6 +7,9 @@ import waywallen.ui as W
 MD.Page {
     id: root
 
+    property string artistId: ""
+    property Component browserHeading
+    readonly property bool artistMode: artistId.length > 0
     property bool detailOpen: false
     property RemoteDetailPanel detailPanel: RemoteDetailPanel {
         details: detailsQuery
@@ -24,6 +27,17 @@ MD.Page {
         tagOptions: root.detailRow ? root.sourceFilterOptions(root.detailRow.sourceId) : []
 
         onBack: detailPresenter.dismiss()
+        onArtistRequested: (id, name, avatarUrl, webUrl) => {
+            if (!root.detailRow || id === root.artistId)
+                return;
+            root.MD.MProp.page.pushItem('waywallen.ui/ArtistPage', {
+                sourceId: root.detailRow.sourceId,
+                artistId: id,
+                artistName: name,
+                artistAvatarUrl: avatarUrl,
+                artistUrl: webUrl
+            });
+        }
         onDownloadRequested: {
             if (root.detailRow)
                 dlQuery.start(root.detailRow.sourceId, root.detailRow.itemId);
@@ -207,8 +221,7 @@ MD.Page {
         const currentSortKey = searchQuery.sortKey;
         sourceId = id;
         discoverState.setSelectedSourceId(id);
-        if (sourceChanged)
-            loadDiscoverTweakState(id);
+        loadDiscoverTweakState(id);
         sortOptions = s.sorts ?? [];
         sortIndex = 0;
         if (!sourceChanged && currentSortKey.length > 0) {
@@ -321,6 +334,14 @@ MD.Page {
             contentItem: ColumnLayout {
                 spacing: 0
 
+                Loader {
+                    Layout.fillWidth: true
+                    Layout.margins: active ? 16 : 0
+                    active: root.browserHeading !== null
+                    visible: active
+                    sourceComponent: root.browserHeading
+                }
+
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.leftMargin: 16
@@ -334,7 +355,7 @@ MD.Page {
                         mdState.borderWidth: 1
                         text: root.sourceName(root.sourceId)
                         trailingIconName: MD.Token.icon.arrow_drop_down
-                        visible: availabilityQuery.sources.length > 1
+                        visible: !root.artistMode && availabilityQuery.sources.length > 1
 
                         onClicked: sourceMenu.open()
 
@@ -447,7 +468,8 @@ MD.Page {
                         onClicked: searchQuery.retry()
                     }
                     ColumnLayout {
-                        readonly property bool hasError: !searchQuery.querying && searchQuery.errorText.length > 0
+                        readonly property bool sourceUnavailable: root.artistMode && !root.sourceInfo(root.sourceId) && !availabilityQuery.querying
+                        readonly property bool hasError: sourceUnavailable || (!searchQuery.querying && searchQuery.errorText.length > 0)
                         readonly property var loginAction: root.currentSourceLoginAction()
                         readonly property string loginButtonLabel: {
                             const label = loginAction ? W.I18n.tr(loginAction.browseButtonLabelText).trim() : "";
@@ -499,7 +521,7 @@ MD.Page {
                             font.capitalization: Font.MixedCase
                             horizontalAlignment: Text.AlignHCenter
                             maximumLineCount: 4
-                            text: parent.needsLogin ? parent.loginDescription : searchQuery.errorText
+                            text: parent.needsLogin ? parent.loginDescription : parent.sourceUnavailable ? qsTr("This source is no longer available.") : searchQuery.errorText
                             typescale: MD.Token.typescale.body_medium
                             visible: parent.needsLogin || parent.hasError
                             wrapMode: Text.WordWrap
@@ -517,14 +539,14 @@ MD.Page {
                             text: qsTr("Retry")
                             visible: parent.hasError && !parent.needsLogin
 
-                            onClicked: searchQuery.retry()
+                            onClicked: parent.sourceUnavailable ? root.reloadAll() : searchQuery.retry()
                         }
                         MD.Label {
                             Layout.alignment: Qt.AlignHCenter
                             color: MD.Token.color.on_surface_variant
                             text: qsTr("No wallpapers found")
                             typescale: MD.Token.typescale.body_large
-                            visible: !searchQuery.querying && !parent.needsLogin && searchQuery.errorText.length === 0
+                            visible: !searchQuery.querying && !parent.needsLogin && !parent.hasError
                         }
                     }
                 }
@@ -559,6 +581,7 @@ MD.Page {
     }
     W.DiscoverState {
         id: discoverState
+        persistent: !root.artistMode
     }
     W.RemoteStoreItem {
         id: detailStore
@@ -609,6 +632,10 @@ MD.Page {
                 return;
             }
             let nextSourceId = root.sourceId;
+            if (root.artistMode && !root.sourceInfo(nextSourceId)) {
+                searchQuery.browsingEnabled = false;
+                return;
+            }
             if (!root.sourceInfo(nextSourceId)) {
                 const savedSourceId = discoverState.selectedSourceId();
                 if (root.sourceInfo(savedSourceId))
@@ -624,6 +651,7 @@ MD.Page {
     }
     W.RemoteSearchQuery {
         id: searchQuery
+        artistId: root.artistId
     }
     W.RemoteFilterDialog {
         id: m_filter_dialog

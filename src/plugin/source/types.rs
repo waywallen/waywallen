@@ -420,6 +420,8 @@ pub struct DiscoverDetailField {
 /// Detail blob returned by a plugin's `discover.details(ctx, id)`.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct DiscoverDetails {
+    /// Source-owned identity accepted by artist-scoped searches.
+    pub author_id: String,
     pub author: String,
     pub author_avatar_url: String,
     pub author_url: String,

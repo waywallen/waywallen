@@ -6,6 +6,7 @@ QtObject {
     id: root
 
     property string settingsCategory: "DiscoverView"
+    property bool persistent: true
 
     readonly property Settings settings: Settings {
         category: root.settingsCategory
@@ -20,6 +21,8 @@ QtObject {
     }
 
     function setSelectedSourceId(sourceId) {
+        if (!persistent)
+            return;
         const value = String(sourceId ?? "");
         if (settings.selectedSourceId !== value)
             settings.selectedSourceId = value;
@@ -49,6 +52,8 @@ QtObject {
     }
 
     function filterValuesFor(sourceId) {
+        if (!persistent)
+            return [];
         const values = readFilters()[sourceId];
         return Array.isArray(values) ? normalize(values) : [];
     }
@@ -64,6 +69,8 @@ QtObject {
     }
 
     function excludedTagsFor(sourceId) {
+        if (!persistent)
+            return [];
         try {
             const state = JSON.parse(settings.excludedTagsJson);
             const values = state?.[sourceId];
@@ -74,6 +81,8 @@ QtObject {
     }
 
     function setExcludedTagsFor(sourceId, values) {
+        if (!persistent)
+            return;
         if (sourceId.length === 0)
             return;
         let state = {};
@@ -92,11 +101,15 @@ QtObject {
     }
 
     function matchModesFor(sourceId) {
+        if (!persistent)
+            return {};
         const value = readMatchModes()[sourceId];
         return value && typeof value === "object" && !Array.isArray(value) ? value : {};
     }
 
     function setMatchModesFor(sourceId, modes) {
+        if (!persistent)
+            return;
         if (sourceId.length === 0)
             return;
         const state = readMatchModes();
@@ -107,6 +120,8 @@ QtObject {
     }
 
     function setFilterValuesFor(sourceId, values) {
+        if (!persistent)
+            return;
         if (sourceId.length === 0)
             return;
         const state = readFilters();

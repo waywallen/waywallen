@@ -43,6 +43,7 @@ export class RemoteSearchQuery : public QueryList,
 
     Q_PROPERTY(QString sourceId READ sourceId WRITE setSourceId NOTIFY sourceIdChanged FINAL)
     Q_PROPERTY(QString query READ query WRITE setQuery NOTIFY queryChanged FINAL)
+    Q_PROPERTY(QString artistId READ artistId WRITE setArtistId NOTIFY artistIdChanged FINAL)
     Q_PROPERTY(QString sortKey READ sortKey WRITE setSortKey NOTIFY sortKeyChanged FINAL)
     Q_PROPERTY(QStringList tags READ tags WRITE setTags NOTIFY tagsChanged FINAL)
     Q_PROPERTY(QStringList excludedTags READ excludedTags WRITE setExcludedTags NOTIFY
@@ -63,6 +64,8 @@ public:
 
     auto query() const -> const QString&;
     void setQuery(const QString&);
+    auto artistId() const -> const QString&;
+    void setArtistId(const QString&);
 
     auto sortKey() const -> const QString&;
     void setSortKey(const QString&);
@@ -88,6 +91,7 @@ public:
 
     Q_SIGNAL void sourceIdChanged();
     Q_SIGNAL void queryChanged();
+    Q_SIGNAL void artistIdChanged();
     Q_SIGNAL void sortKeyChanged();
     Q_SIGNAL void tagsChanged();
     Q_SIGNAL void excludedTagsChanged();
@@ -102,6 +106,7 @@ private:
 
     QString     m_source_id;
     QString     m_query;
+    QString     m_artist_id;
     QString     m_sort_key;
     QStringList m_tags;
     QStringList m_excluded_tags;
@@ -123,6 +128,7 @@ export class RemoteDetailsQuery : public Query,
     Q_PROPERTY(QString author READ author NOTIFY loaded FINAL)
     Q_PROPERTY(QString authorAvatarUrl READ authorAvatarUrl NOTIFY loaded FINAL)
     Q_PROPERTY(QString authorUrl READ authorUrl NOTIFY loaded FINAL)
+    Q_PROPERTY(QString authorId READ authorId NOTIFY loaded FINAL)
     Q_PROPERTY(QString description READ description NOTIFY loaded FINAL)
     Q_PROPERTY(QString size READ size NOTIFY loaded FINAL)
     Q_PROPERTY(int width READ width NOTIFY loaded FINAL)
@@ -142,6 +148,7 @@ public:
     auto author() const -> const QString&;
     auto authorAvatarUrl() const -> const QString&;
     auto authorUrl() const -> const QString&;
+    auto authorId() const -> const QString&;
     auto description() const -> const QString&;
     auto size() const -> const QString&;
     auto width() const -> int;
@@ -162,6 +169,7 @@ private:
     QString      m_author;
     QString      m_author_avatar_url;
     QString      m_author_url;
+    QString      m_author_id;
     QString      m_description;
     QString      m_size;
     int          m_width { 0 };

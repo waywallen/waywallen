@@ -1252,6 +1252,8 @@ message RemoteSearchRequest {
   string cursor = 6;
   map<string, string> filter_match_modes = 7;
   repeated string excluded_tags = 8;
+  // Source-owned identity; empty for an unscoped search.
+  string artist_id = 9;
 }
 message RemoteSearchResponse {
   repeated RemoteItem items = 1;
@@ -1298,6 +1300,8 @@ message RemoteDetailsResponse {
   string author_avatar_url = 9;
   repeated RemoteDetailField fields = 10;
   string author_url = 11;
+  // Nonempty only when the source supports artist-scoped searches.
+  string author_id = 12;
 }
 
 message RemoteDetailField {

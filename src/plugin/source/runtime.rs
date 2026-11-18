@@ -22,6 +22,7 @@ pub(super) struct SourceCapability {
 
 #[derive(Debug, Clone)]
 pub(super) struct DiscoverCapability {
+    pub(super) supports_artists: bool,
     pub(super) supports_search: bool,
     pub(super) supports_details: bool,
     pub(super) supports_download: bool,
@@ -1179,6 +1180,12 @@ impl LuaPluginRuntime {
                 let filters =
                     declared_filters.unwrap_or_else(|| Self::legacy_discover_filter(legacy_tags));
                 Some(DiscoverCapability {
+                    supports_artists: Self::optional_bool(
+                        &discover_tbl,
+                        "artists",
+                        "info().capabilities.discover",
+                        false,
+                    )?,
                     supports_search: true,
                     supports_details,
                     supports_download,
@@ -2822,6 +2829,32 @@ impl LuaPluginRuntime {
         modes: &HashMap<String, String>,
         excluded: &[String],
     ) -> Result<DiscoverSearchResult> {
+        self.call_discover_for_artist(
+            plugin_name,
+            query,
+            sort,
+            page,
+            tags,
+            cursor,
+            modes,
+            excluded,
+            "",
+        )
+        .await
+    }
+
+    pub async fn call_discover_for_artist(
+        &mut self,
+        plugin_name: &str,
+        query: &str,
+        sort: &str,
+        page: u32,
+        tags: &[String],
+        cursor: &str,
+        modes: &HashMap<String, String>,
+        excluded: &[String],
+        artist_id: &str,
+    ) -> Result<DiscoverSearchResult> {
         let callbacks = self
             .callbacks
             .get(plugin_name)
@@ -2835,6 +2868,12 @@ impl LuaPluginRuntime {
             .as_ref()
             .ok_or_else(|| Error::DiscoverUnsupported(plugin_name.to_string()))?;
         Self::validate_discover_filter_values(plugin_name, discover, tags)?;
+        if !artist_id.is_empty() {
+            if !discover.supports_artists {
+                return Err(Error::DiscoverUnsupported(plugin_name.to_string()));
+            }
+            Self::validate_artist_id(artist_id)?;
+        }
         let mut seen_excluded = HashSet::new();
         for value in excluded {
             if !seen_excluded.insert(value)
@@ -2892,6 +2931,9 @@ impl LuaPluginRuntime {
 
         let params = self.lua.create_table()?;
         params.set("query", query)?;
+        if !artist_id.is_empty() {
+            params.set("artist_id", artist_id)?;
+        }
         params.set("sort", sort)?;
         params.set("page", page)?;
         if !cursor.is_empty() {
@@ -3054,6 +3096,13 @@ impl LuaPluginRuntime {
         }
     }
 
+    fn validate_artist_id(id: &str) -> Result<()> {
+        if id.len() > 256 || id.trim() != id || id.chars().any(char::is_control) {
+            return Err(Error::InvalidArgument("invalid discover artist id".into()));
+        }
+        Ok(())
+    }
+
     /// Relay a detail request to a plugin's `discover.details(ctx, id)` Lua function.
     pub async fn call_details(&mut self, plugin_name: &str, id: &str) -> Result<DiscoverDetails> {
         let callbacks = self
@@ -3069,6 +3118,7 @@ impl LuaPluginRuntime {
         if !discover.supports_details {
             return Err(Error::DiscoverUnsupported(plugin_name.to_string()));
         }
+        let supports_artists = discover.supports_artists;
         let details_fn: LuaFunction = self.lua.registry_value(
             callbacks
                 .discover_details
@@ -3086,6 +3136,11 @@ impl LuaPluginRuntime {
             })?;
 
         let details = DiscoverDetails {
+            author_id: Self::optional_string(
+                &result,
+                "author_id",
+                "module.discover.details result",
+            )?,
             author: Self::optional_string(&result, "author", "module.discover.details result")?,
             author_avatar_url: Self::optional_string(
                 &result,
@@ -3110,6 +3165,12 @@ impl LuaPluginRuntime {
             extra: parse_lua_string_map(&result, "extra", "module.discover.details result")?,
             fields: Self::discover_detail_fields(&result, info.entry_version)?,
         };
+        if !details.author_id.is_empty() {
+            if !supports_artists {
+                return Err(Error::DiscoverUnsupported(plugin_name.to_string()));
+            }
+            Self::validate_artist_id(&details.author_id)?;
+        }
         self.persist_state(plugin_name)?;
         Ok(details)
     }
