@@ -708,6 +708,7 @@ impl LuaPluginRuntime {
             return Ok(Vec::new());
         };
         let mut sorts = Vec::new();
+        let mut keys = HashSet::new();
         for (idx, sort) in sorts_tbl.sequence_values::<LuaTable>().enumerate() {
             let sort = sort.map_err(|e| {
                 Error::Internal(anyhow!("{context}.sorts[{}] must be a table: {e}", idx + 1))
@@ -715,12 +716,41 @@ impl LuaPluginRuntime {
             let context = format!("{context}.sorts[{}]", idx + 1);
             let key = Self::require_string(&sort, "key", &context)?;
             let label = Self::require_localized_text(&sort, "label", &context)?;
-            if key.is_empty() {
+            if key.is_empty() || !keys.insert(key.clone()) {
                 return Err(Error::Internal(anyhow!(
-                    "{context}.key and {context}.label must not be empty"
+                    "{context}.key must be non-empty and unique"
                 )));
             }
-            sorts.push(DiscoverSort { key, label });
+            let mut options = Vec::new();
+            if let Some(values) = Self::optional_table(&sort, "options", &context)? {
+                for (index, value) in values.sequence_values::<LuaTable>().enumerate() {
+                    let context = format!("{context}.options[{}]", index + 1);
+                    let value = value.map_err(|e| Error::Internal(anyhow!("{context}: {e}")))?;
+                    let key = Self::require_string(&value, "key", &context)?;
+                    let label = Self::require_localized_text(&value, "label", &context)?;
+                    if key.is_empty() || !keys.insert(key.clone()) {
+                        return Err(Error::Internal(anyhow!(
+                            "{context}.key must be non-empty and unique"
+                        )));
+                    }
+                    if value.contains_key("options")? {
+                        return Err(Error::Internal(anyhow!(
+                            "{context} does not support nested options"
+                        )));
+                    }
+                    options.push(DiscoverSortChoice { key, label });
+                }
+                if options.is_empty() {
+                    return Err(Error::Internal(anyhow!(
+                        "{context}.options must not be empty"
+                    )));
+                }
+            }
+            sorts.push(DiscoverSort {
+                key,
+                label,
+                options,
+            });
         }
         Ok(sorts)
     }
@@ -3032,7 +3062,7 @@ impl LuaPluginRuntime {
                     "artist browsing does not support text search".into(),
                 ));
             }
-            if !sort.is_empty() && !options.sorts.iter().any(|option| option.key == sort) {
+            if !sort.is_empty() && !options.sorts.iter().any(|option| option.accepts(sort)) {
                 return Err(Error::InvalidArgument("unsupported artist sort".into()));
             }
         }

@@ -1074,6 +1074,14 @@ message RemoteSortOption {
   string key = 1;
   string label = 2;
   PluginMessage label_text = 3;
+  // A group submits one of these keys, not its own key.
+  repeated RemoteSortChoice options = 4;
+}
+
+message RemoteSortChoice {
+  string key = 1;
+  string label = 2;
+  PluginMessage label_text = 3;
 }
 
 message RemoteArtistOptions {

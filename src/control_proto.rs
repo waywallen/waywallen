@@ -12,6 +12,23 @@ pub fn plugin_message_to_proto(
     })
 }
 
+pub fn discover_sort_to_proto(sort: crate::plugin::source::DiscoverSort) -> RemoteSortOption {
+    RemoteSortOption {
+        key: sort.key,
+        label: sort.label.text().to_string(),
+        label_text: plugin_message_to_proto(&sort.label),
+        options: sort
+            .options
+            .into_iter()
+            .map(|choice| RemoteSortChoice {
+                key: choice.key,
+                label: choice.label.text().to_string(),
+                label_text: plugin_message_to_proto(&choice.label),
+            })
+            .collect(),
+    }
+}
+
 /// Stringify a `toml::Value` for the wire `default_value` / `min` /
 /// `max` / `step` fields.
 fn toml_value_to_wire(v: &toml::Value) -> String {

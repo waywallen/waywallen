@@ -60,7 +60,9 @@ MD.Page {
     property var infoPresentation: null
     property var managePresentation: null
     property int sortIndex: 0
+    property int sortChoiceIndex: 0
     property var sortOptions: []
+    readonly property var sortChoices: sortOptions[sortIndex]?.options ?? []
     property string sourceId: ""
 
     function closeDetail() {
@@ -156,8 +158,19 @@ MD.Page {
     function pickSort(idx) {
         if (idx < 0 || idx >= sortOptions.length)
             return;
+        if (sortIndex !== idx)
+            sortChoiceIndex = 0;
         sortIndex = idx;
-        searchQuery.sortKey = sortOptions[idx].key;
+        applySort();
+    }
+    function pickSortChoice(idx) {
+        if (idx < 0 || idx >= sortChoices.length)
+            return;
+        sortChoiceIndex = idx;
+        applySort();
+    }
+    function applySort() {
+        searchQuery.sortKey = sortChoices.length > 0 ? sortChoices[sortChoiceIndex].key : sortOptions[sortIndex]?.key ?? "";
     }
     function pruneTags(tags, filters) {
         const allowed = {};
@@ -230,10 +243,14 @@ MD.Page {
         loadDiscoverTweakState(id);
         sortOptions = (root.artistMode ? s.artistOptions?.sorts ?? s.sorts : s.sorts) ?? [];
         sortIndex = 0;
+        sortChoiceIndex = 0;
         if (!sourceChanged && currentSortKey.length > 0) {
             for (let i = 0; i < sortOptions.length; ++i) {
-                if (sortOptions[i].key === currentSortKey) {
+                const choices = sortOptions[i].options ?? [];
+                const choiceIndex = choices.findIndex(option => option.key === currentSortKey);
+                if (choiceIndex >= 0 || (choices.length === 0 && sortOptions[i].key === currentSortKey)) {
                     sortIndex = i;
+                    sortChoiceIndex = Math.max(0, choiceIndex);
                     break;
                 }
             }
@@ -263,7 +280,7 @@ MD.Page {
         discoverState.setMatchModesFor(id, modes);
         searchQuery.sourceId = id;
         detailsQuery.sourceId = id;
-        searchQuery.sortKey = sortOptions.length > 0 ? sortOptions[sortIndex].key : "";
+        applySort();
         if (sourceChanged || !canBrowse) {
             detailOpen = false;
             detailsQuery.itemId = "";
@@ -409,6 +426,37 @@ MD.Page {
                                 onClicked: {
                                     root.pickSort(index);
                                     sortMenu.close();
+                                }
+                            }
+                        }
+                    }
+                    MD.EmbedChip {
+                        id: sortChoiceChip
+
+                        mdState.borderWidth: 1
+                        text: W.I18n.tr(root.sortChoices[root.sortChoiceIndex]?.labelText ?? "")
+                        trailingIconName: MD.Token.icon.arrow_drop_down
+                        visible: root.sortChoices.length > 0
+
+                        onClicked: sortChoiceMenu.open()
+
+                        MD.Menu {
+                            id: sortChoiceMenu
+
+                            model: root.sortChoices
+                            parent: sortChoiceChip
+                            y: parent.height
+
+                            contentDelegate: MD.MenuItem {
+                                required property int index
+                                required property var modelData
+
+                                icon.name: index === root.sortChoiceIndex ? MD.Token.icon.check : ' '
+                                text: W.I18n.tr(modelData.labelText)
+
+                                onClicked: {
+                                    root.pickSortChoice(index);
+                                    sortChoiceMenu.close();
                                 }
                             }
                         }

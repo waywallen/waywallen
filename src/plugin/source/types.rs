@@ -195,6 +195,24 @@ pub struct SourceStatus {
 pub struct DiscoverSort {
     pub key: String,
     pub label: LocalizedText,
+    /// When present, clients submit a choice key instead of the group key.
+    pub options: Vec<DiscoverSortChoice>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiscoverSortChoice {
+    pub key: String,
+    pub label: LocalizedText,
+}
+
+impl DiscoverSort {
+    pub fn accepts(&self, key: &str) -> bool {
+        if self.options.is_empty() {
+            self.key == key
+        } else {
+            self.options.iter().any(|option| option.key == key)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]

@@ -57,6 +57,16 @@ void RemoteAvailabilityQuery::reload() {
                     row[u"key"_s]       = sort.key();
                     row[u"label"_s]     = sort.label();
                     row[u"labelText"_s] = pluginMessageFromPb(sort.labelText(), sort.label());
+                    QVariantList options;
+                    options.reserve(sort.options().size());
+                    for (const auto& option : sort.options()) {
+                        options.push_back(QVariantMap {
+                            { u"key"_s, option.key() },
+                            { u"label"_s, option.label() },
+                            { u"labelText"_s, pluginMessageFromPb(option.labelText(), option.label()) },
+                        });
+                    }
+                    row[u"options"_s] = options;
                     sorts.push_back(row);
                 }
                 return sorts;

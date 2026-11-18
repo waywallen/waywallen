@@ -1299,13 +1299,7 @@ pub(super) async fn dispatch_inner(
                                 sorts: options
                                     .sorts
                                     .into_iter()
-                                    .map(|sort| pb::RemoteSortOption {
-                                        key: sort.key,
-                                        label: sort.label.text().to_string(),
-                                        label_text: crate::control_proto::plugin_message_to_proto(
-                                            &sort.label,
-                                        ),
-                                    })
+                                    .map(crate::control_proto::discover_sort_to_proto)
                                     .collect(),
                             }),
                             pagination: match s.pagination {
@@ -1319,13 +1313,7 @@ pub(super) async fn dispatch_inner(
                             sorts: s
                                 .sorts
                                 .into_iter()
-                                .map(|sort| pb::RemoteSortOption {
-                                    key: sort.key,
-                                    label: sort.label.text().to_string(),
-                                    label_text: crate::control_proto::plugin_message_to_proto(
-                                        &sort.label,
-                                    ),
-                                })
+                                .map(crate::control_proto::discover_sort_to_proto)
                                 .collect(),
                             tags,
                             content_dir,
