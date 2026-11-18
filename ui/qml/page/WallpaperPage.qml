@@ -1293,6 +1293,7 @@ MD.Page {
         W.TweakSheet {
             popupParent: root
             tweak: wallpaperTweakState
+            localBadges: true
         }
     }
     Component {

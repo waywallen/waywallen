@@ -9,6 +9,9 @@ MD.BottomSheet {
 
     required property Item popupParent
     required property var tweak
+    property var badgeOptions: []
+    property string badgeSourceId: ""
+    property bool localBadges: false
 
     dim: false
     dismissOnDragDown: true
@@ -35,6 +38,48 @@ MD.BottomSheet {
                 maximumLineCount: 1
                 text: qsTr("Tweak")
                 typescale: MD.Token.typescale.title_medium
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                visible: control.localBadges || control.badgeOptions.length > 0
+
+                MD.Text {
+                    text: qsTr("Card badges")
+                    typescale: MD.Token.typescale.label_medium
+                    color: MD.Token.color.on_surface_variant
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    visible: control.localBadges
+
+                    MD.Switch {
+                        checked: W.WallpaperBadgeSettings.enabled
+                        Accessible.name: qsTr("Show card badges")
+                        onCheckedChangeRequested: checked => W.WallpaperBadgeSettings.setEnabled(checked)
+                    }
+                    MD.Button {
+                        text: qsTr("Edit rules")
+                        onClicked: control.popupParent.Window.window.presentPopup('waywallen.ui/PagePopup', {
+                            source: 'waywallen.ui/WallpaperBadgeRulesPage'
+                        })
+                    }
+                }
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: 6
+                    visible: !control.localBadges
+
+                    Repeater {
+                        model: control.badgeOptions
+                        delegate: MD.FilterChip {
+                            required property var modelData
+                            text: W.I18n.tr(modelData.labelText)
+                            selected: W.DiscoverState.hiddenBadgesFor(control.badgeSourceId).indexOf(modelData.id) < 0
+                            onSelectionRequested: W.DiscoverState.setBadgeVisible(control.badgeSourceId, modelData.id, !selected)
+                        }
+                    }
+                }
             }
             ColumnLayout {
                 Layout.fillWidth: true

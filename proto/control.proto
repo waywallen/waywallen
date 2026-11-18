@@ -1148,6 +1148,18 @@ message RemoteSourceInfo {
   RemotePagination pagination = 18;
   DownloadAction download_action = 19;
   RemoteArtistOptions artist_options = 20;
+  repeated RemoteBadgeDef badges = 21;
+}
+
+message RemoteBadgeDef {
+  string id = 1;
+  string label = 2;
+  PluginMessage label_text = 3;
+}
+
+message RemoteBadge {
+  string id = 1;
+  string text = 2;
 }
 
 message DownloadAction {
@@ -1260,6 +1272,7 @@ message RemoteItem {
   optional uint32 height = 10;
   map<string, string> preview_headers = 11;
   map<string, string> author_avatar_headers = 12;
+  repeated RemoteBadge badges = 13;
 }
 
 message RemoteSearchRequest {

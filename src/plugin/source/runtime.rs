@@ -2,6 +2,7 @@ use super::parsing::{parse_lua_string_map, redact_secrets};
 use super::*;
 use crate::plugin::i18n::LocalizedText;
 
+mod badges;
 mod browser;
 pub(crate) use browser::{BrowserLoginBegin, BrowserLoginOutcome, BrowserLoginUpdate};
 
@@ -59,6 +60,7 @@ pub(super) struct DiscoverCapability {
     pub(super) download_action: DiscoverDownloadAction,
     pub(super) sorts: Vec<DiscoverSort>,
     pub(super) filters: Vec<DiscoverFilter>,
+    pub(super) badges: Vec<DiscoverBadgeDef>,
     /// The plugin exposes `discover.tags(ctx)`; the daemon calls it to refresh
     /// a legacy multi-select filter from a live source.
     pub(super) dynamic_tags: bool,
@@ -1336,6 +1338,7 @@ impl LuaPluginRuntime {
                     .unwrap_or_default(),
                     sorts,
                     filters,
+                    badges: Self::discover_badge_definitions(&discover_tbl)?,
                     dynamic_tags,
                 })
             }
@@ -2941,6 +2944,7 @@ impl LuaPluginRuntime {
                 download_action: disc.download_action.clone(),
                 sorts: disc.sorts.clone(),
                 filters: disc.filters.clone(),
+                badges: disc.badges.clone(),
                 owner_plugin_id: info.plugin_id.clone(),
                 settings: info.settings.clone(),
                 actions: info.actions.clone(),
@@ -3106,6 +3110,7 @@ impl LuaPluginRuntime {
             _ => {}
         }
         let pagination = discover.pagination;
+        let badge_definitions = discover.badges.clone();
         let entry_version = info.entry_version;
         let default_wp_type = info
             .capabilities
@@ -3192,6 +3197,7 @@ impl LuaPluginRuntime {
                 },
                 width: Self::optional_dimension(&row, "width"),
                 height: Self::optional_dimension(&row, "height"),
+                badges: Self::discover_item_badges(&row, &badge_definitions, &context)?,
                 extra: parse_lua_string_map(&row, "extra", &context)?,
             });
         }

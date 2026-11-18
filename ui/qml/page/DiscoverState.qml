@@ -15,10 +15,35 @@ QtObject {
         property string filtersJson: "{}"
         property string matchModesJson: "{}"
         property string excludedTagsJson: "{}"
+        property string hiddenBadgesJson: "{}"
     }
 
     function selectedSourceId() {
         return settings.selectedSourceId;
+    }
+
+    function hiddenBadgesFor(sourceId) {
+        try {
+            const state = JSON.parse(settings.hiddenBadgesJson);
+            const values = state?.[sourceId];
+            return Array.isArray(values) ? normalize(values) : [];
+        } catch (error) {
+            return [];
+        }
+    }
+    function setBadgeVisible(sourceId, id, visible) {
+        if (sourceId.length === 0 || id.length === 0)
+            return;
+        const next = hiddenBadgesFor(sourceId).filter(value => value !== id);
+        if (!visible)
+            next.push(id);
+        settings.hiddenBadgesJson = valuesJson(settings.hiddenBadgesJson, sourceId, next);
+    }
+    function visibleBadges(sourceId, badges, definitions) {
+        const allowed = (definitions ?? []).map(definition => definition.id);
+        const hidden = hiddenBadgesFor(sourceId);
+        return (badges ?? []).filter(badge => allowed.indexOf(badge.id) >= 0
+            && hidden.indexOf(badge.id) < 0).map(badge => badge.text);
     }
 
     function setSelectedSourceId(sourceId) {

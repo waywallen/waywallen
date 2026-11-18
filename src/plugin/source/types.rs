@@ -205,6 +205,18 @@ pub struct DiscoverSortChoice {
     pub label: LocalizedText,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiscoverBadgeDef {
+    pub id: String,
+    pub label: LocalizedText,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DiscoverBadge {
+    pub id: String,
+    pub text: String,
+}
+
 impl DiscoverSort {
     pub fn accepts(&self, key: &str) -> bool {
         if self.options.is_empty() {
@@ -278,6 +290,7 @@ pub struct DiscoverSourceInfo {
     pub download_action: DiscoverDownloadAction,
     pub sorts: Vec<DiscoverSort>,
     pub filters: Vec<DiscoverFilter>,
+    pub badges: Vec<DiscoverBadgeDef>,
     /// Domain id of the owning installable plugin (e.g.
     /// `org.waywallen.open-wallpaper-engine`). Source settings remain keyed by
     /// `plugin_id`, the Lua source name.
@@ -435,6 +448,7 @@ pub struct DiscoverItem {
     pub wp_type: String,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    pub badges: Vec<DiscoverBadge>,
     pub extra: HashMap<String, String>,
 }
 

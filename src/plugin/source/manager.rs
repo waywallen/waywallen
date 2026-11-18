@@ -667,6 +667,7 @@ impl LuaPluginRegistry {
                 download_action: disc.download_action.clone(),
                 sorts: disc.sorts.clone(),
                 filters: disc.filters.clone(),
+                badges: disc.badges.clone(),
                 owner_plugin_id: info.plugin_id.clone(),
                 settings: info.settings.clone(),
                 actions: info.actions.clone(),

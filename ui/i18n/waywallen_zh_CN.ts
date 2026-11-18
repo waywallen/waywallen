@@ -2511,6 +2511,9 @@ Unsaved frame state may be lost.</source>
 </context>
 <context>
     <name>TweakSheet</name>
+    <message><source>Card badges</source><translation>卡片角标</translation></message>
+    <message><source>Show card badges</source><translation>显示卡片角标</translation></message>
+    <message><source>Edit rules</source><translation>编辑规则</translation></message>
     <message>
         <source>Layout</source>
         <translation>布局</translation>
@@ -3573,5 +3576,22 @@ Unsaved frame state may be lost.</source>
         <source>Failed to open page</source>
         <translation>无法打开页面</translation>
     </message>
+</context>
+<context>
+    <name>WallpaperBadgeRulesPage</name>
+    <message><source>Card badge rules</source><translation>卡片角标规则</translation></message>
+    <message><source>Content rating</source><translation>内容分级</translation></message>
+    <message><source>Wallpaper type</source><translation>壁纸类型</translation></message>
+    <message><source>Tag</source><translation>标签</translation></message>
+    <message><source>Rules match exactly, ignoring case. A tag rule matches any tag on the wallpaper.</source><translation>规则进行忽略大小写的精确匹配。标签规则匹配壁纸的任一标签。</translation></message>
+    <message><source>%1: %2 → %3</source><translation>%1：%2 → %3</translation></message>
+    <message><source>Edit</source><translation>编辑</translation></message>
+    <message><source>Remove</source><translation>移除</translation></message>
+    <message><source>Match field</source><translation>匹配字段</translation></message>
+    <message><source>Matching value</source><translation>匹配值</translation></message>
+    <message><source>Badge text</source><translation>角标文字</translation></message>
+    <message><source>Save</source><translation>保存</translation></message>
+    <message><source>Add</source><translation>添加</translation></message>
+    <message><source>Cancel</source><translation>取消</translation></message>
 </context>
 </TS>

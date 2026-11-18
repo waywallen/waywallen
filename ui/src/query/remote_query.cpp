@@ -121,6 +121,14 @@ void RemoteAvailabilityQuery::reload() {
                 }
                 m[u"tags"_s]             = tags;
                 m[u"filters"_s]          = filters;
+                QVariantList badges;
+                for (const auto& badge : src.badges()) {
+                    badges.push_back(QVariantMap {
+                        { u"id"_s, badge.id_proto() },
+                        { u"labelText"_s, pluginMessageFromPb(badge.labelText(), badge.label()) },
+                    });
+                }
+                m[u"badges"_s] = badges;
                 m[u"contentDir"_s]       = src.contentDir();
                 m[u"ownerPluginId"_s]    = src.ownerPluginId();
                 m[u"displayName"_s]      = src.displayName();
@@ -431,6 +439,12 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
             QList<model::RemoteRow> rows;
             rows.reserve(sr.items().size());
             for (const auto& it : sr.items()) {
+                QVariantList badges;
+                for (const auto& badge : it.badges()) {
+                    badges.push_back(QVariantMap {
+                        { u"id"_s, badge.id_proto() }, { u"text"_s, badge.text() },
+                    });
+                }
                 rows.push_back(AppStore::instance()->mergeRemoteRow(model::RemoteRow {
                     it.sourceId(),
                     it.id_proto(),
@@ -444,6 +458,7 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
                     it.downloaded() ? 3 : 0,
                     it.hasWidth() ? it.width() : 0,
                     it.hasHeight() ? it.height() : 0,
+                    std::move(badges),
                 }));
             }
             auto t = self->model();

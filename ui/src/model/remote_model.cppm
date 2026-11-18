@@ -27,6 +27,7 @@ struct RemoteRow {
     Q_PROPERTY(int acquisitionState MEMBER acquisitionState)
     Q_PROPERTY(quint32 width MEMBER width)
     Q_PROPERTY(quint32 height MEMBER height)
+    Q_PROPERTY(QVariantList badges MEMBER badges)
     Q_PROPERTY(bool downloadTransferActive MEMBER downloadTransferActive)
     Q_PROPERTY(quint64 downloadReceivedBytes MEMBER downloadReceivedBytes)
     Q_PROPERTY(quint64 downloadTotalBytes MEMBER downloadTotalBytes)
@@ -44,6 +45,7 @@ public:
     int         acquisitionState { 0 };
     quint32     width { 0 };
     quint32     height { 0 };
+    QVariantList badges;
     bool        downloadTransferActive { false };
     quint64     downloadReceivedBytes { 0 };
     quint64     downloadTotalBytes { 0 };

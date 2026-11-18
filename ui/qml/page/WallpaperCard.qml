@@ -65,6 +65,15 @@ Item {
                 wpType: root.wallpaper?.wpType ?? ""
                 timeline: (root.wallpaper?.subType ?? 0) === 1
             }
+            W.CardBadges {
+                id: cardBadges
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.margins: 5
+                texts: W.WallpaperBadgeSettings.labelsFor(root.wallpaper)
+                maximumWidth: Math.max(0, parent.width - ((root.wallpaper?.updateAvailable ?? false)
+                    ? Math.min(120, parent.width / 2) + 12 : 10))
+            }
 
             // Scrim aligns to the image control's bounds; spans the
             // title-top → image-bottom overlap.
@@ -113,7 +122,8 @@ Item {
                 height: 24
                 radius: 12
                 visible: root.wallpaper?.updateAvailable ?? false
-                width: Math.min(Math.ceil(updateMetrics.advanceWidth) + 16, parent.width - (root.selected ? 44 : 12))
+                width: Math.max(0, Math.min(Math.ceil(updateMetrics.advanceWidth) + 16,
+                    parent.width - (root.selected ? 44 : 12) - (cardBadges.visible ? cardBadges.width + 5 : 0)))
 
                 TextMetrics {
                     id: updateMetrics

@@ -503,6 +503,7 @@ MD.Page {
                         tweak: root.discoverTweakState
 
                         delegate: RemoteCard {
+                            badgeTexts: W.DiscoverState.visibleBadges(root.sourceId, item.badges, root.currentSourceConfig()?.badges ?? [])
                             fallbackAspectRatio: root.discoverTweakState.itemAspectRatio
                             itemHeight: masonry ? height : m_grid.displayItemHeight
                             itemWidth: m_grid.displayItemWidth
@@ -846,6 +847,8 @@ MD.Page {
         W.TweakSheet {
             popupParent: root
             tweak: root.discoverTweakState
+            badgeOptions: root.currentSourceConfig()?.badges ?? []
+            badgeSourceId: root.sourceId
         }
     }
 }

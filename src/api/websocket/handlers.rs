@@ -1325,6 +1325,17 @@ pub(super) async fn dispatch_inner(
                             remote_capability: remote_capability as i32,
                             remote_hint: s.remote_hint.text().to_string(),
                             avatar_url: s.avatar_url,
+                            badges: s
+                                .badges
+                                .into_iter()
+                                .map(|badge| pb::RemoteBadgeDef {
+                                    id: badge.id,
+                                    label: badge.label.text().to_string(),
+                                    label_text: crate::control_proto::plugin_message_to_proto(
+                                        &badge.label,
+                                    ),
+                                })
+                                .collect(),
                             filters: s
                                 .filters
                                 .into_iter()
@@ -1470,6 +1481,14 @@ pub(super) async fn dispatch_inner(
                             wp_type: item.wp_type,
                             width: item.width,
                             height: item.height,
+                            badges: item
+                                .badges
+                                .into_iter()
+                                .map(|badge| pb::RemoteBadge {
+                                    id: badge.id,
+                                    text: badge.text,
+                                })
+                                .collect(),
                         });
                     }
                     Res::RemoteSearch(pb::RemoteSearchResponse {
