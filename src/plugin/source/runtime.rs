@@ -22,7 +22,7 @@ pub(super) struct SourceCapability {
 
 #[derive(Debug, Clone)]
 pub(super) struct DiscoverCapability {
-    pub(super) supports_artists: bool,
+    pub(super) artists: Option<DiscoverArtistOptions>,
     pub(super) supports_search: bool,
     pub(super) supports_details: bool,
     pub(super) supports_download: bool,
@@ -623,21 +623,19 @@ impl LuaPluginRuntime {
         Ok(out)
     }
 
-    fn optional_discover_sorts(discover_tbl: &LuaTable) -> Result<Vec<DiscoverSort>> {
-        let Some(sorts_tbl) =
-            Self::optional_table(discover_tbl, "sorts", "info().capabilities.discover")?
-        else {
+    fn optional_discover_sorts(
+        discover_tbl: &LuaTable,
+        context: &str,
+    ) -> Result<Vec<DiscoverSort>> {
+        let Some(sorts_tbl) = Self::optional_table(discover_tbl, "sorts", context)? else {
             return Ok(Vec::new());
         };
         let mut sorts = Vec::new();
         for (idx, sort) in sorts_tbl.sequence_values::<LuaTable>().enumerate() {
             let sort = sort.map_err(|e| {
-                Error::Internal(anyhow!(
-                    "info().capabilities.discover.sorts[{}] must be a table: {e}",
-                    idx + 1
-                ))
+                Error::Internal(anyhow!("{context}.sorts[{}] must be a table: {e}", idx + 1))
             })?;
-            let context = format!("info().capabilities.discover.sorts[{}]", idx + 1);
+            let context = format!("{context}.sorts[{}]", idx + 1);
             let key = Self::require_string(&sort, "key", &context)?;
             let label = Self::require_localized_text(&sort, "label", &context)?;
             if key.is_empty() {
@@ -648,6 +646,35 @@ impl LuaPluginRuntime {
             sorts.push(DiscoverSort { key, label });
         }
         Ok(sorts)
+    }
+
+    fn discover_artists(
+        table: &LuaTable,
+        sorts: &[DiscoverSort],
+    ) -> Result<Option<DiscoverArtistOptions>> {
+        let value = table.get::<LuaValue>("artists")?;
+        let context = "info().capabilities.discover.artists";
+        let options = match value {
+            LuaValue::Nil | LuaValue::Boolean(false) => return Ok(None),
+            LuaValue::Boolean(true) => DiscoverArtistOptions {
+                search_text: true,
+                sorts: sorts.to_vec(),
+            },
+            LuaValue::Table(table) => DiscoverArtistOptions {
+                search_text: Self::optional_bool(&table, "search_text", context, true)?,
+                sorts: if table.contains_key("sorts")? {
+                    Self::optional_discover_sorts(&table, context)?
+                } else {
+                    sorts.to_vec()
+                },
+            },
+            _ => {
+                return Err(Error::InvalidArgument(format!(
+                    "{context} must be a boolean or table"
+                )))
+            }
+        };
+        Ok(Some(options))
     }
 
     pub(super) fn legacy_discover_filter(tags: Vec<String>) -> Vec<DiscoverFilter> {
@@ -1163,7 +1190,9 @@ impl LuaPluginRuntime {
                         "module.subscription presence must match the subscription capability"
                     )));
                 }
-                let sorts = Self::optional_discover_sorts(&discover_tbl)?;
+                let sorts =
+                    Self::optional_discover_sorts(&discover_tbl, "info().capabilities.discover")?;
+                let artists = Self::discover_artists(&discover_tbl, &sorts)?;
                 let declared_filters =
                     Self::optional_discover_filters(&discover_tbl, entry_version)?;
                 let legacy_tags = Self::optional_string_sequence(
@@ -1180,12 +1209,7 @@ impl LuaPluginRuntime {
                 let filters =
                     declared_filters.unwrap_or_else(|| Self::legacy_discover_filter(legacy_tags));
                 Some(DiscoverCapability {
-                    supports_artists: Self::optional_bool(
-                        &discover_tbl,
-                        "artists",
-                        "info().capabilities.discover",
-                        false,
-                    )?,
+                    artists,
                     supports_search: true,
                     supports_details,
                     supports_download,
@@ -2752,6 +2776,7 @@ impl LuaPluginRuntime {
                 name: info.name.clone(),
                 display_name: info.display_name.clone(),
                 supports_search: disc.supports_search,
+                artists: disc.artists.clone(),
                 pagination: disc.pagination,
                 remote_capability: disc.remote,
                 remote_hint: disc.remote_hint.clone(),
@@ -2869,10 +2894,19 @@ impl LuaPluginRuntime {
             .ok_or_else(|| Error::DiscoverUnsupported(plugin_name.to_string()))?;
         Self::validate_discover_filter_values(plugin_name, discover, tags)?;
         if !artist_id.is_empty() {
-            if !discover.supports_artists {
-                return Err(Error::DiscoverUnsupported(plugin_name.to_string()));
-            }
+            let options = discover
+                .artists
+                .as_ref()
+                .ok_or_else(|| Error::DiscoverUnsupported(plugin_name.to_string()))?;
             Self::validate_artist_id(artist_id)?;
+            if !options.search_text && !query.is_empty() {
+                return Err(Error::InvalidArgument(
+                    "artist browsing does not support text search".into(),
+                ));
+            }
+            if !sort.is_empty() && !options.sorts.iter().any(|option| option.key == sort) {
+                return Err(Error::InvalidArgument("unsupported artist sort".into()));
+            }
         }
         let mut seen_excluded = HashSet::new();
         for value in excluded {
@@ -3118,7 +3152,7 @@ impl LuaPluginRuntime {
         if !discover.supports_details {
             return Err(Error::DiscoverUnsupported(plugin_name.to_string()));
         }
-        let supports_artists = discover.supports_artists;
+        let supports_artists = discover.artists.is_some();
         let details_fn: LuaFunction = self.lua.registry_value(
             callbacks
                 .discover_details

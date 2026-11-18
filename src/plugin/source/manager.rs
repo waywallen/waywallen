@@ -604,6 +604,7 @@ impl LuaPluginRegistry {
                 name: info.name.clone(),
                 display_name: info.display_name.clone(),
                 supports_search: disc.supports_search,
+                artists: disc.artists.clone(),
                 pagination: disc.pagination,
                 remote_capability: disc.remote,
                 remote_hint: disc.remote_hint.clone(),

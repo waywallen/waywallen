@@ -250,6 +250,7 @@ pub struct DiscoverSourceInfo {
     /// Human-readable display name (falls back to `name`).
     pub display_name: LocalizedText,
     pub supports_search: bool,
+    pub artists: Option<DiscoverArtistOptions>,
     pub pagination: DiscoverPagination,
     pub remote_capability: Option<RemoteCapability>,
     pub remote_hint: LocalizedText,
@@ -268,6 +269,12 @@ pub struct DiscoverSourceInfo {
     pub status: Vec<SourceStatus>,
     /// Provider-owned account image returned by `lifecycle.check()`.
     pub avatar_url: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DiscoverArtistOptions {
+    pub search_text: bool,
+    pub sorts: Vec<DiscoverSort>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]

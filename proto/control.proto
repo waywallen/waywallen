@@ -1074,6 +1074,11 @@ message RemoteSortOption {
   PluginMessage label_text = 3;
 }
 
+message RemoteArtistOptions {
+  bool search_text = 1;
+  repeated RemoteSortOption sorts = 2;
+}
+
 message RemoteFilterOption {
   string value = 1;
   string label = 2;
@@ -1132,6 +1137,7 @@ message RemoteSourceInfo {
   PluginMessage remote_hint_text = 17;
   RemotePagination pagination = 18;
   DownloadAction download_action = 19;
+  RemoteArtistOptions artist_options = 20;
 }
 
 message DownloadAction {

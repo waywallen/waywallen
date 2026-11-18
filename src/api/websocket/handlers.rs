@@ -1294,6 +1294,20 @@ pub(super) async fn dispatch_inner(
                             id: s.plugin_id,
                             name: s.name,
                             supports_search: s.supports_search,
+                            artist_options: s.artists.map(|options| pb::RemoteArtistOptions {
+                                search_text: options.search_text,
+                                sorts: options
+                                    .sorts
+                                    .into_iter()
+                                    .map(|sort| pb::RemoteSortOption {
+                                        key: sort.key,
+                                        label: sort.label.text().to_string(),
+                                        label_text: crate::control_proto::plugin_message_to_proto(
+                                            &sort.label,
+                                        ),
+                                    })
+                                    .collect(),
+                            }),
                             pagination: match s.pagination {
                                 crate::plugin::source::DiscoverPagination::Page => {
                                     pb::RemotePagination::Page as i32
@@ -1411,7 +1425,14 @@ pub(super) async fn dispatch_inner(
                     .discover_sources()?
                     .into_iter()
                     .find(|s| s.plugin_id == source_id)
-                    .and_then(|s| s.sorts.into_iter().next())
+                    .and_then(|s| {
+                        if r.artist_id.is_empty() {
+                            s.sorts.into_iter().next()
+                        } else {
+                            s.artists
+                                .and_then(|options| options.sorts.into_iter().next())
+                        }
+                    })
                     .map(|s| s.key)
                     .unwrap_or_default()
             } else {

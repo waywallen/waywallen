@@ -25,6 +25,7 @@ MD.Page {
         downloadAction: root.detailRow ? root.sourceInfo(root.detailRow.sourceId)?.downloadAction ?? null : null
         subscriptionState: Number(root.detailRow?.acquisitionState ?? 0)
         tagOptions: root.detailRow ? root.sourceFilterOptions(root.detailRow.sourceId) : []
+        typeLabels: pluginQuery.typeLabels || ({})
 
         onBack: detailPresenter.dismiss()
         onArtistRequested: (id, name, avatarUrl, webUrl) => {
@@ -220,9 +221,13 @@ MD.Page {
         const sourceChanged = sourceId !== id;
         const currentSortKey = searchQuery.sortKey;
         sourceId = id;
+        if (root.artistMode && s.artistOptions?.searchText === false) {
+            searchQuery.query = "";
+            m_search_field.text = "";
+        }
         discoverState.setSelectedSourceId(id);
         loadDiscoverTweakState(id);
-        sortOptions = s.sorts ?? [];
+        sortOptions = (root.artistMode ? s.artistOptions?.sorts ?? s.sorts : s.sorts) ?? [];
         sortIndex = 0;
         if (!sourceChanged && currentSortKey.length > 0) {
             for (let i = 0; i < sortOptions.length; ++i) {
@@ -262,9 +267,6 @@ MD.Page {
             detailOpen = false;
             detailsQuery.itemId = "";
             m_grid.currentIndex = -1;
-        }
-        function onPluginChanged() {
-            pluginQuery.reload();
         }
     }
     function sortLabel() {
@@ -415,6 +417,12 @@ MD.Page {
 
                         Layout.preferredWidth: 120
                         placeholderText: qsTr("Search")
+                        visible: {
+                            if (!root.artistMode)
+                                return true;
+                            const source = root.currentSourceConfig();
+                            return source !== null && (source.artistOptions?.searchText ?? true);
+                        }
 
                         onTextEdited: searchQuery.query = text
                     }
@@ -623,6 +631,9 @@ MD.Page {
 
         onTriggered: searchQuery.reload()
     }
+    W.RendererPluginListQuery {
+        id: pluginQuery
+    }
     W.RemoteAvailabilityQuery {
         id: availabilityQuery
 
@@ -743,6 +754,9 @@ MD.Page {
         }
         function onSettingsChanged() {
             availabilityQuery.reload();
+        }
+        function onPluginChanged() {
+            pluginQuery.reload();
         }
 
         target: W.Notify

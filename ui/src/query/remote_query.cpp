@@ -39,19 +39,22 @@ void RemoteAvailabilityQuery::reload() {
         if (! self || ! self->isCurrentRequest(revision)) co_return;
 
         self->inspect_set(result, [self](const proto::Response& rsp) {
-            const auto&  av = rsp.remoteAvailability();
+            const auto& av           = rsp.remoteAvailability();
+            const auto  convertSorts = [](const auto& values) {
+                QVariantList sorts;
+                sorts.reserve(values.size());
+                for (const auto& sort : values) {
+                    QVariantMap row;
+                    row[u"key"_s]       = sort.key();
+                    row[u"label"_s]     = sort.label();
+                    row[u"labelText"_s] = pluginMessageFromPb(sort.labelText(), sort.label());
+                    sorts.push_back(row);
+                }
+                return sorts;
+            };
             QVariantList sources;
             sources.reserve(av.sources().size());
             for (const auto& src : av.sources()) {
-                QVariantList sorts;
-                sorts.reserve(src.sorts().size());
-                for (const auto& sort : src.sorts()) {
-                    QVariantMap sm;
-                    sm[u"key"_s]       = sort.key();
-                    sm[u"label"_s]     = sort.label();
-                    sm[u"labelText"_s] = pluginMessageFromPb(sort.labelText(), sort.label());
-                    sorts.push_back(sm);
-                }
                 QStringList tags;
                 for (const auto& tag : src.tags()) tags.push_back(tag);
                 QVariantList filters;
@@ -86,10 +89,17 @@ void RemoteAvailabilityQuery::reload() {
                     filters.push_back(fm);
                 }
                 QVariantMap m;
-                m[u"id"_s]               = src.id_proto();
-                m[u"name"_s]             = src.name();
-                m[u"supportsSearch"_s]   = src.supportsSearch();
-                m[u"sorts"_s]            = sorts;
+                m[u"id"_s]             = src.id_proto();
+                m[u"name"_s]           = src.name();
+                m[u"supportsSearch"_s] = src.supportsSearch();
+                m[u"sorts"_s]          = convertSorts(src.sorts());
+                if (src.hasArtistOptions()) {
+                    const auto& options   = src.artistOptions();
+                    m[u"artistOptions"_s] = QVariantMap {
+                        { u"searchText"_s, options.searchText() },
+                        { u"sorts"_s, convertSorts(options.sorts()) },
+                    };
+                }
                 m[u"tags"_s]             = tags;
                 m[u"filters"_s]          = filters;
                 m[u"contentDir"_s]       = src.contentDir();
