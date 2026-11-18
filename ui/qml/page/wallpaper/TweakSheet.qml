@@ -58,10 +58,14 @@ MD.BottomSheet {
                         Accessible.name: qsTr("Show card badges")
                         onCheckedChangeRequested: checked => W.WallpaperBadgeSettings.setEnabled(checked)
                     }
-                    MD.Button {
-                        text: qsTr("Edit rules")
+                    MD.IconButton {
+                        icon.name: MD.Token.icon.edit
+                        Accessible.name: qsTr("Edit rules")
+                        MD.ToolTip.visible: mdState.interactions.hovered
+                        MD.ToolTip.text: qsTr("Edit rules")
                         onClicked: control.popupParent.Window.window.presentPopup('waywallen.ui/PagePopup', {
-                            source: 'waywallen.ui/WallpaperBadgeRulesPage'
+                            source: 'waywallen.ui/WallpaperBadgeRulesPage',
+                            z: control.z
                         })
                     }
                 }
