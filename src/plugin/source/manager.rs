@@ -1035,6 +1035,15 @@ impl LuaPluginRegistry {
     ) -> Arc<tokio::sync::Mutex<LuaPluginRuntime>> {
         self.handle(plugin_name).unwrap().runtime.clone()
     }
+
+    #[cfg(test)]
+    pub(crate) async fn set_test_callback_timeout(
+        &self,
+        plugin_name: &str,
+        timeout: std::time::Duration,
+    ) {
+        self.test_runtime(plugin_name).lock().await.callback_timeout = timeout;
+    }
 }
 
 // ---------------------------------------------------------------------------
