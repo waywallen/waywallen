@@ -9,6 +9,7 @@ use super::*;
 
 struct Input {
     url: String,
+    headers: HashMap<String, String>,
     filename: String,
     limit: u64,
     size: Option<u64>,
@@ -31,6 +32,7 @@ pub(super) async fn download(
     let main_url = crate::remote_asset::prepare::validate_url(&transfer.url)?.to_string();
     let mut inputs = vec![Input {
         url: main_url.clone(),
+        headers: transfer.headers.clone(),
         filename: "input-0".into(),
         limit: DOWNLOAD_LIMIT,
         size: None,
@@ -47,6 +49,7 @@ pub(super) async fn download(
             urls.insert(url.clone(), index);
             inputs.push(Input {
                 url,
+                headers: HashMap::new(),
                 filename: format!("input-{index}"),
                 limit: crate::remote_asset::prepare::RESOURCE_LIMIT,
                 size: None,
@@ -78,13 +81,14 @@ pub(super) async fn download(
         let input_budget = &input_budget;
         let path = input_root.join(input.filename);
         async move {
-            download_remote_file_checked(
+            download_remote_file_headers_checked(
                 &input.url,
                 &path,
                 input.limit,
                 input.size,
                 input.auxiliary,
                 input.auxiliary.then_some(input_budget),
+                &input.headers,
                 |value| {
                     let mut aggregate = aggregate
                         .lock()

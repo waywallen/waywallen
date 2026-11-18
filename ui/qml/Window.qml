@@ -222,6 +222,7 @@ MD.ApplicationWindow {
 
     W.DaemonNotRunDialog {}
     W.QrLoginDialog {}
+    W.BrowserLoginDialog {}
 
     ColumnLayout {
         anchors.fill: parent

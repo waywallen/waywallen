@@ -18,14 +18,16 @@ pub const ENTRY_VERSION_V4: u32 = 4;
 pub const ENTRY_VERSION_V5: u32 = 5;
 pub const ENTRY_VERSION_V6: u32 = 6;
 pub const ENTRY_VERSION_V7: u32 = 7;
-pub const ENTRY_VERSION: u32 = ENTRY_VERSION_V7;
-pub const LATEST_ENTRY_VERSION: u32 = ENTRY_VERSION_V7;
+pub const ENTRY_VERSION_V8: u32 = 8;
+pub const ENTRY_VERSION: u32 = ENTRY_VERSION_V8;
+pub const LATEST_ENTRY_VERSION: u32 = ENTRY_VERSION_V8;
 pub const SUPPORTED_ENTRY_VERSIONS: &[u32] = &[
     ENTRY_VERSION_V3,
     ENTRY_VERSION_V4,
     ENTRY_VERSION_V5,
     ENTRY_VERSION_V6,
     ENTRY_VERSION_V7,
+    ENTRY_VERSION_V8,
 ];
 
 pub(super) const MAX_DISCOVER_CURSOR_BYTES: usize = 4096;
@@ -143,6 +145,7 @@ pub enum SourceActionKind {
     Invoke,
     QrLogin,
     Form,
+    BrowserLogin,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -407,6 +410,7 @@ pub struct DiscoverItem {
     pub id: String,
     pub title: String,
     pub preview_url: String,
+    pub preview_headers: HashMap<String, String>,
     pub author: String,
     pub author_avatar_url: String,
     pub wp_type: String,
@@ -459,6 +463,7 @@ pub enum DownloadFormat {
 #[derive(Debug, Clone, Default)]
 pub struct DiscoverTransfer {
     pub url: String,
+    pub headers: HashMap<String, String>,
     pub filename: String,
     pub format: DownloadFormat,
     pub resolve: bool,
@@ -488,6 +493,8 @@ pub struct DiscoverMetadata {
     pub wp_type: String,
     pub title: String,
     pub preview_url: String,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub preview_headers: HashMap<String, String>,
     pub description: String,
     pub tags: Vec<String>,
     pub external_id: String,

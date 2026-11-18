@@ -1466,6 +1466,35 @@ pub(super) fn global_event_to_pb(e: &GlobalEvent, state: &Arc<DaemonContext>) ->
                 instruction_text: crate::control_proto::plugin_message_to_proto(instruction),
             })),
         }),
+        GlobalEvent::BrowserLoginProgress {
+            session_id,
+            plugin_id,
+            action_id,
+            state: login_state,
+            display_value,
+            error,
+            title,
+            instruction,
+        } => Some(pb::Event {
+            payload: Some(pb::event::Payload::BrowserLoginProgress(
+                pb::BrowserLoginProgress {
+                    session_id: session_id.clone(),
+                    plugin_id: plugin_id.clone(),
+                    action_id: action_id.clone(),
+                    state: *login_state,
+                    display_value: display_value.text().to_string(),
+                    error: error.text().to_string(),
+                    title: title.text().to_string(),
+                    instruction: instruction.text().to_string(),
+                    display_value_text: crate::control_proto::plugin_message_to_proto(
+                        display_value,
+                    ),
+                    error_text: crate::control_proto::plugin_message_to_proto(error),
+                    title_text: crate::control_proto::plugin_message_to_proto(title),
+                    instruction_text: crate::control_proto::plugin_message_to_proto(instruction),
+                },
+            )),
+        }),
         GlobalEvent::SettingsChanged => {
             let snap = state.settings.snapshot();
             Some(pb::Event {

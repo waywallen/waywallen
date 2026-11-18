@@ -2,6 +2,12 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="fr_FR">
 <context>
+    <name>BrowserLoginDialog</name>
+    <message><source>Opening the sign-in window…</source><translation>Ouverture de la fenêtre de connexion…</translation></message>
+    <message><source>Verifying sign-in…</source><translation>Vérification de la connexion…</translation></message>
+    <message><source>Complete sign-in in the browser window.</source><translation>Terminez la connexion dans la fenêtre du navigateur.</translation></message>
+</context>
+<context>
     <name>AboutPage</name>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="47"/>

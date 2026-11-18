@@ -3,6 +3,7 @@ name = "waywallen"
 members = [
   "bridge",
   "plugins/common",
+  "plugins/web",
   "plugins/org.waywallen.image",
   "plugins/org.waywallen.image/definition",
   "plugins/org.waywallen.gltf",
@@ -16,6 +17,7 @@ members = [
   "ui/backend",
 ]
 default-members = [
+  "plugins/web",
   "plugins/org.waywallen.image",
   "plugins/org.waywallen.gltf",
   "plugins/org.waywallen.sketchfab",

@@ -1473,6 +1473,7 @@ pub(super) async fn dispatch_inner(
                             id: item.id,
                             title: item.title,
                             preview_url: item.preview_url,
+                            preview_headers: item.preview_headers,
                             author: item.author,
                             author_avatar_url: item.author_avatar_url,
                             downloaded,
@@ -1785,6 +1786,20 @@ pub(super) async fn dispatch_inner(
                         }),
                     }
                 }
+                Some(SourceActionKind::BrowserLogin) => {
+                    match state.browser_login.start(&r.plugin_id, &r.action_id).await {
+                        Ok(session_id) => Res::PluginAction(pb::PluginActionResponse {
+                            accepted: true,
+                            error: String::new(),
+                            session_id,
+                        }),
+                        Err(error) => Res::PluginAction(pb::PluginActionResponse {
+                            accepted: false,
+                            error: query_error("browser login", error),
+                            session_id: String::new(),
+                        }),
+                    }
+                }
                 None => Res::PluginAction(pb::PluginActionResponse {
                     accepted: false,
                     error: query_error(
@@ -1799,6 +1814,10 @@ pub(super) async fn dispatch_inner(
         Req::QrLoginCancel(r) => {
             let cancelled = state.qr_login.cancel(&r.session_id).await;
             Res::QrLoginCancel(pb::QrLoginCancelResponse { cancelled })
+        }
+        Req::BrowserLoginCancel(r) => {
+            let cancelled = state.browser_login.cancel(&r.session_id).await;
+            Res::BrowserLoginCancel(pb::BrowserLoginCancelResponse { cancelled })
         }
 
         Req::RemoteSettingsPatch(r) => {

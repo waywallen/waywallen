@@ -123,6 +123,42 @@ pub struct LuaPluginRegistry {
 
 pub type SourceManager = LuaPluginRegistry;
 
+pub(crate) struct BrowserSession {
+    handle: Arc<PluginHandle>,
+    plugin: String,
+    operation: u64,
+}
+
+impl BrowserSession {
+    pub(crate) fn active(&self) -> bool {
+        self.handle.generation_state.load(Ordering::Acquire) == RUNTIME_ACTIVE
+    }
+
+    pub(crate) async fn handle_event(
+        &self,
+        event: &crate::plugin::browser_protocol::BrowserEvent,
+    ) -> Result<super::runtime::BrowserLoginUpdate> {
+        let mut runtime = self.handle.runtime.lock().await;
+        if !self.active() {
+            return Err(Error::InvalidArgument(
+                "browser login plugin was reloaded".into(),
+            ));
+        }
+        runtime
+            .handle_browser_login(&self.plugin, self.operation, event)
+            .await
+    }
+
+    pub(crate) async fn cancel(&self) -> Result<()> {
+        self.handle
+            .runtime
+            .lock()
+            .await
+            .cancel_browser_login(&self.plugin, self.operation)
+            .await
+    }
+}
+
 pub struct ScanReport {
     pub successful: HashSet<String>,
     pub error: Option<Error>,
@@ -520,6 +556,26 @@ impl LuaPluginRegistry {
             .await
             .begin_qr_login(plugin_name, action_id)
             .await
+    }
+
+    pub(crate) async fn begin_browser_login(
+        &self,
+        plugin: &str,
+        action: &str,
+    ) -> Result<(BrowserSession, super::runtime::BrowserLoginBegin)> {
+        let handle = self.handle(plugin)?;
+        let begin = handle
+            .runtime
+            .lock()
+            .await
+            .begin_browser_login(plugin, action)
+            .await?;
+        let session = BrowserSession {
+            handle,
+            plugin: plugin.into(),
+            operation: begin.operation_id,
+        };
+        Ok((session, begin))
     }
 
     pub async fn poll_qr_login(&self, plugin_name: &str, operation_id: u64) -> Result<QrLoginPoll> {

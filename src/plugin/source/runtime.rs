@@ -2,8 +2,34 @@ use super::parsing::{parse_lua_string_map, redact_secrets};
 use super::*;
 use crate::plugin::i18n::LocalizedText;
 
+mod browser;
+pub(crate) use browser::{BrowserLoginBegin, BrowserLoginOutcome, BrowserLoginUpdate};
+
 const MAX_LOCALIZED_ARGUMENTS: usize = 16;
 const MAX_PROVIDER_DATA_BYTES: usize = 64 * 1024;
+
+fn resource_headers(table: &LuaTable, key: &str, context: &str) -> Result<HashMap<String, String>> {
+    let headers = parse_lua_string_map(table, key, context)?;
+    if headers.len() > 16 {
+        return Err(Error::InvalidArgument(
+            "too many resource request headers".into(),
+        ));
+    }
+    for (name, value) in &headers {
+        if !matches!(
+            name.to_ascii_lowercase().as_str(),
+            "referer" | "user-agent" | "accept" | "accept-language" | "origin"
+        ) || value.len() > 8192
+            || reqwest::header::HeaderName::from_bytes(name.as_bytes()).is_err()
+            || reqwest::header::HeaderValue::from_str(value).is_err()
+        {
+            return Err(Error::InvalidArgument(
+                "unsupported resource request header".into(),
+            ));
+        }
+    }
+    Ok(headers)
+}
 
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(transparent)]
@@ -101,6 +127,9 @@ struct PluginCallbacks {
     qrlogin_begin: Option<LuaRegistryKey>,
     qrlogin_poll: Option<LuaRegistryKey>,
     qrlogin_cancel: Option<LuaRegistryKey>,
+    browserlogin_begin: Option<LuaRegistryKey>,
+    browserlogin_handle: Option<LuaRegistryKey>,
+    browserlogin_cancel: Option<LuaRegistryKey>,
     subscription_status: Option<LuaRegistryKey>,
     subscription_subscribe: Option<LuaRegistryKey>,
     subscription_unsubscribe: Option<LuaRegistryKey>,
@@ -146,6 +175,8 @@ pub struct LuaPluginRuntime {
     generation_state: Arc<AtomicU8>,
     pub(super) qr_operations: HashMap<u64, LuaRegistryKey>,
     next_qr_operation_id: u64,
+    browser_operations: HashMap<u64, LuaRegistryKey>,
+    next_browser_operation_id: u64,
 }
 
 // mlua with the `send` feature makes Lua: Send.
@@ -162,11 +193,11 @@ impl LuaPluginRuntime {
         lua.set_memory_limit(LUA_PLUGIN_MEMORY_LIMIT)
             .map_err(|error| Error::Internal(anyhow!("set Lua memory limit: {error}")))?;
         let http_cookie_store = Arc::new(mlua_extra::http::SessionCookieStore::default());
-        let http_client = reqwest::Client::builder()
-            .user_agent(WAYWALLEN_HTTP_USER_AGENT)
-            .cookie_provider(http_cookie_store.clone())
-            .build()
-            .map_err(|error| Error::Internal(anyhow!("build plugin HTTP client: {error}")))?;
+        let http_client = Self::build_http_client(
+            http_cookie_store.clone(),
+            reqwest::redirect::Policy::default(),
+        )
+        .map_err(|error| Error::Internal(anyhow!("build plugin HTTP client: {error}")))?;
         let callback_deadline = Arc::new(StdMutex::new(None));
         let hook_deadline = callback_deadline.clone();
         lua.set_hook(
@@ -201,6 +232,8 @@ impl LuaPluginRuntime {
             generation_state: Arc::new(AtomicU8::new(RUNTIME_ACTIVE)),
             qr_operations: HashMap::new(),
             next_qr_operation_id: 1,
+            browser_operations: HashMap::new(),
+            next_browser_operation_id: 1,
         })
     }
 
@@ -281,11 +314,54 @@ impl LuaPluginRuntime {
         }
     }
 
+    fn build_http_client(
+        store: Arc<mlua_extra::http::SessionCookieStore>,
+        redirects: reqwest::redirect::Policy,
+    ) -> std::result::Result<reqwest::Client, reqwest::Error> {
+        reqwest::Client::builder()
+            .user_agent(WAYWALLEN_HTTP_USER_AGENT)
+            .cookie_provider(store)
+            .redirect(redirects)
+            .build()
+    }
+
     fn http_view(&self) -> mlua_extra::http::LuaHttpClient {
         mlua_extra::http::LuaHttpClient::with_session(
             self.http_client.clone(),
             self.http_cookie_store.clone(),
         )
+    }
+
+    fn install_http_context(&self, ctx: &LuaTable) -> LuaResult<()> {
+        ctx.set("http", self.http_view())?;
+        ctx.set(
+            "new_http_session",
+            self.lua.create_function(|_, ()| {
+                let store = Arc::new(mlua_extra::http::SessionCookieStore::default());
+                let client =
+                    Self::build_http_client(store.clone(), reqwest::redirect::Policy::none())
+                        .map_err(mlua::Error::external)?;
+                Ok(mlua_extra::http::LuaHttpClient::with_session(client, store))
+            })?,
+        )
+    }
+
+    fn install_url_context(&self, ctx: &LuaTable) -> LuaResult<()> {
+        let module = mlua_extra::url::create_module(&self.lua)?;
+        module.set(
+            "decode_query_pairs",
+            self.lua.create_function(|lua, value: LuaString| {
+                let result = lua.create_table()?;
+                for (index, (key, value)) in
+                    url::form_urlencoded::parse(&value.as_bytes()).enumerate()
+                {
+                    let pair = lua.create_sequence_from([key.into_owned(), value.into_owned()])?;
+                    result.raw_set(index + 1, pair)?;
+                }
+                Ok(result)
+            })?,
+        )?;
+        ctx.set("url", module)
     }
 
     fn restore_http_session(&self, plugin_id: &str) -> Result<()> {
@@ -364,6 +440,7 @@ impl LuaPluginRuntime {
         self.plugin_infos.clear();
         self.saved_states.clear();
         self.qr_operations.clear();
+        self.browser_operations.clear();
         self.entries.clear();
         self.by_type.clear();
     }
@@ -1271,6 +1348,7 @@ impl LuaPluginRuntime {
         let lifecycle = Self::optional_table(module, "lifecycle", "module")?;
         let actions_api = Self::optional_table(module, "actions", "module")?;
         let qrlogin = Self::optional_table(module, "qrlogin", "module")?;
+        let browserlogin = Self::optional_table(module, "browserlogin", "module")?;
         if let Some(lifecycle) = &lifecycle {
             Self::require_table_function(lifecycle, "load", "module.lifecycle")?;
             Self::require_table_function(lifecycle, "save", "module.lifecycle")?;
@@ -1323,6 +1401,23 @@ impl LuaPluginRuntime {
             Self::require_table_function(qrlogin, "begin", "module.qrlogin")?;
             Self::require_table_function(qrlogin, "poll", "module.qrlogin")?;
         }
+        let has_browser_action = actions
+            .iter()
+            .any(|action| action.kind == SourceActionKind::BrowserLogin);
+        if has_browser_action != browserlogin.is_some() {
+            return Err(Error::InvalidArgument(
+                "module.browserlogin presence must match browser_login actions".into(),
+            ));
+        }
+        if let Some(browserlogin) = browserlogin {
+            if entry_version < ENTRY_VERSION_V8 {
+                return Err(Error::InvalidArgument(
+                    "browser_login requires entry_version 8".into(),
+                ));
+            }
+            Self::require_table_function(&browserlogin, "begin", "module.browserlogin")?;
+            Self::require_table_function(&browserlogin, "handle", "module.browserlogin")?;
+        }
         let display_name = {
             let dn = Self::optional_localized_text(&info_table, "display_name", "info()")?;
             if dn.text().is_empty() {
@@ -1374,6 +1469,7 @@ impl LuaPluginRuntime {
                 "" | "invoke" => SourceActionKind::Invoke,
                 "qr_login" => SourceActionKind::QrLogin,
                 "form" => SourceActionKind::Form,
+                "browser_login" => SourceActionKind::BrowserLogin,
                 value => {
                     return Err(Error::Internal(anyhow!(
                         "info().actions kind '{value}' is unsupported"
@@ -1462,7 +1558,10 @@ impl LuaPluginRuntime {
                     &entry,
                     "required_for_browsing",
                     "info().actions",
-                    kind == SourceActionKind::QrLogin,
+                    matches!(
+                        kind,
+                        SourceActionKind::QrLogin | SourceActionKind::BrowserLogin
+                    ),
                 )?,
             });
         }
@@ -1530,6 +1629,9 @@ impl LuaPluginRuntime {
             qrlogin_begin: self.callback_key(module, "qrlogin", "begin")?,
             qrlogin_poll: self.callback_key(module, "qrlogin", "poll")?,
             qrlogin_cancel: self.callback_key(module, "qrlogin", "cancel")?,
+            browserlogin_begin: self.callback_key(module, "browserlogin", "begin")?,
+            browserlogin_handle: self.callback_key(module, "browserlogin", "handle")?,
+            browserlogin_cancel: self.callback_key(module, "browserlogin", "cancel")?,
             subscription_status: self.callback_key(module, "subscription", "status")?,
             subscription_subscribe: self.callback_key(module, "subscription", "subscribe")?,
             subscription_unsubscribe: self.callback_key(module, "subscription", "unsubscribe")?,
@@ -1983,9 +2085,35 @@ impl LuaPluginRuntime {
         ctx.set("base64", base64)?;
 
         let time = mlua_extra::time::create_module(&self.lua)?;
+        time.set(
+            "utc_iso8601",
+            self.lua.create_function(|_, ()| {
+                Ok(chrono::Utc::now()
+                    .format("%Y-%m-%dT%H:%M:%S+00:00")
+                    .to_string())
+            })?,
+        )?;
         ctx.set("time_unix", time.get::<LuaFunction>("unix")?)?;
         ctx.set("time", time)?;
-        ctx.set("random", mlua_extra::random::create_module(&self.lua)?)
+        ctx.set("random", mlua_extra::random::create_module(&self.lua)?)?;
+        let crypto = self.lua.create_table()?;
+        crypto.set(
+            "sha256_base64url",
+            self.lua.create_function(|_, value: LuaString| {
+                use base64::Engine as _;
+                use sha2::Digest as _;
+                Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .encode(sha2::Sha256::digest(value.as_bytes())))
+            })?,
+        )?;
+        crypto.set(
+            "md5_hex",
+            self.lua.create_function(|_, value: LuaString| {
+                use md5::Digest as _;
+                Ok(format!("{:x}", md5::Md5::digest(value.as_bytes())))
+            })?,
+        )?;
+        ctx.set("crypto", crypto)
     }
 
     /// Build the `ctx` table passed to Lua callbacks.
@@ -2338,10 +2466,10 @@ impl LuaPluginRuntime {
 
         // ctx.http is a fluent client:
         // ctx.http:get(url):headers({...}):send()
-        ctx.set("http", self.http_view())?;
+        self.install_http_context(&ctx)?;
         ctx.set("html", mlua_extra::html::create_module(&self.lua)?)?;
         ctx.set("xml", mlua_extra::xml::create_module(&self.lua)?)?;
-        ctx.set("url", mlua_extra::url::create_module(&self.lua)?)?;
+        self.install_url_context(&ctx)?;
 
         Ok(ctx)
     }
@@ -2372,9 +2500,9 @@ impl LuaPluginRuntime {
                 Ok(())
             })?,
         )?;
-        ctx.set("http", self.http_view())?;
+        self.install_http_context(&ctx)?;
         ctx.set("html", mlua_extra::html::create_module(&self.lua)?)?;
-        ctx.set("url", mlua_extra::url::create_module(&self.lua)?)?;
+        self.install_url_context(&ctx)?;
         Ok(ctx)
     }
 
@@ -3020,6 +3148,7 @@ impl LuaPluginRuntime {
                 id: Self::require_string(&row, "id", &context)?,
                 title: Self::require_string(&row, "title", &context)?,
                 preview_url: Self::require_string(&row, "preview_url", &context)?,
+                preview_headers: resource_headers(&row, "preview_headers", &context)?,
                 author: Self::require_string(&row, "author", &context)?,
                 author_avatar_url: Self::optional_string(&row, "author_avatar_url", &context)?,
                 wp_type: {
@@ -3336,6 +3465,7 @@ impl LuaPluginRuntime {
         }
         let transfer = DiscoverTransfer {
             url: Self::optional_string(&result, "url", "module.discover.download result")?,
+            headers: resource_headers(&result, "headers", "module.discover.download result")?,
             filename: Self::optional_string(
                 &result,
                 "filename",
@@ -3352,6 +3482,11 @@ impl LuaPluginRuntime {
             preview_url: Self::optional_string(
                 &result,
                 "preview_url",
+                "module.discover.download result",
+            )?,
+            preview_headers: resource_headers(
+                &result,
+                "preview_headers",
                 "module.discover.download result",
             )?,
             description: Self::optional_string(

@@ -129,6 +129,9 @@ where
     if let Err(error) = state.qr_login.cancel_all_and_wait().await {
         log::warn!("QR login shutdown cleanup failed: {error:#}");
     }
+    if let Err(error) = state.browser_login.cancel_all_and_wait().await {
+        log::warn!("browser login shutdown cleanup failed: {error:#}");
+    }
     state.playlists.shutdown().await;
     state.tasks.wait_stopped().await;
     let renderer_ids = state

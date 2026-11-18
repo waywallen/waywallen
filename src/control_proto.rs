@@ -85,6 +85,7 @@ pub fn source_action_to_proto(a: &crate::plugin::source::SourceAction) -> Plugin
             SourceActionKind::Invoke => PluginActionKind::Invoke,
             SourceActionKind::QrLogin => PluginActionKind::QrLogin,
             SourceActionKind::Form => PluginActionKind::Form,
+            SourceActionKind::BrowserLogin => PluginActionKind::BrowserLogin,
         } as i32,
         visible: a.visible,
         enabled: a.enabled,

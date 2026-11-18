@@ -58,6 +58,8 @@ sources = [
   "src/qml_register.cpp",
   "src/query/autostart_query.cpp",
   "src/query/autostart_query.cppm",
+  "src/query/browser_login_query.cpp",
+  "src/query/browser_login_query.cppm",
   "src/query/display_query.cpp",
   "src/query/display_query.cppm",
   "src/query/global_pause_query.cpp",

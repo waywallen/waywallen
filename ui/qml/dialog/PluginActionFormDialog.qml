@@ -30,9 +30,13 @@ MD.Dialog {
 
     function openFor(nextAction) {
         action = nextAction || ({});
+        clearValues();
+        open();
+    }
+
+    function clearValues() {
         values = ({});
         resetRevision += 1;
-        open();
     }
 
     function setValue(key, value) {
@@ -48,7 +52,12 @@ MD.Dialog {
             accept.enabled = Qt.binding(function() { return root.complete; });
         }
     }
-    onAccepted: submitted(Object.assign({}, values))
+    onAccepted: {
+        const submittedValues = Object.assign({}, values);
+        clearValues();
+        submitted(submittedValues);
+    }
+    onClosed: clearValues()
 
     contentItem: ColumnLayout {
         spacing: 12

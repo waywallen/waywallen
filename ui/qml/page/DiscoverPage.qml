@@ -81,7 +81,7 @@ MD.Page {
         const actions = c && c.actions ? c.actions : [];
         for (let i = 0; i < actions.length; ++i) {
             const kind = Number(actions[i].kind);
-            if ((kind === 2 || kind === 3) && actions[i].requiredForBrowsing === true && (actions[i].visible === undefined || actions[i].visible))
+            if ((kind === 2 || kind === 3 || kind === 4) && actions[i].requiredForBrowsing === true && (actions[i].visible === undefined || actions[i].visible))
                 return actions[i];
         }
         return null;

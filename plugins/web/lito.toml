@@ -1,0 +1,13 @@
+[package]
+name = "waywallen-web-helper"
+version.workspace = true
+
+[[bin]]
+name = "waywallen-web-helper"
+module = "waywallen.web"
+sources = ["main.cpp", "web.cppm", "web.cpp", "ffi.cppm"]
+
+[dependencies]
+rstd-std.workspace = true
+rstd-json.workspace = true
+rstd-dlopn = { version = "0.1.7" }

@@ -212,6 +212,11 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         events.sender(),
         shutdown_tx.subscribe(),
     );
+    let browser_login = plugin::browser_login::BrowserLoginManager::new(
+        source_mgr.clone(),
+        events.sender(),
+        shutdown_tx.subscribe(),
+    );
 
     let (rotation_handle, rotation_rx) = playback::rotation::make_handle();
 
@@ -240,6 +245,7 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         _audio: audio_service,
         source_manager: source_mgr.clone(),
         qr_login,
+        browser_login,
         plugins: plugin_packages,
         inactive_system,
         inactive_user,

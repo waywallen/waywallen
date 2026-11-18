@@ -10,6 +10,7 @@ pub(crate) struct DaemonContext {
     pub(super) _audio: system::audio::AudioService,
     pub(crate) source_manager: Arc<plugin::source::SourceManager>,
     pub(crate) qr_login: Arc<plugin::qr_login::QrLoginManager>,
+    pub(crate) browser_login: Arc<plugin::browser_login::BrowserLoginManager>,
     pub(crate) plugins: Arc<tokio::sync::RwLock<Vec<plugin::renderer_registry::PluginPackageMeta>>>,
     pub(crate) inactive_system: Arc<tokio::sync::RwLock<Vec<String>>>,
     pub(crate) inactive_user: Arc<tokio::sync::RwLock<Vec<String>>>,

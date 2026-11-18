@@ -34,15 +34,31 @@ pub(crate) fn redact_secrets(message: &str) -> String {
     for marker in [
         "access_token=",
         "refresh_token=",
+        "code=",
+        "code_verifier=",
+        "code_challenge=",
         "authorization=",
         "cookie=",
+        "phpsessid=",
+        "session_id=",
+        "sessionid=",
         "\"access_token\":\"",
         "\"access_token\": \"",
         "\"refresh_token\":\"",
         "\"refresh_token\": \"",
+        "\"code\":\"",
+        "\"code\": \"",
+        "\"code_verifier\":\"",
+        "\"code_verifier\": \"",
+        "\"phpsessid\":\"",
+        "\"phpsessid\": \"",
+        "\"session_id\":\"",
+        "\"session_id\": \"",
+        "\"sessionid\":\"",
+        "\"sessionid\": \"",
     ] {
         let mut from = 0;
-        while let Some(relative) = out[from..].find(marker) {
+        while let Some(relative) = out[from..].to_ascii_lowercase().find(marker) {
             let start = from + relative + marker.len();
             let end = out[start..]
                 .find(|character: char| {

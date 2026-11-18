@@ -43,6 +43,7 @@ Item {
     property bool retainWhileLoading: false
     property MD.Shimmer shimmer: W.ThumbnailLoading.shimmer
     property string source
+    property var sourceHeaders: ({})
     property size sourceSize: Qt.size(-1, -1)
     readonly property int state: {
         if (!_hasInput || req.state === W.ThumbnailRequest.Idle)
@@ -104,6 +105,7 @@ Item {
             retainWhileLoading: root.retainWhileLoading
             sharedPlayback: true
             source: root._displayUrl
+            sourceHeaders: root.sourceHeaders
             sourceSize: root.sourceSize
             verticalAlignment: root.verticalAlignment
 

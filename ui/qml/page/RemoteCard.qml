@@ -53,6 +53,7 @@ Item {
                 resourceSize: Qt.size(Number(root.item?.width ?? 0), Number(root.item?.height ?? 0))
                 shimmer: root.shimmer
                 source: root.previewUrl
+                sourceHeaders: root.item?.previewHeaders ?? ({})
                 verticalAlignment: Image.AlignVCenter
             }
             Rectangle {

@@ -2,6 +2,12 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="zh_CN">
 <context>
+    <name>BrowserLoginDialog</name>
+    <message><source>Opening the sign-in window…</source><translation>正在打开登录窗口…</translation></message>
+    <message><source>Verifying sign-in…</source><translation>正在验证登录…</translation></message>
+    <message><source>Complete sign-in in the browser window.</source><translation>请在浏览器窗口中完成登录。</translation></message>
+</context>
+<context>
     <name>AboutPage</name>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="36"/>

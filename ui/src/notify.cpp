@@ -129,6 +129,14 @@ Notify::Notify(QObject* parent): QObject(parent) {
                                        pluginMessageFromPb(p.errorText(), p.error()),
                                        pluginMessageFromPb(p.titleText(), p.title()),
                                        pluginMessageFromPb(p.instructionText(), p.instruction()));
+            } else if (evt.hasBrowserLoginProgress()) {
+                const auto& p = evt.browserLoginProgress();
+                Q_EMIT browserLoginProgress(p.sessionId(), p.pluginId(), p.actionId(),
+                    static_cast<int>(p.state()),
+                    pluginMessageFromPb(p.displayValueText(), p.displayValue()),
+                    pluginMessageFromPb(p.errorText(), p.error()),
+                    pluginMessageFromPb(p.titleText(), p.title()),
+                    pluginMessageFromPb(p.instructionText(), p.instruction()));
             } else if (evt.hasPluginStateChanged()) {
                 Q_EMIT pluginStateChanged();
             } else if (evt.hasPlaylistChanged()) {

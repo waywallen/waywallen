@@ -412,11 +412,16 @@ void RemoteSearchQuery::fetchPage(quint32 page, bool append) {
             QList<model::RemoteRow> rows;
             rows.reserve(sr.items().size());
             for (const auto& it : sr.items()) {
+                QVariantMap previewHeaders;
+                const auto  headers = it.previewHeaders();
+                for (auto header = headers.cbegin(); header != headers.cend(); ++header)
+                    previewHeaders.insert(header.key(), header.value());
                 rows.push_back(AppStore::instance()->mergeRemoteRow(model::RemoteRow {
                     it.sourceId(),
                     it.id_proto(),
                     it.title(),
                     it.previewUrl(),
+                    previewHeaders,
                     it.author(),
                     it.authorAvatarUrl(),
                     it.wpType(),

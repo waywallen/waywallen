@@ -100,6 +100,7 @@ Item {
                     Layout.preferredHeight: 200
                     Layout.topMargin: 4
                     source: root.item?.previewUrl ?? ""
+                    sourceHeaders: root.item?.previewHeaders ?? ({})
                     fillMode: Image.PreserveAspectFit
                 }
 

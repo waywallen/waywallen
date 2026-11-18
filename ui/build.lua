@@ -85,6 +85,7 @@ qt.qml_module({
     "qml/dialog/WallpaperFilterDialog.qml",
     "qml/dialog/RemoteFilterDialog.qml",
     "qml/dialog/QrLoginDialog.qml",
+    "qml/dialog/BrowserLoginDialog.qml",
     "qml/dialog/PluginActionFormDialog.qml",
     "qml/dialog/DisplayEditDialog.qml",
     "qml/dialog/CanvasDialog.qml",
@@ -295,6 +296,11 @@ qt.qml_module({
       source = "src/query/qr_login_query.cppm",
       mode = "module-split",
       output = "waywallen/query/qr_login_query",
+    },
+    {
+      source = "src/query/browser_login_query.cppm",
+      mode = "module-split",
+      output = "waywallen/query/browser_login_query",
     },
     {
       source = "src/query/plugin_action_query.cppm",

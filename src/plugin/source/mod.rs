@@ -19,6 +19,7 @@ mod types;
 
 pub use manager::*;
 pub(crate) use parsing::redact_secrets;
+pub(crate) use runtime::BrowserLoginOutcome;
 pub use runtime::{LuaPluginRuntime, WallpaperApply};
 pub use types::*;
 

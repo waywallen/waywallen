@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -165,6 +166,7 @@ async fn write_remote_sidecar(path: &Path, info: &DiscoverMetadata) -> Result<()
     Ok(())
 }
 
+#[cfg(test)]
 async fn download_remote_file(
     url: &str,
     path: &Path,
@@ -178,6 +180,7 @@ async fn download_remote_file(
     .await
 }
 
+#[cfg(test)]
 async fn download_remote_file_checked(
     url: &str,
     path: &Path,
@@ -185,9 +188,55 @@ async fn download_remote_file_checked(
     expected: Option<u64>,
     raw: bool,
     input_budget: Option<&AtomicU64>,
+    progress: impl FnMut(RemoteDownloadTransfer) -> Result<()>,
+) -> Result<()> {
+    download_remote_file_headers_checked(
+        url,
+        path,
+        limit,
+        expected,
+        raw,
+        input_budget,
+        &HashMap::new(),
+        progress,
+    )
+    .await
+}
+
+async fn download_remote_file_with_headers(
+    url: &str,
+    path: &Path,
+    limit: u64,
+    headers: &HashMap<String, String>,
+    mut progress: impl FnMut(RemoteDownloadTransfer),
+) -> Result<()> {
+    download_remote_file_headers_checked(url, path, limit, None, false, None, headers, |value| {
+        progress(value);
+        Ok(())
+    })
+    .await
+}
+
+async fn download_remote_file_headers_checked(
+    url: &str,
+    path: &Path,
+    limit: u64,
+    expected: Option<u64>,
+    raw: bool,
+    input_budget: Option<&AtomicU64>,
+    headers: &HashMap<String, String>,
     mut progress: impl FnMut(RemoteDownloadTransfer) -> Result<()>,
 ) -> Result<()> {
     let url = crate::remote_asset::prepare::validate_url(url)?;
+    let mut request_headers = reqwest::header::HeaderMap::new();
+    for (name, value) in headers {
+        request_headers.insert(
+            reqwest::header::HeaderName::from_bytes(name.as_bytes())
+                .context("invalid resource header name")?,
+            reqwest::header::HeaderValue::from_str(value)
+                .context("invalid resource header value")?,
+        );
+    }
     let _permit = HTTP_SLOTS
         .acquire()
         .await
@@ -212,6 +261,7 @@ async fn download_remote_file_checked(
     .build()?;
     let response = client
         .get(url)
+        .headers(request_headers)
         .send()
         .await
         .map_err(reqwest::Error::without_url)
@@ -430,7 +480,15 @@ async fn prepare_artifact(
         )?)
     } else if !metadata.preview_url.is_empty() {
         let path = staged.preview_path();
-        match download_remote_file(&metadata.preview_url, &path, PREVIEW_LIMIT, |_| {}).await {
+        match download_remote_file_with_headers(
+            &metadata.preview_url,
+            &path,
+            PREVIEW_LIMIT,
+            &metadata.preview_headers,
+            |_| {},
+        )
+        .await
+        {
             Ok(()) => Some(path),
             Err(error) => {
                 log::warn!("remote preview was not downloaded: {error:#}");
@@ -493,9 +551,15 @@ pub async fn download_remote(
     match info.transfer.format {
         DownloadFormat::File if !info.transfer.resolve => {
             let target = dir.join(safe_remote_filename(&info.transfer.filename, &id));
-            download_remote_file(&info.transfer.url, &target, DOWNLOAD_LIMIT, |transfer| {
-                transfer_progress(Some(transfer));
-            })
+            download_remote_file_with_headers(
+                &info.transfer.url,
+                &target,
+                DOWNLOAD_LIMIT,
+                &info.transfer.headers,
+                |transfer| {
+                    transfer_progress(Some(transfer));
+                },
+            )
             .await?;
             transfer_progress(None);
             write_remote_sidecar(&target, &info.metadata).await?;

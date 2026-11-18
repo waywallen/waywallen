@@ -1,3 +1,5 @@
+pub(crate) mod browser_login;
+pub(crate) mod browser_protocol;
 pub mod display_registry;
 pub mod i18n;
 pub mod installer;

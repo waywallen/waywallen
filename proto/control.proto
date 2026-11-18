@@ -109,6 +109,7 @@ message Request {
     LibraryRenameRequest        library_rename = 92;
     LibraryEditRequest          library_edit = 93;
     LibraryRelocateRequest      library_relocate = 94;
+    BrowserLoginCancelRequest   browser_login_cancel = 98;
   }
 }
 
@@ -205,6 +206,7 @@ message Response {
     Empty                        library_rename = 92;
     Empty                        library_edit = 93;
     Empty                        library_relocate = 94;
+    BrowserLoginCancelResponse   browser_login_cancel = 98;
   }
 }
 
@@ -1165,6 +1167,7 @@ enum PluginActionKind {
   PLUGIN_ACTION_KIND_INVOKE = 1;
   PLUGIN_ACTION_KIND_QR_LOGIN = 2;
   PLUGIN_ACTION_KIND_FORM = 3;
+  PLUGIN_ACTION_KIND_BROWSER_LOGIN = 4;
 }
 
 message PluginActionField {
@@ -1247,6 +1250,7 @@ message RemoteItem {
   // Absent when the search result has no reliable dimensions.
   optional uint32 width = 9;
   optional uint32 height = 10;
+  map<string, string> preview_headers = 11;
 }
 
 message RemoteSearchRequest {
@@ -1376,6 +1380,39 @@ message QrLoginCancelRequest {
 }
 message QrLoginCancelResponse {
   bool cancelled = 1;
+}
+
+message BrowserLoginCancelRequest {
+  string session_id = 1;
+}
+message BrowserLoginCancelResponse {
+  bool cancelled = 1;
+}
+
+enum BrowserLoginState {
+  BROWSER_LOGIN_STATE_UNSPECIFIED = 0;
+  BROWSER_LOGIN_STATE_STARTING = 1;
+  BROWSER_LOGIN_STATE_WAITING = 2;
+  BROWSER_LOGIN_STATE_VERIFYING = 3;
+  BROWSER_LOGIN_STATE_SUCCEEDED = 4;
+  BROWSER_LOGIN_STATE_FAILED = 5;
+  BROWSER_LOGIN_STATE_CANCELLED = 6;
+  BROWSER_LOGIN_STATE_EXPIRED = 7;
+}
+
+message BrowserLoginProgress {
+  string session_id = 1;
+  string plugin_id = 2;
+  string action_id = 3;
+  BrowserLoginState state = 4;
+  string display_value = 5;
+  string error = 6;
+  string title = 7;
+  string instruction = 8;
+  PluginMessage display_value_text = 9;
+  PluginMessage error_text = 10;
+  PluginMessage title_text = 11;
+  PluginMessage instruction_text = 12;
 }
 
 // Merge declared settings into one remote source's config table. Unlike
@@ -1540,6 +1577,7 @@ message Event {
     CanvasSnapshot         canvas_snapshot           = 25;
     WallpaperPresentationSnapshot wallpaper_presentation_snapshot = 26;
     WallpaperHiddenChanged wallpaper_hidden_changed = 27;
+    BrowserLoginProgress   browser_login_progress    = 30;
   }
 }
 
