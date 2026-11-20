@@ -32,7 +32,7 @@ async fn activate_groups(app: &Arc<DaemonContext>, groups: HashMap<i64, Vec<Disp
             app,
             &display_ids,
             pid,
-            crate::application::APPLY_FIRST_FRAME_TIMEOUT,
+            crate::application::apply_first_frame_timeout(),
         )
         .await
         {
