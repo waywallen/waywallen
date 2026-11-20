@@ -53,6 +53,20 @@ MD.Page {
         }
     }
 
+    MD.Dialog {
+        id: clearSnapshotsDialog
+        parent: MD.Overlay.overlay
+        modal: true
+        title: qsTr("Clear wallpaper snapshots?")
+        standardButtons: MD.Dialog.Cancel | MD.Dialog.Ok
+        contentItem: MD.Text {
+            text: qsTr("All snapshots will be deleted. Your wallpapers will be kept. The system background may disappear until a new snapshot is saved.")
+            wrapMode: Text.Wrap
+            color: MD.Token.color.on_surface_variant
+        }
+        onAccepted: clearSnapshotsQ.reload()
+    }
+
     component FieldLabel: MD.Text {
         typescale: MD.Token.typescale.label_large
         color: MD.Token.color.on_surface
@@ -104,6 +118,24 @@ MD.Page {
         onStatusChanged: {
             if (status === 3)
                 m_pending.submittedGlobal = null;
+        }
+    }
+
+    W.SystemWallpaperSnapshotsQuery {
+        id: retakeSnapshotQ
+        retake: true
+        onStatusChanged: {
+            if (status === 2)
+                W.Action.toast(qsTr("Wallpaper snapshot requested"));
+        }
+    }
+
+    W.SystemWallpaperSnapshotsQuery {
+        id: clearSnapshotsQ
+        clear: true
+        onStatusChanged: {
+            if (status === 2)
+                W.Action.toast(qsTr("Wallpaper snapshots cleared"));
         }
     }
 
@@ -295,6 +327,8 @@ MD.Page {
             "renderer.volume": 100,
             pluginUpdateNotifications: true,
             duplicateRenderers: false,
+            systemWallpaperEnabled: false,
+            systemWallpaperAuto: true,
             hideTrayIcon: false,
             debugLoggingEnabled: false
         };
@@ -344,6 +378,8 @@ MD.Page {
             rendererVolume: root._rendererVolume(g),
             pluginUpdateNotifications: Boolean(g.pluginUpdateNotifications ?? true),
             duplicateRenderers: Boolean(g.duplicateRenderers ?? false),
+            systemWallpaperEnabled: g.systemWallpaperAuto ? null : Boolean(g.systemWallpaperEnabled ?? false),
+            systemWallpaperAuto: Boolean(g.systemWallpaperAuto ?? false),
             hideTrayIcon: Boolean(g.hideTrayIcon ?? false),
             debugLoggingEnabled: Boolean(g.debugLoggingEnabled ?? false)
         });
@@ -1003,6 +1039,64 @@ MD.Page {
                         mdState.type: MD.Enum.BtText
                         enabled: String(getQ.logDir || "").length > 0
                         onClicked: root.openLogFolder()
+                    }
+                }
+            }
+
+            SettingItem {
+                first: false
+                last: false
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    FieldLabel {
+                        Layout.fillWidth: true
+                        text: qsTr("Update system wallpaper")
+                    }
+
+                    MD.Switch {
+                        id: m_system_wallpaper
+                        Accessible.name: qsTr("Update system wallpaper")
+                        enabled: Object.keys(getQ.global).length > 0
+                        onCheckedChangeRequested: checked => root._mut(g => {
+                            g.systemWallpaperEnabled = checked;
+                            g.systemWallpaperAuto = false;
+                        })
+                    }
+
+                    Binding {
+                        target: m_system_wallpaper
+                        property: "checked"
+                        value: Boolean(root._currentGlobal()?.systemWallpaperEnabled ?? false)
+                    }
+                }
+
+                MD.Text {
+                    text: qsTr("Use a snapshot of the current wallpaper as the system background.")
+                    typescale: MD.Token.typescale.body_small
+                    color: MD.Token.color.on_surface_variant
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    MD.Button {
+                        text: qsTr("Retake snapshot")
+                        mdState.type: MD.Enum.BtText
+                        enabled: Boolean(root._currentGlobal()?.systemWallpaperEnabled ?? false) && retakeSnapshotQ.status !== 1 && clearSnapshotsQ.status !== 1
+                        onClicked: retakeSnapshotQ.reload()
+                    }
+
+                    MD.Button {
+                        text: qsTr("Clear all snapshots")
+                        mdState.type: MD.Enum.BtText
+                        enabled: Object.keys(getQ.global).length > 0 && clearSnapshotsQ.status !== 1 && retakeSnapshotQ.status !== 1
+                        onClicked: clearSnapshotsDialog.open()
                     }
                 }
             }

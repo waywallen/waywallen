@@ -148,6 +148,9 @@ Notify::Notify(QObject* parent): QObject(parent) {
                 Q_EMIT pluginChanged();
             } else if (evt.hasPluginUpdateChanged()) {
                 Q_EMIT pluginUpdateChanged();
+            } else if (evt.hasSystemWallpaperFailed()) {
+                const auto& f = evt.systemWallpaperFailed();
+                Q_EMIT systemWallpaperFailed(f.wallpaperId(), f.error());
             } else if (evt.hasPluginRestartFailed()) {
                 const auto& f = evt.pluginRestartFailed();
                 Q_EMIT pluginRestartFailed(f.pluginId(), f.error());

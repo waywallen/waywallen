@@ -231,6 +231,8 @@ using proto::PluginSettings;
 using proto::SettingsChanged;
 using proto::SettingsGetRequest;
 using proto::SettingsGetResponse;
+using proto::SystemWallpaperSnapshotsRequest;
+using proto::SystemWallpaperSnapshotsResponse;
 using proto::SettingsSetRequest;
 using proto::TransitionConfig;
 using proto::WindowExclusions;

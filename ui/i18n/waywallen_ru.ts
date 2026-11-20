@@ -1748,6 +1748,22 @@ Related display: #%1</source>
 </context>
 <context>
     <name>SettingsPage</name>
+    <message><source>Wallpaper snapshot requested</source><translation>Запрошен новый снимок обоев</translation></message>
+    <message><source>Clear wallpaper snapshots?</source><translation>Очистить снимки обоев?</translation></message>
+    <message><source>All snapshots will be deleted. Your wallpapers will be kept. The system background may disappear until a new snapshot is saved.</source><translation>Снимки будут удалены, обои сохранятся. До нового снимка системный фон может исчезнуть.</translation></message>
+    <message><source>Wallpaper snapshots cleared</source><translation>Снимки обоев очищены</translation></message>
+    <message><source>Retake snapshot</source><translation>Переснять</translation></message>
+    <message><source>Clear all snapshots</source><translation>Очистить все</translation></message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="1019"/>
+        <source>Update system wallpaper</source>
+        <translation>Обновлять системные обои</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="1039"/>
+        <source>Use a snapshot of the current wallpaper as the system background.</source>
+        <translation>Устанавливает снимок текущих обоев как системный фон.</translation>
+    </message>
     <message><source>Current display</source><translation>Текущий дисплей</translation></message>
     <message><source>All displays</source><translation>Все дисплеи</translation></message>
     <message><source>Applies to</source><translation>Область действия</translation></message>
@@ -3250,6 +3266,10 @@ Unsaved frame state may be lost.</source>
 </context>
 <context>
     <name>Window</name>
+    <message>
+        <source>System wallpaper update failed: %1</source>
+        <translation>Не удалось обновить системные обои: %1</translation>
+    </message>
     <message>
         <location filename="../qml/Window.qml" line="45"/>
         <source>Changelog</source>

@@ -55,6 +55,20 @@ fn main() {
     );
 
     build_pulse_adapter(&manifest_dir);
+    let snapshot = manifest_dir.join("src/wallframe/snapshot.c");
+    println!("cargo:rerun-if-changed={}", snapshot.display());
+    let mut build = cc::Build::new();
+    build.file(snapshot).flag_if_supported("-std=gnu11");
+    for package in ["egl", "glesv2"] {
+        let library = pkg_config::Config::new()
+            .cargo_metadata(false)
+            .probe(package)
+            .expect("EGL and GLES2 development headers are required for wallpaper snapshots");
+        for include in library.include_paths {
+            build.include(include);
+        }
+    }
+    build.compile("waywallen_snapshot");
 }
 
 fn build_pulse_adapter(manifest_dir: &Path) {

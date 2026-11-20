@@ -296,6 +296,21 @@ impl SettingsStore {
             .pointer_forwarding_enabled
     }
 
+    pub fn system_wallpaper_enabled(&self) -> bool {
+        self.inner
+            .read()
+            .expect("settings poisoned")
+            .global
+            .effective_system_wallpaper_enabled()
+    }
+
+    pub(crate) fn set_system_wallpaper_default_enabled(&self, enabled: bool) -> bool {
+        let mut settings = self.inner.write().expect("settings poisoned");
+        let before = settings.global.effective_system_wallpaper_enabled();
+        settings.global.system_wallpaper_default_enabled = enabled;
+        before != settings.global.effective_system_wallpaper_enabled()
+    }
+
     /// Clone the value map for a single plugin, or `None` if the
     /// plugin has no recorded settings.
     pub fn plugin(&self, plugin_name: &str) -> Option<HashMap<String, String>> {

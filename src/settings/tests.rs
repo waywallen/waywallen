@@ -154,6 +154,8 @@ fn default_roundtrip() {
     assert!(!s.global.manual_muted);
     assert!(s.global.plugin_update_notifications);
     assert!(!s.global.duplicate_renderers_for_same_wallpaper);
+    assert!(s.global.system_wallpaper_enabled.is_none());
+    assert!(!s.global.effective_system_wallpaper_enabled());
     assert!(s.global.pointer_forwarding_enabled);
     assert!(!s.global.autostart_enabled);
     assert!(s.plugins.is_empty());
@@ -170,6 +172,46 @@ autostart_enabled = true
     assert!(toml::to_string(&s)
         .unwrap()
         .contains("autostart_enabled = true"));
+}
+
+#[test]
+fn system_wallpaper_defaults_to_integration_and_explicit_values_round_trip() {
+    let legacy: Settings = toml::from_str("[global]\n").unwrap();
+    assert!(legacy.global.system_wallpaper_enabled.is_none());
+    assert!(!legacy.global.effective_system_wallpaper_enabled());
+    assert!(!toml::to_string(&legacy)
+        .unwrap()
+        .contains("system_wallpaper"));
+    let disabled: Settings =
+        toml::from_str("[global]\nsystem_wallpaper_enabled = false\n").unwrap();
+    assert_eq!(disabled.global.system_wallpaper_enabled, Some(false));
+    let restored: Settings = toml::from_str(&toml::to_string(&disabled).unwrap()).unwrap();
+    assert_eq!(restored.global.system_wallpaper_enabled, Some(false));
+    let enabled: Settings = toml::from_str("[global]\nsystem_wallpaper_enabled = true\n").unwrap();
+    let restored: Settings = toml::from_str(&toml::to_string(&enabled).unwrap()).unwrap();
+    assert_eq!(restored.global.system_wallpaper_enabled, Some(true));
+}
+
+#[test]
+fn system_wallpaper_integration_default_is_temporary_and_preserves_user_choice() {
+    let store = SettingsStore::from_test_settings(Settings::default());
+    assert!(!store.system_wallpaper_enabled());
+    assert!(store.set_system_wallpaper_default_enabled(true));
+    assert!(store.system_wallpaper_enabled());
+    store.update(|settings| settings.global.hide_tray_icon = true);
+    let saved = toml::to_string(&store.snapshot()).unwrap();
+    assert!(!saved.contains("system_wallpaper"));
+    let restored: Settings = toml::from_str(&saved).unwrap();
+    assert!(!restored.global.effective_system_wallpaper_enabled());
+    assert!(store.set_system_wallpaper_default_enabled(false));
+    assert!(!store.system_wallpaper_enabled());
+    for enabled in [false, true] {
+        store.update(|settings| settings.global.system_wallpaper_enabled = Some(enabled));
+        for safe_default in [true, false] {
+            assert!(!store.set_system_wallpaper_default_enabled(safe_default));
+            assert_eq!(store.system_wallpaper_enabled(), enabled);
+        }
+    }
 }
 
 #[test]

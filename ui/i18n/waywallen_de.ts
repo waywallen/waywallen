@@ -1817,6 +1817,22 @@ Betroffener Bildschirm: #%1</translation>
 </context>
 <context>
     <name>SettingsPage</name>
+    <message><source>Wallpaper snapshot requested</source><translation>Neue Hintergrundaufnahme angefordert</translation></message>
+    <message><source>Clear wallpaper snapshots?</source><translation>Hintergrundaufnahmen löschen?</translation></message>
+    <message><source>All snapshots will be deleted. Your wallpapers will be kept. The system background may disappear until a new snapshot is saved.</source><translation>Alle Aufnahmen werden gelöscht. Deine Hintergrundbilder bleiben erhalten. Bis zur nächsten Aufnahme kann der Systemhintergrund verschwinden.</translation></message>
+    <message><source>Wallpaper snapshots cleared</source><translation>Hintergrundaufnahmen gelöscht</translation></message>
+    <message><source>Retake snapshot</source><translation>Neu aufnehmen</translation></message>
+    <message><source>Clear all snapshots</source><translation>Alle Aufnahmen löschen</translation></message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="1019"/>
+        <source>Update system wallpaper</source>
+        <translation>Systemhintergrund aktualisieren</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="1039"/>
+        <source>Use a snapshot of the current wallpaper as the system background.</source>
+        <translation>Verwendet eine Aufnahme des aktuellen Hintergrundbilds als Systemhintergrund.</translation>
+    </message>
     <message>
         <location filename="../qml/page/SettingsPage.qml" line="15"/>
         <source>Settings</source>
@@ -3337,6 +3353,10 @@ Ungespeicherter Bildzustand kann verloren gehen.</translation>
 </context>
 <context>
     <name>Window</name>
+    <message>
+        <source>System wallpaper update failed: %1</source>
+        <translation>Systemhintergrund konnte nicht aktualisiert werden: %1</translation>
+    </message>
     <message>
         <location filename="../qml/Window.qml" line="41"/>
         <source>Changelog</source>

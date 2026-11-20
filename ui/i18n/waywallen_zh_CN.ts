@@ -1757,6 +1757,22 @@ Related display: #%1</source>
 </context>
 <context>
     <name>SettingsPage</name>
+    <message><source>Wallpaper snapshot requested</source><translation>已请求重新截取壁纸快照</translation></message>
+    <message><source>Clear wallpaper snapshots?</source><translation>清除壁纸快照？</translation></message>
+    <message><source>All snapshots will be deleted. Your wallpapers will be kept. The system background may disappear until a new snapshot is saved.</source><translation>所有快照将被删除，原始壁纸将保留。保存新快照之前，系统背景可能会消失。</translation></message>
+    <message><source>Wallpaper snapshots cleared</source><translation>壁纸快照已清除</translation></message>
+    <message><source>Retake snapshot</source><translation>重新截图</translation></message>
+    <message><source>Clear all snapshots</source><translation>清除所有快照</translation></message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="1019"/>
+        <source>Update system wallpaper</source>
+        <translation>更新系统壁纸</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="1039"/>
+        <source>Use a snapshot of the current wallpaper as the system background.</source>
+        <translation>将当前壁纸的快照设为系统背景。</translation>
+    </message>
     <message><source>Excluded windows</source><translation>排除的窗口</translation></message>
     <message><source>Current display</source><translation>当前显示器</translation></message>
     <message><source>All displays</source><translation>所有显示器</translation></message>
@@ -3258,6 +3274,10 @@ Unsaved frame state may be lost.</source>
     <message>
         <source>Menu</source>
         <translation>菜单</translation>
+    </message>
+    <message>
+        <source>System wallpaper update failed: %1</source>
+        <translation>系统壁纸更新失败：%1</translation>
     </message>
     <message>
         <location filename="../qml/Window.qml" line="45"/>
