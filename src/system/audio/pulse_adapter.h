@@ -30,7 +30,10 @@ enum ww_pulse_error
     WW_PULSE_OUT_OF_MEMORY       = 6,
 };
 
-ww_pulse_capture_t* ww_pulse_capture_open(int* error_code, char* error, size_t error_capacity);
+/* Records the monitor of `sink_name`. A NULL or empty name, or a sink that
+ * does not exist, records the monitor of the current default sink instead. */
+ww_pulse_capture_t* ww_pulse_capture_open(const char* sink_name, int* error_code, char* error,
+                                          size_t error_capacity);
 void                ww_pulse_capture_close(ww_pulse_capture_t* capture);
 
 /* Copies interleaved stereo F32LE frames from the callback-owned fixed ring.

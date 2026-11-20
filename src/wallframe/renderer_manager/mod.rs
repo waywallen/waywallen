@@ -1073,6 +1073,17 @@ impl RendererManager {
         cmd.process_group(0);
         cmd.arg("--ipc").arg(&sock_path);
         cmd.env("WW_LOG", log_level_name(renderer_log.level));
+        // Play through the output chosen in the settings. PulseAudio and
+        // PipeWire-Pulse clients read PULSE_SINK when they open a stream.
+        if let Some(sink) = self.settings.get().and_then(|settings| {
+            settings
+                .global()
+                .renderer
+                .audio_output_name()
+                .map(str::to_owned)
+        }) {
+            cmd.env("PULSE_SINK", sink);
+        }
         // SPAWN_VERSION 3: extras (canonical `path` + plugin-specific
         // keys like `assets`/`external_id`) ride as `--<key> <value>`
         let mut extra_keys: Vec<&String> = req.extras.keys().collect();

@@ -3,8 +3,11 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::watch;
 
-use super::playback::{has_external_playback, PlaybackObserverBackend};
-use super::pulse::{AudioCaptureBackend, CaptureErrorKind, PulseCapture, PulsePlaybackObserver};
+use super::playback::{has_external_playback, renderer_stream_indices, PlaybackObserverBackend};
+use super::pulse::{
+    list_playback_streams, move_playback_streams, AudioCaptureBackend, CaptureErrorKind,
+    PulseCapture, PulsePlaybackObserver,
+};
 use super::window::{AudioPcmWindow, AUDIO_WINDOW_END_OF_STREAM};
 use crate::events::GlobalEvent;
 use crate::settings::SettingsStore;
@@ -30,7 +33,12 @@ pub enum AudioServiceState {
 }
 
 enum CaptureWorkerCommand {
-    Configure { enabled: bool, demanded: bool },
+    Configure {
+        enabled: bool,
+        demanded: bool,
+    },
+    /// Drop the current capture so the next open follows the chosen output.
+    Reopen,
     Shutdown,
 }
 
@@ -55,9 +63,20 @@ impl AudioService {
         let (command_tx, command_rx) = std::sync::mpsc::channel();
         let (frame_tx, frame_rx) = watch::channel::<Option<AudioPcmWindow>>(None);
         let (state_tx, state_rx) = watch::channel(AudioServiceState::Closed);
+        // Output device the capture worker listens to. Read each time the
+        // worker opens a capture, so a changed choice only needs a reopen.
+        let output = Arc::new(std::sync::Mutex::new(
+            settings
+                .global()
+                .renderer
+                .audio_output_name()
+                .map(str::to_owned),
+        ));
+        let capture_output = output.clone();
         let worker = std::thread::spawn(move || {
             run_worker(command_rx, frame_tx, state_tx, DEFAULT_IDLE_TIMEOUT, || {
-                PulseCapture::open()
+                let sink = capture_output.lock().ok().and_then(|output| output.clone());
+                PulseCapture::open(sink.as_deref())
                     .map(|capture| Box::new(capture) as Box<dyn AudioCaptureBackend>)
             });
         });
@@ -85,6 +104,8 @@ impl AudioService {
             });
             let mut frame_rx = frame_rx;
             let mut playback_rx = playback_rx;
+            let mut audio_output = settings.global().renderer.audio_output_name().map(str::to_owned);
+            let mut renderer_audio_enabled = settings.global().renderer.enable_audio;
             let mut playback_demand = settings.global().mute_when_other_audio;
             let _ = playback_command_tx.send(PlaybackWorkerCommand::Demand(playback_demand));
             let mut dispatch = tokio::time::interval(DISPATCH_INTERVAL);
@@ -146,6 +167,35 @@ impl AudioService {
                                         last_sent = Some((generation, sequence));
                                         send_end(&manager, generation, sequence).await;
                                     }
+                                }
+                                let next_output =
+                                    global.renderer.audio_output_name().map(str::to_owned);
+                                let output_changed = next_output != audio_output;
+                                // Turning audio back on can open a new stream on a
+                                // renderer that started before the choice changed.
+                                let audio_reenabled = global.renderer.enable_audio
+                                    && !renderer_audio_enabled;
+                                renderer_audio_enabled = global.renderer.enable_audio;
+                                if output_changed {
+                                    log::info!(
+                                        "audio output changed to {}",
+                                        next_output.as_deref().unwrap_or("the default device")
+                                    );
+                                    audio_output = next_output.clone();
+                                    if let Ok(mut shared) = output.lock() {
+                                        *shared = next_output.clone();
+                                    }
+                                    last_sent = None;
+                                    if command_tx.send(CaptureWorkerCommand::Reopen).is_err() {
+                                        break;
+                                    }
+                                }
+                                if output_changed || (audio_reenabled && audio_output.is_some()) {
+                                    route_renderer_streams(
+                                        &manager,
+                                        audio_output.clone(),
+                                        audio_reenabled && !output_changed,
+                                    );
                                 }
                                 let demanded = global.mute_when_other_audio;
                                 if demanded != playback_demand {
@@ -223,6 +273,40 @@ impl AudioService {
     pub fn state(&self) -> AudioServiceState {
         *self.state.borrow()
     }
+}
+
+/// Moves the audio streams of running renderers to `output` (`None` = the
+/// system default device). Renderers started later pick the output up from
+/// their environment, so this only has to catch the ones already playing.
+///
+/// Talking to the sound server blocks, so it runs on the blocking pool.
+/// `delayed` waits a moment first, for a stream that is just being opened.
+fn route_renderer_streams(manager: &RendererManager, output: Option<String>, delayed: bool) {
+    let ownership = manager.subscribe_process_ownership().borrow().clone();
+    tokio::task::spawn_blocking(move || {
+        if delayed {
+            std::thread::sleep(Duration::from_secs(1));
+        }
+        let streams = match list_playback_streams() {
+            Ok(streams) => streams,
+            Err(error) => {
+                log::warn!("audio output: could not list playback streams: {error}");
+                return;
+            }
+        };
+        let indices = renderer_stream_indices(&streams, &ownership);
+        if indices.is_empty() {
+            return;
+        }
+        match move_playback_streams(output.as_deref(), &indices) {
+            Ok(moved) => log::info!(
+                "audio output: moved {moved} of {} renderer stream(s) to {}",
+                indices.len(),
+                output.as_deref().unwrap_or("the default device")
+            ),
+            Err(error) => log::warn!("audio output: could not move renderer streams: {error}"),
+        }
+    });
 }
 
 fn next_audio_identity(last: Option<(u64, u64)>) -> (u64, u64) {
@@ -324,6 +408,17 @@ fn run_worker<F>(
                 } else {
                     states.send_replace(AudioServiceState::Closed);
                 }
+            }
+            Ok(CaptureWorkerCommand::Reopen) => {
+                // The old capture listens to the previous output. Start over
+                // so a demanded capture reopens on the new one right away.
+                frames.send_replace(None);
+                drop(backend.take());
+                retry_deadline = None;
+                backoff = Duration::from_secs(1);
+                unavailable_latched = false;
+                idle_deadline = None;
+                states.send_replace(AudioServiceState::Closed);
             }
             Ok(CaptureWorkerCommand::Shutdown)
             | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {

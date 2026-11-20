@@ -268,6 +268,11 @@ qt.qml_module({
       output = "waywallen/query/display_query",
     },
     {
+      source = "src/query/audio_output_query.cppm",
+      mode = "module-split",
+      output = "waywallen/query/audio_output_query",
+    },
+    {
       source = "src/query/gpu_query.cppm",
       mode = "module-split",
       output = "waywallen/query/gpu_query",

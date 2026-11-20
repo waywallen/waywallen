@@ -111,6 +111,11 @@ MD.Page {
         id: autostartGetQ
     }
 
+    W.AudioOutputListQuery {
+        id: audioOutputQ
+        forwardError: false
+    }
+
     W.AutostartSetQuery {
         id: autostartSetQ
         forwardError: false
@@ -131,6 +136,7 @@ MD.Page {
         function onDaemonReady() {
             getQ.reload();
             autostartGetQ.reload();
+            audioOutputQ.reload();
         }
         function onSettingsChanged() {
             getQ.reload();
@@ -142,13 +148,16 @@ MD.Page {
         if (W.Notify.daemonPhase === W.Notify.DaemonPhase.Ready) {
             getQ.reload();
             autostartGetQ.reload();
+            audioOutputQ.reload();
         }
     }
 
     onVisibleChanged: if (visible) {
         W.App.refreshNetworkCacheSize();
-        if (W.Notify.daemonPhase === W.Notify.DaemonPhase.Ready)
+        if (W.Notify.daemonPhase === W.Notify.DaemonPhase.Ready) {
             autostartGetQ.reload();
+            audioOutputQ.reload();
+        }
     }
 
     // Same pattern as WallpaperPage._persistGlobalChange but routed
@@ -293,6 +302,7 @@ MD.Page {
             pointerForwardingEnabled: true,
             "renderer.enable_audio": true,
             "renderer.volume": 100,
+            "renderer.audio_output": "",
             pluginUpdateNotifications: true,
             duplicateRenderers: false,
             hideTrayIcon: false,
@@ -342,6 +352,7 @@ MD.Page {
             pointerForwardingEnabled: Boolean(g.pointerForwardingEnabled ?? true),
             rendererEnableAudio: root._rendererAudioEnabled(g),
             rendererVolume: root._rendererVolume(g),
+            rendererAudioOutput: root._rendererAudioOutput(g),
             pluginUpdateNotifications: Boolean(g.pluginUpdateNotifications ?? true),
             duplicateRenderers: Boolean(g.duplicateRenderers ?? false),
             hideTrayIcon: Boolean(g.hideTrayIcon ?? false),
@@ -437,6 +448,26 @@ MD.Page {
     function _rendererAudioEnabled(globalSettings) {
         const value = globalSettings?.["renderer.enable_audio"];
         return value === undefined ? true : Boolean(value);
+    }
+
+    function _rendererAudioOutput(globalSettings) {
+        return String(globalSettings?.["renderer.audio_output"] ?? "");
+    }
+
+    // Combo entries: "Default device" first, then every device the sound
+    // server reports. A saved device that is currently missing (unplugged)
+    // is kept as its own entry so the choice is not silently lost.
+    function _audioOutputChoices(saved) {
+        const choices = [{ value: "", label: qsTr("Default device") }];
+        let found = saved === "";
+        for (const o of audioOutputQ.outputs) {
+            choices.push({ value: o.name, label: o.description || o.name });
+            if (o.name === saved)
+                found = true;
+        }
+        if (!found)
+            choices.push({ value: saved, label: qsTr("%1 (unavailable)").arg(saved) });
+        return choices;
     }
 
     function _rendererVolume(globalSettings) {
@@ -1404,6 +1435,42 @@ MD.Page {
                         target: m_audio_capture_enabled
                         property: "checked"
                         value: Boolean(root._currentGlobal()?.audioCaptureEnabled)
+                    }
+                }
+            }
+
+            SettingItem {
+                first: false
+                last: false
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    FieldLabel {
+                        Layout.fillWidth: true
+                        text: qsTr("Audio output")
+                    }
+
+                    MD.ComboBox {
+                        id: m_audio_output_box
+                        readonly property var choices: root._audioOutputChoices(
+                            root._rendererAudioOutput(root._currentGlobal()))
+                        Layout.preferredWidth: 260
+                        mdState.size: MD.Enum.S
+                        model: choices.map(o => o.label)
+                        onSelectionChangeRequested: idx => root._mut(g => {
+                            g["renderer.audio_output"] = choices[idx].value;
+                        })
+                    }
+                    Binding {
+                        target: m_audio_output_box
+                        property: "currentIndex"
+                        value: {
+                            const saved = root._rendererAudioOutput(root._currentGlobal());
+                            const idx = m_audio_output_box.choices.findIndex(o => o.value === saved);
+                            return idx < 0 ? 0 : idx;
+                        }
                     }
                 }
             }

@@ -110,6 +110,7 @@ message Request {
     LibraryEditRequest          library_edit = 93;
     LibraryRelocateRequest      library_relocate = 94;
     BrowserLoginCancelRequest   browser_login_cancel = 98;
+    AudioOutputListRequest      audio_output_list = 99;
   }
 }
 
@@ -207,6 +208,7 @@ message Response {
     Empty                        library_edit = 93;
     Empty                        library_relocate = 94;
     BrowserLoginCancelResponse   browser_login_cancel = 98;
+    AudioOutputListResponse      audio_output_list = 99;
   }
 }
 
@@ -1780,6 +1782,10 @@ message GlobalRendererSettings {
   optional bool enable_audio = 1;
   // Percentage factor multiplied with each renderer's `volume` setting.
   optional uint32 volume = 2;
+  // Output device (PulseAudio/PipeWire sink name from `AudioOutputList`)
+  // that renderers play through and audio capture listens to. Empty means
+  // the system default device. Absent leaves the stored choice unchanged.
+  optional string audio_output = 3;
 }
 
 message GlobalSettings {
@@ -2182,6 +2188,31 @@ message GpuInfo {
 message GpuListRequest {}
 message GpuListResponse {
   repeated GpuInfo gpus = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Audio output enumeration
+// ---------------------------------------------------------------------------
+//
+// Output devices (PulseAudio/PipeWire sinks) a user can route wallpaper audio
+// to. Queried on demand, since devices come and go (USB, Bluetooth, HDMI).
+message AudioOutput {
+  // Stable sink name; this is the value stored in
+  // `GlobalRendererSettings.audio_output`.
+  string name = 1;
+  // Human-readable label for pickers.
+  string description = 2;
+  // True for the sink the sound server currently treats as its default.
+  bool is_default = 3;
+}
+
+message AudioOutputListRequest {}
+message AudioOutputListResponse {
+  repeated AudioOutput outputs = 1;
+  // False when no sound server could be reached; `outputs` is then empty and
+  // `error` says why.
+  bool available = 2;
+  string error = 3;
 }
 
 // Install an installable plugin from a local .zip into the user plugin dir

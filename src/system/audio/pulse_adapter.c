@@ -84,10 +84,13 @@ struct ww_pulse_capture {
     char            failure[256];
 
     char default_sink[WW_PULSE_NAME_CAPACITY];
+    /* Output the user picked; empty means "follow the default sink". */
+    char preferred_sink[WW_PULSE_NAME_CAPACITY];
     char monitor_source[WW_PULSE_NAME_CAPACITY];
     char queried_monitor[WW_PULSE_NAME_CAPACITY];
     int  query_pending;
     int  query_found_sink;
+    int  query_using_preferred;
 };
 
 struct ww_pulse_playback_observer {
@@ -407,7 +410,6 @@ static void on_stream_read(pa_stream* stream, size_t bytes, void* userdata) {
 }
 
 static void on_sink_info(pa_context* context, const pa_sink_info* info, int eol, void* userdata) {
-    (void)context;
     ww_pulse_capture_t* self = userdata;
     if (info && info->monitor_source_name) {
         snprintf(
@@ -415,6 +417,18 @@ static void on_sink_info(pa_context* context, const pa_sink_info* info, int eol,
         self->query_found_sink = 1;
     }
     if (eol == 0) return;
+
+    if (! self->query_found_sink && self->query_using_preferred && self->default_sink[0] != '\0') {
+        /* The chosen output is gone (for example unplugged): follow the default
+         * sink instead. The next sink event retries the chosen one. */
+        self->query_using_preferred = 0;
+        pa_operation* operation     = self->api.context_get_sink_info_by_name(
+            context, self->default_sink, on_sink_info, self);
+        if (operation) {
+            self->api.operation_unref(operation);
+            return;
+        }
+    }
 
     self->query_pending = 0;
     if (! self->query_found_sink || self->queried_monitor[0] == '\0') {
@@ -441,8 +455,12 @@ static void on_server_info(pa_context* context, const pa_server_info* info, void
         return;
     }
     snprintf(self->default_sink, sizeof(self->default_sink), "%s", info->default_sink_name);
-    pa_operation* operation =
-        self->api.context_get_sink_info_by_name(context, self->default_sink, on_sink_info, self);
+    self->query_using_preferred = self->preferred_sink[0] != '\0';
+    pa_operation* operation     = self->api.context_get_sink_info_by_name(
+        context,
+        self->query_using_preferred ? self->preferred_sink : self->default_sink,
+        on_sink_info,
+        self);
     if (! operation) {
         self->query_pending = 0;
         self->api.threaded_mainloop_signal(self->loop, 0);
@@ -490,7 +508,8 @@ static void destroy_locked(ww_pulse_capture_t* self) {
     }
 }
 
-ww_pulse_capture_t* ww_pulse_capture_open(int* error_code, char* error, size_t error_capacity) {
+ww_pulse_capture_t* ww_pulse_capture_open(const char* sink_name, int* error_code, char* error,
+                                          size_t error_capacity) {
     if (error_code) *error_code = WW_PULSE_OK;
     copy_error(error, error_capacity, "");
 
@@ -499,6 +518,9 @@ ww_pulse_capture_t* ww_pulse_capture_open(int* error_code, char* error, size_t e
         if (error_code) *error_code = WW_PULSE_OUT_OF_MEMORY;
         copy_error(error, error_capacity, "out of memory");
         return NULL;
+    }
+    if (sink_name && sink_name[0] != '\0') {
+        snprintf(self->preferred_sink, sizeof(self->preferred_sink), "%s", sink_name);
     }
     pthread_mutex_init(&self->state_mutex, NULL);
     self->ring = calloc(WW_PULSE_RING_FRAMES * 2u, sizeof(float));

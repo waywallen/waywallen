@@ -58,17 +58,28 @@ fn main() {
 }
 
 fn build_pulse_adapter(manifest_dir: &Path) {
-    let source = manifest_dir.join("src/system/audio/pulse_adapter.c");
-    let header = manifest_dir.join("src/system/audio/pulse_adapter.h");
-    println!("cargo:rerun-if-changed={}", source.display());
-    println!("cargo:rerun-if-changed={}", header.display());
+    let audio_dir = manifest_dir.join("src/system/audio");
+    let sources = [
+        audio_dir.join("pulse_adapter.c"),
+        audio_dir.join("pulse_control.c"),
+    ];
+    let headers = [
+        audio_dir.join("pulse_adapter.h"),
+        audio_dir.join("pulse_control.h"),
+    ];
+    for path in sources.iter().chain(headers.iter()) {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
 
     let pulse = pkg_config::Config::new()
         .cargo_metadata(false)
         .probe("libpulse")
         .expect("libpulse headers are required to build the optional runtime adapter");
     let mut build = cc::Build::new();
-    build.file(source).flag_if_supported("-std=gnu11");
+    build.flag_if_supported("-std=gnu11");
+    for source in sources {
+        build.file(source);
+    }
     for include in pulse.include_paths {
         build.include(include);
     }

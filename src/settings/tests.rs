@@ -1180,6 +1180,50 @@ volume = 35
 }
 
 #[test]
+fn audio_output_defaults_to_the_system_device_and_round_trips() {
+    // Configs written before the setting existed read as "default device".
+    let legacy: Settings = toml::from_str("[global.renderer]\nenable_audio = true\n").unwrap();
+    assert_eq!(legacy.global.renderer.audio_output, "");
+    assert_eq!(legacy.global.renderer.audio_output_name(), None);
+
+    let settings: Settings = toml::from_str(
+        r#"
+[global.renderer]
+audio_output = "alsa_output.usb-DAC.analog-stereo"
+"#,
+    )
+    .unwrap();
+    assert_eq!(
+        settings.global.renderer.audio_output_name(),
+        Some("alsa_output.usb-DAC.analog-stereo")
+    );
+
+    let encoded = toml::to_string(&settings).unwrap();
+    let decoded: Settings = toml::from_str(&encoded).unwrap();
+    assert_eq!(decoded.global.renderer, settings.global.renderer);
+}
+
+#[test]
+fn audio_output_name_ignores_blank_values() {
+    let mut renderer = GlobalRendererSettings::default();
+    assert_eq!(renderer.audio_output_name(), None);
+    renderer.audio_output = "   ".to_string();
+    assert_eq!(renderer.audio_output_name(), None);
+    renderer.audio_output = "  sink  ".to_string();
+    assert_eq!(renderer.audio_output_name(), Some("sink"));
+}
+
+#[test]
+fn audio_output_validation_rejects_unusable_names() {
+    assert!(validate_audio_output("").is_ok());
+    assert!(validate_audio_output("alsa_output.pci-0000_00_1f.3.analog-stereo").is_ok());
+    assert!(validate_audio_output(&"a".repeat(MAX_AUDIO_OUTPUT_LEN)).is_ok());
+    assert!(validate_audio_output(&"a".repeat(MAX_AUDIO_OUTPUT_LEN + 1)).is_err());
+    assert!(validate_audio_output("bad\0name").is_err());
+    assert!(validate_audio_output("two\nlines").is_err());
+}
+
+#[test]
 fn persisted_catalog_query_round_trips_through_domain_types() {
     let state = WallpaperFilterState {
         filters: vec![WallpaperFilterRuleState {

@@ -11,6 +11,33 @@ impl PlaybackObserverBackend for PulsePlaybackObserver {
     }
 }
 
+/// Sink-input indices of the streams that belong to renderer processes.
+pub fn renderer_stream_indices(
+    streams: &[PulsePlaybackStream],
+    ownership: &RendererProcessOwnershipSnapshot,
+) -> Vec<u32> {
+    renderer_stream_indices_with(streams, ownership, |pid| {
+        let process_group = unsafe { libc::getpgid(pid) };
+        (process_group > 0).then_some(process_group)
+    })
+}
+
+fn renderer_stream_indices_with(
+    streams: &[PulsePlaybackStream],
+    ownership: &RendererProcessOwnershipSnapshot,
+    mut process_group_for: impl FnMut(i32) -> Option<i32>,
+) -> Vec<u32> {
+    streams
+        .iter()
+        .filter(|stream| {
+            stream.process_id > 0
+                && process_group_for(stream.process_id)
+                    .is_some_and(|group| ownership.owns_process_group(group))
+        })
+        .map(|stream| stream.index)
+        .collect()
+}
+
 pub fn has_external_playback(
     streams: &[PulsePlaybackStream],
     ownership: &RendererProcessOwnershipSnapshot,
@@ -78,6 +105,25 @@ mod tests {
         assert!(has_external_playback_with(&[stream(0)], &ownership, |_| {
             None
         }));
+    }
+
+    #[test]
+    fn renderer_streams_are_selected_by_process_group() {
+        let ownership = RendererProcessOwnershipSnapshot::from_process_groups([42]);
+        let streams = [stream(7), stream(8), stream(0)];
+        let owned = renderer_stream_indices_with(&streams, &ownership, |pid| match pid {
+            7 => Some(42),
+            _ => Some(77),
+        });
+        assert_eq!(owned, vec![7]);
+    }
+
+    #[test]
+    fn streams_without_a_known_process_are_never_routed() {
+        let ownership = RendererProcessOwnershipSnapshot::from_process_groups([42]);
+        let streams = [stream(0), stream(9)];
+        let owned = renderer_stream_indices_with(&streams, &ownership, |_| None);
+        assert!(owned.is_empty());
     }
 
     #[test]
