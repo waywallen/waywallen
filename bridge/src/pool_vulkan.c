@@ -332,8 +332,8 @@ static int alloc_slot(ww_pool_t* pool, uint32_t slot_index, ww_pool_slot_layout_
      * regardless of what the directive says, since GPU_LINEAR is the
      * Vulkan analogue of `gbm_bo_create(USE_LINEAR)`. For OPTIMIZED
      * paths we use whatever modifier the daemon picked. */
-    bool     linear_path  = (d->path == WAYWALLEN_BUFFER_PATH_COMPAT_LINEAR) ||
-                            (d->memory_source == WAYWALLEN_BUFFER_MEMORY_SOURCE_GPU_LINEAR);
+    bool linear_path = (d->path == WAYWALLEN_BUFFER_PATH_COMPAT_LINEAR) ||
+                       (d->memory_source == WAYWALLEN_BUFFER_MEMORY_SOURCE_GPU_LINEAR);
     if (! st->have_modifier_ext) linear_path = true;
     uint64_t modifiers[1] = { linear_path ? DRM_FORMAT_MOD_LINEAR : d->format.modifier };
 
@@ -390,8 +390,8 @@ static int alloc_slot(ww_pool_t* pool, uint32_t slot_index, ww_pool_slot_layout_
     img_ci.mipLevels         = 1;
     img_ci.arrayLayers       = 1;
     img_ci.samples           = VK_SAMPLE_COUNT_1_BIT;
-    img_ci.tiling            = st->have_modifier_ext ? VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT
-                                                     : VK_IMAGE_TILING_LINEAR;
+    img_ci.tiling =
+        st->have_modifier_ext ? VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT : VK_IMAGE_TILING_LINEAR;
     /* Producer and consumer must use the same modifier usage contract;
      * mismatches can select incompatible compressed sub-layouts. */
     img_ci.usage         = st->image_usage;
