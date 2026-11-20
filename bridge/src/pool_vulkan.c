@@ -70,6 +70,10 @@ typedef struct vk_state {
      * Sole input to the advertise-time modifier filter. */
     VkFormatFeatureFlags format_features;
 
+    /* False on GPUs without VK_EXT_image_drm_format_modifier (e.g. RADV
+     * GFX8/Tonga): slots are plain VK_IMAGE_TILING_LINEAR dma-bufs. */
+    bool have_modifier_ext;
+
     /* Per-slot resources. */
     struct {
         VkImage        image;
@@ -103,10 +107,10 @@ static int load_dispatch(vk_state_t* st, PFN_vkGetInstanceProcAddr getipa) {
     if (! st->vkCreateImage || ! st->vkDestroyImage || ! st->vkGetImageMemoryRequirements2 ||
         ! st->vkAllocateMemory || ! st->vkFreeMemory || ! st->vkBindImageMemory ||
         ! st->vkGetImageSubresourceLayout || ! st->vkGetMemoryFdKHR ||
-        ! st->vkGetImageDrmFormatModifierPropertiesEXT ||
         ! st->vkGetPhysicalDeviceFormatProperties2 || ! st->vkGetPhysicalDeviceMemoryProperties) {
         return -ENOSYS;
     }
+    st->have_modifier_ext = st->vkGetImageDrmFormatModifierPropertiesEXT != NULL;
     return 0;
 }
 
@@ -156,6 +160,32 @@ static int probe_caps(ww_pool_t* pool, uint32_t width, uint32_t height) {
     for (size_t fi = 0; fi < sizeof(s_vk_fourcc_table) / sizeof(s_vk_fourcc_table[0]); ++fi) {
         uint32_t fourcc    = s_vk_fourcc_table[fi].fourcc;
         VkFormat vk_format = s_vk_fourcc_table[fi].vk_format;
+
+        if (! st->have_modifier_ext) {
+            /* No modifier extension: advertise (fourcc, LINEAR) when the
+             * format supports the required features with linear tiling. */
+            VkFormatProperties2 lp = { 0 };
+            lp.sType               = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2;
+            st->vkGetPhysicalDeviceFormatProperties2(st->phys, vk_format, &lp);
+            if ((lp.formatProperties.linearTilingFeatures & want_features) != want_features)
+                continue;
+            if (entries_count == entries_cap) {
+                size_t             new_cap = entries_cap ? entries_cap * 2 : 16;
+                ww_format_entry_t* grow =
+                    (ww_format_entry_t*)realloc(entries, new_cap * sizeof(*grow));
+                if (! grow) {
+                    free(entries);
+                    return -ENOMEM;
+                }
+                entries     = grow;
+                entries_cap = new_cap;
+            }
+            entries[entries_count].fourcc      = fourcc;
+            entries[entries_count].modifier    = DRM_FORMAT_MOD_LINEAR;
+            entries[entries_count].plane_count = 1;
+            ++entries_count;
+            continue;
+        }
 
         /* Two-call enumeration of modifier list for this fourcc. */
         VkDrmFormatModifierPropertiesListEXT mod_list = { 0 };
@@ -304,6 +334,7 @@ static int alloc_slot(ww_pool_t* pool, uint32_t slot_index, ww_pool_slot_layout_
      * paths we use whatever modifier the daemon picked. */
     bool     linear_path  = (d->path == WAYWALLEN_BUFFER_PATH_COMPAT_LINEAR) ||
                             (d->memory_source == WAYWALLEN_BUFFER_MEMORY_SOURCE_GPU_LINEAR);
+    if (! st->have_modifier_ext) linear_path = true;
     uint64_t modifiers[1] = { linear_path ? DRM_FORMAT_MOD_LINEAR : d->format.modifier };
 
     VkImageDrmFormatModifierListCreateInfoEXT mod_list = { 0 };
@@ -341,6 +372,8 @@ static int alloc_slot(ww_pool_t* pool, uint32_t slot_index, ww_pool_slot_layout_
         modifier_create_info                          = &explicit_modifier;
     }
 
+    if (! st->have_modifier_ext) modifier_create_info = NULL;
+
     VkExternalMemoryImageCreateInfo ext_img = { 0 };
     ext_img.sType                           = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
     ext_img.pNext                           = modifier_create_info;
@@ -357,7 +390,8 @@ static int alloc_slot(ww_pool_t* pool, uint32_t slot_index, ww_pool_slot_layout_
     img_ci.mipLevels         = 1;
     img_ci.arrayLayers       = 1;
     img_ci.samples           = VK_SAMPLE_COUNT_1_BIT;
-    img_ci.tiling            = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT;
+    img_ci.tiling            = st->have_modifier_ext ? VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT
+                                                     : VK_IMAGE_TILING_LINEAR;
     /* Producer and consumer must use the same modifier usage contract;
      * mismatches can select incompatible compressed sub-layouts. */
     img_ci.usage         = st->image_usage;
@@ -461,7 +495,11 @@ static int alloc_slot(ww_pool_t* pool, uint32_t slot_index, ww_pool_slot_layout_
      * always 1, AMD DCC w/o RETILE = 2, DCC w/ RETILE = 3, etc. */
     VkImageDrmFormatModifierPropertiesEXT mod_props = { 0 };
     mod_props.sType = VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_PROPERTIES_EXT;
-    st->vkGetImageDrmFormatModifierPropertiesEXT(st->device, image, &mod_props);
+    if (st->have_modifier_ext) {
+        st->vkGetImageDrmFormatModifierPropertiesEXT(st->device, image, &mod_props);
+    } else {
+        mod_props.drmFormatModifier = DRM_FORMAT_MOD_LINEAR;
+    }
 
     uint32_t plane_count = linear_path ? 1u : d->format.plane_count;
     if (plane_count == 0) plane_count = 1;
@@ -489,7 +527,7 @@ static int alloc_slot(ww_pool_t* pool, uint32_t slot_index, ww_pool_slot_layout_
     uint64_t plane_sizes[WW_POOL_MAX_PLANES]   = { 0 };
     for (uint32_t p = 0; p < plane_count; ++p) {
         VkImageSubresource s   = { 0 };
-        s.aspectMask           = kAspects[p];
+        s.aspectMask           = st->have_modifier_ext ? kAspects[p] : VK_IMAGE_ASPECT_COLOR_BIT;
         VkSubresourceLayout pl = { 0 };
         st->vkGetImageSubresourceLayout(st->device, image, &s, &pl);
         plane_strides[p] = (uint32_t)pl.rowPitch;
