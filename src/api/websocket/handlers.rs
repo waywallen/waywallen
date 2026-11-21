@@ -1713,7 +1713,7 @@ pub(super) async fn dispatch_inner(
                     source: application::ApplySource::UserWallpaper,
                     targets: (!targets.is_empty()).then_some(targets),
                     renderer_name: (!r.renderer_name.is_empty()).then_some(r.renderer_name),
-                    first_frame_timeout: Some(application::APPLY_FIRST_FRAME_TIMEOUT),
+                    first_frame_timeout: Some(application::apply_first_frame_timeout()),
                     require_display: true,
                     sharing: application::RendererSharingPolicy::UseSettings,
                 },
