@@ -23,6 +23,9 @@ constexpr const char* kQuitOnDaemonShutdownKey = "quitOnDaemonShutdown";
 constexpr const char* kControlRevision = "control.v1";
 
 DaemonDBusClient* g_instance { nullptr };
+/// Process-wide: an update restart must keep every UI client alive while the
+/// daemon shuts down, even if more than one client object exists.
+bool g_shutdown_quit_hold { false };
 
 bool is_unknown_property_error(const QString& name) {
     // Different DBus stacks report the missing-property condition with
@@ -345,7 +348,7 @@ void DaemonDBusClient::on_ready() {
 void DaemonDBusClient::on_shutting_down() {
     qDebug("DaemonDBusClient: ShuttingDown signal received");
     set_daemon_shutdown_expected(true);
-    if (m_quit_on_daemon_shutdown) {
+    if (m_quit_on_daemon_shutdown && ! g_shutdown_quit_hold) {
         QCoreApplication::quit();
         return;
     }
@@ -376,6 +379,8 @@ void DaemonDBusClient::setQuitOnDaemonShutdown(bool enabled) {
     QSettings().setValue(QString::fromLatin1(kQuitOnDaemonShutdownKey), enabled);
     Q_EMIT quitOnDaemonShutdownChanged();
 }
+
+void DaemonDBusClient::setShutdownQuitHold(bool hold) { g_shutdown_quit_hold = hold; }
 
 void DaemonDBusClient::set_ws_port(quint16 port) {
     if (m_ws_port == port) return;
