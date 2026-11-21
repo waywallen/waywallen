@@ -166,6 +166,9 @@ using proto::RemoteCapabilityGadget::RemoteCapability;
 using proto::RemoteDownloadStateGadget::RemoteDownloadState;
 using proto::SubscriptionStateGadget::SubscriptionState;
 
+using proto::AudioOutput;
+using proto::AudioOutputListRequest;
+using proto::AudioOutputListResponse;
 using proto::GpuInfo;
 using proto::GpuListRequest;
 using proto::GpuListResponse;

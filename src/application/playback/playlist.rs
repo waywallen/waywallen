@@ -321,7 +321,7 @@ pub async fn attach(
             target,
             playlist_id,
             resume_by_display,
-            crate::application::APPLY_FIRST_FRAME_TIMEOUT,
+            crate::application::apply_first_frame_timeout(),
             apply_port(app, ApplySource::UserPlaylistActivation),
         )
         .await?;

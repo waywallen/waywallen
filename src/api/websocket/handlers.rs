@@ -887,6 +887,33 @@ pub(super) async fn dispatch_inner(
             Res::GpuList(pb::GpuListResponse { gpus })
         }
 
+        Req::AudioOutputList(_) => {
+            let listed = tokio::task::spawn_blocking(crate::system::audio::list_sinks)
+                .await
+                .map_err(|e| Error::Internal(anyhow::anyhow!("audio output list join: {e}")))?;
+            // No reachable sound server is not a request failure: the UI
+            // still offers the default device, so report it in the payload.
+            Res::AudioOutputList(match listed {
+                Ok(sinks) => pb::AudioOutputListResponse {
+                    outputs: sinks
+                        .into_iter()
+                        .map(|sink| pb::AudioOutput {
+                            name: sink.name,
+                            description: sink.description,
+                            is_default: sink.is_default,
+                        })
+                        .collect(),
+                    available: true,
+                    error: String::new(),
+                },
+                Err(error) => pb::AudioOutputListResponse {
+                    outputs: Vec::new(),
+                    available: false,
+                    error: error.to_string(),
+                },
+            })
+        }
+
         Req::PluginInstall(r) => {
             let result =
                 crate::application::install_plugin_archive(state, r.zip_path.clone()).await?;
@@ -1686,7 +1713,7 @@ pub(super) async fn dispatch_inner(
                     source: application::ApplySource::UserWallpaper,
                     targets: (!targets.is_empty()).then_some(targets),
                     renderer_name: (!r.renderer_name.is_empty()).then_some(r.renderer_name),
-                    first_frame_timeout: Some(application::APPLY_FIRST_FRAME_TIMEOUT),
+                    first_frame_timeout: Some(application::apply_first_frame_timeout()),
                     require_display: true,
                     sharing: application::RendererSharingPolicy::UseSettings,
                 },
@@ -2039,6 +2066,15 @@ pub(super) async fn dispatch_inner(
                     .as_ref()
                     .and_then(|g| g.wallpaper_library_visibility.as_ref()),
             )?;
+            if let Some(output) = r
+                .global
+                .as_ref()
+                .and_then(|g| g.renderer.as_ref())
+                .and_then(|renderer| renderer.audio_output.as_deref())
+            {
+                crate::settings::validate_audio_output(output)
+                    .map_err(Error::SettingsValidationFailed)?;
+            }
             let previous_settings = state.settings.snapshot();
             let previous_filter = previous_settings.global.wallpaper_filter.clone();
             let prev_layout = previous_settings.global.layout.clone();
@@ -2123,6 +2159,9 @@ pub(super) async fn dispatch_inner(
                         if let Some(volume) = renderer.volume {
                             s.global.renderer.volume =
                                 volume.min(crate::settings::MAX_RENDERER_VOLUME);
+                        }
+                        if let Some(output) = renderer.audio_output.as_deref() {
+                            s.global.renderer.audio_output = output.trim().to_string();
                         }
                     }
                     s.global.hide_tray_icon = g.hide_tray_icon;

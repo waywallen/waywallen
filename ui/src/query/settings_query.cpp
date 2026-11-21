@@ -170,6 +170,8 @@ auto global_to_map(const proto::GlobalSettings& g) -> QVariantMap {
         ! has_renderer || ! g.renderer().hasEnableAudio() || g.renderer().enableAudio();
     m[u"renderer.volume"_s] =
         has_renderer && g.renderer().hasVolume() ? g.renderer().volume() : 100;
+    m[u"renderer.audio_output"_s] =
+        has_renderer && g.renderer().hasAudioOutput() ? g.renderer().audioOutput() : QString {};
     m[u"hideTrayIcon"_s]        = g.hideTrayIcon();
     m[u"debugLoggingEnabled"_s] = g.debugLoggingEnabled();
     QStringList wallpaper_skip_types;
@@ -268,13 +270,17 @@ auto map_to_global(const QVariantMap& m) -> proto::GlobalSettings {
         g.setSystemWallpaperEnabled(m.value(u"systemWallpaperEnabled"_s).toBool());
     }
     g.setSystemWallpaperAuto(m.value(u"systemWallpaperAuto"_s).toBool());
-    if (m.contains(u"renderer.enable_audio"_s) || m.contains(u"renderer.volume"_s)) {
+    if (m.contains(u"renderer.enable_audio"_s) || m.contains(u"renderer.volume"_s)
+        || m.contains(u"renderer.audio_output"_s)) {
         proto::GlobalRendererSettings renderer;
         if (m.contains(u"renderer.enable_audio"_s)) {
             renderer.setEnableAudio(m.value(u"renderer.enable_audio"_s).toBool());
         }
         if (m.contains(u"renderer.volume"_s)) {
             renderer.setVolume(m.value(u"renderer.volume"_s).toUInt());
+        }
+        if (m.contains(u"renderer.audio_output"_s)) {
+            renderer.setAudioOutput(m.value(u"renderer.audio_output"_s).toString());
         }
         g.setRenderer(std::move(renderer));
     }

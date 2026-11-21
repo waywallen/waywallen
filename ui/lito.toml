@@ -56,6 +56,8 @@ sources = [
   "src/proto.cpp",
   "src/proto.cppm",
   "src/qml_register.cpp",
+  "src/query/audio_output_query.cpp",
+  "src/query/audio_output_query.cppm",
   "src/query/autostart_query.cpp",
   "src/query/autostart_query.cppm",
   "src/query/browser_login_query.cpp",

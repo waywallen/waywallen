@@ -169,7 +169,7 @@ fn spawn_wallpaper_recall(state: Arc<DaemonContext>) {
                                             crate::application::restore_wallpaper_canvas(
                                                 &state2,
                                                 &wp_id,
-                                                Some(crate::application::APPLY_FIRST_FRAME_TIMEOUT),
+                                                Some(crate::application::apply_first_frame_timeout()),
                                                 canvas_id,
                                             ).await
                                         } else {
@@ -177,7 +177,7 @@ fn spawn_wallpaper_recall(state: Arc<DaemonContext>) {
                                                 &state2,
                                                 &wp_id,
                                                 &ids,
-                                                crate::application::APPLY_FIRST_FRAME_TIMEOUT,
+                                                crate::application::apply_first_frame_timeout(),
                                                 crate::application::ApplySource::DisplayRecall,
                                             ).await
                                         };

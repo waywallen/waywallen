@@ -1,4 +1,4 @@
-use std::ffi::{c_char, c_float, c_int, c_void, CStr};
+use std::ffi::{c_char, c_float, c_int, c_void, CStr, CString};
 use std::ptr::NonNull;
 
 use super::window::{AudioPcmWindow, PcmWindowAssembler};
@@ -8,6 +8,7 @@ const ERROR_CAPACITY: usize = 512;
 #[link(name = "waywallen_pulse_adapter", kind = "static")]
 unsafe extern "C" {
     fn ww_pulse_capture_open(
+        sink_name: *const c_char,
         error_code: *mut c_int,
         error: *mut c_char,
         error_capacity: usize,
@@ -40,6 +41,48 @@ unsafe extern "C" {
         error: *mut c_char,
         error_capacity: usize,
     ) -> c_int;
+    fn ww_pulse_list_sinks(
+        sinks: *mut RawPulseSink,
+        capacity: usize,
+        total: *mut usize,
+        error_code: *mut c_int,
+        error: *mut c_char,
+        error_capacity: usize,
+    ) -> c_int;
+    fn ww_pulse_list_playback_streams(
+        streams: *mut PulsePlaybackStream,
+        capacity: usize,
+        total: *mut usize,
+        error_code: *mut c_int,
+        error: *mut c_char,
+        error_capacity: usize,
+    ) -> c_int;
+    fn ww_pulse_move_playback_streams(
+        sink_name: *const c_char,
+        indices: *const u32,
+        count: usize,
+        moved: *mut usize,
+        error_code: *mut c_int,
+        error: *mut c_char,
+        error_capacity: usize,
+    ) -> c_int;
+}
+
+const SINK_NAME_CAPACITY: usize = 256;
+
+#[repr(C)]
+struct RawPulseSink {
+    name: [c_char; SINK_NAME_CAPACITY],
+    description: [c_char; SINK_NAME_CAPACITY],
+    is_default: c_int,
+}
+
+/// One output device (sink) offered by the sound server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PulseSink {
+    pub name: String,
+    pub description: String,
+    pub is_default: bool,
 }
 
 #[repr(C)]
@@ -92,10 +135,26 @@ pub struct PulseCapture {
 unsafe impl Send for PulseCapture {}
 
 impl PulseCapture {
-    pub fn open() -> Result<Self, CaptureError> {
+    /// Records the monitor of `sink`, or of the default sink when `None`.
+    /// A sink that no longer exists falls back to the default one.
+    pub fn open(sink: Option<&str>) -> Result<Self, CaptureError> {
+        let sink = sink
+            .map(CString::new)
+            .transpose()
+            .map_err(|_| CaptureError {
+                kind: CaptureErrorKind::Unknown,
+                message: "audio output name contains a NUL byte".to_string(),
+            })?;
         let mut code = 0;
         let mut error = [0 as c_char; ERROR_CAPACITY];
-        let handle = unsafe { ww_pulse_capture_open(&mut code, error.as_mut_ptr(), error.len()) };
+        let handle = unsafe {
+            ww_pulse_capture_open(
+                sink.as_ref().map_or(std::ptr::null(), |name| name.as_ptr()),
+                &mut code,
+                error.as_mut_ptr(),
+                error.len(),
+            )
+        };
         let Some(handle) = NonNull::new(handle) else {
             return Err(CaptureError {
                 kind: error_kind(code),
@@ -230,6 +289,121 @@ impl Drop for PulsePlaybackObserver {
     fn drop(&mut self) {
         unsafe { ww_pulse_playback_observer_close(self.handle.as_ptr()) };
     }
+}
+
+/// Lists the output devices known to the sound server.
+///
+/// Opens a short-lived connection, so call it from a blocking context.
+pub fn list_sinks() -> Result<Vec<PulseSink>, CaptureError> {
+    let mut capacity = 16;
+    loop {
+        let mut raw: Vec<RawPulseSink> = Vec::with_capacity(capacity);
+        let mut total = 0usize;
+        let mut code = 0;
+        let mut error = [0 as c_char; ERROR_CAPACITY];
+        let rc = unsafe {
+            ww_pulse_list_sinks(
+                raw.as_mut_ptr(),
+                capacity,
+                &mut total,
+                &mut code,
+                error.as_mut_ptr(),
+                error.len(),
+            )
+        };
+        if rc != 0 {
+            return Err(CaptureError {
+                kind: error_kind(code),
+                message: c_message(&error),
+            });
+        }
+        if total > capacity {
+            capacity = total;
+            continue;
+        }
+        unsafe { raw.set_len(total) };
+        return Ok(raw
+            .iter()
+            .map(|sink| PulseSink {
+                name: c_message(&sink.name),
+                description: c_message(&sink.description),
+                is_default: sink.is_default != 0,
+            })
+            .collect());
+    }
+}
+
+/// Lists every playback stream on the sound server.
+///
+/// Opens a short-lived connection, so call it from a blocking context.
+pub fn list_playback_streams() -> Result<Vec<PulsePlaybackStream>, CaptureError> {
+    let mut capacity = 32;
+    loop {
+        let mut streams: Vec<PulsePlaybackStream> = Vec::with_capacity(capacity);
+        let mut total = 0usize;
+        let mut code = 0;
+        let mut error = [0 as c_char; ERROR_CAPACITY];
+        let rc = unsafe {
+            ww_pulse_list_playback_streams(
+                streams.as_mut_ptr(),
+                capacity,
+                &mut total,
+                &mut code,
+                error.as_mut_ptr(),
+                error.len(),
+            )
+        };
+        if rc != 0 {
+            return Err(CaptureError {
+                kind: error_kind(code),
+                message: c_message(&error),
+            });
+        }
+        if total > capacity {
+            capacity = total;
+            continue;
+        }
+        unsafe { streams.set_len(total) };
+        return Ok(streams);
+    }
+}
+
+/// Moves playback streams (by index) to `sink`, or to the current default
+/// sink when `None`. Returns how many streams the server moved.
+///
+/// Opens a short-lived connection, so call it from a blocking context.
+pub fn move_playback_streams(sink: Option<&str>, indices: &[u32]) -> Result<usize, CaptureError> {
+    if indices.is_empty() {
+        return Ok(0);
+    }
+    let sink = sink
+        .map(CString::new)
+        .transpose()
+        .map_err(|_| CaptureError {
+            kind: CaptureErrorKind::Unknown,
+            message: "audio output name contains a NUL byte".to_string(),
+        })?;
+    let mut moved = 0usize;
+    let mut code = 0;
+    let mut error = [0 as c_char; ERROR_CAPACITY];
+    let rc = unsafe {
+        ww_pulse_move_playback_streams(
+            sink.as_ref().map_or(std::ptr::null(), |name| name.as_ptr()),
+            indices.as_ptr(),
+            indices.len(),
+            &mut moved,
+            &mut code,
+            error.as_mut_ptr(),
+            error.len(),
+        )
+    };
+    if rc != 0 {
+        return Err(CaptureError {
+            kind: error_kind(code),
+            message: c_message(&error),
+        });
+    }
+    Ok(moved)
 }
 
 fn error_kind(code: i32) -> CaptureErrorKind {

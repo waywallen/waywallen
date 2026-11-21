@@ -1074,6 +1074,7 @@ pub(super) fn global_to_pb(g: &crate::settings::GlobalSettings) -> pb::GlobalSet
         renderer: Some(pb::GlobalRendererSettings {
             enable_audio: Some(g.renderer.enable_audio),
             volume: Some(g.renderer.effective_volume()),
+            audio_output: Some(g.renderer.audio_output.clone()),
         }),
         hide_tray_icon: g.hide_tray_icon,
         debug_logging_enabled: g.debug_logging_enabled,

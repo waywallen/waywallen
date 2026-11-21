@@ -474,6 +474,9 @@ impl TransitionConfig {
 pub struct GlobalRendererSettings {
     pub enable_audio: bool,
     pub volume: u32,
+    /// PulseAudio/PipeWire output device (sink name) renderers play through
+    /// and audio capture listens to. Empty means the system default device.
+    pub audio_output: String,
 }
 
 impl Default for GlobalRendererSettings {
@@ -481,6 +484,7 @@ impl Default for GlobalRendererSettings {
         Self {
             enable_audio: true,
             volume: MAX_RENDERER_VOLUME,
+            audio_output: String::new(),
         }
     }
 }
@@ -489,6 +493,31 @@ impl GlobalRendererSettings {
     pub fn effective_volume(&self) -> u32 {
         self.volume.min(MAX_RENDERER_VOLUME)
     }
+
+    /// The chosen output device, or `None` to follow the system default.
+    pub fn audio_output_name(&self) -> Option<&str> {
+        let name = self.audio_output.trim();
+        (!name.is_empty()).then_some(name)
+    }
+}
+
+/// Longest accepted output device name. PulseAudio limits object names to
+/// 255 bytes.
+pub const MAX_AUDIO_OUTPUT_LEN: usize = 255;
+
+/// Checks a sink name coming from a client. Empty is valid and means the
+/// system default device.
+pub fn validate_audio_output(name: &str) -> Result<(), String> {
+    let name = name.trim();
+    if name.len() > MAX_AUDIO_OUTPUT_LEN {
+        return Err(format!(
+            "audio_output is longer than {MAX_AUDIO_OUTPUT_LEN} bytes"
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err("audio_output contains a control character".to_string());
+    }
+    Ok(())
 }
 
 /// Daemon-wide settings shared by control and rendering flows.

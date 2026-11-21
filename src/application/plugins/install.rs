@@ -44,7 +44,7 @@ async fn restart_affected_renderers(
         .restart_renderers_orderly(
             &renderer_ids,
             Duration::from_secs(1),
-            crate::application::APPLY_FIRST_FRAME_TIMEOUT,
+            crate::application::apply_first_frame_timeout(),
         )
         .await
 }

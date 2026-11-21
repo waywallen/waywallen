@@ -12,7 +12,31 @@ pub use catalog::*;
 pub use playback::*;
 pub use plugins::*;
 
-pub const APPLY_FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(15);
+/// Default time the daemon waits for a renderer to produce its first frame.
+pub const DEFAULT_APPLY_FIRST_FRAME_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Time the daemon waits for a renderer to produce its first frame.
+///
+/// Heavy scenes can take longer than the default to load on older hardware.
+/// Set `WAYWALLEN_FIRST_FRAME_TIMEOUT_SECS` to override it (whole seconds,
+/// greater than zero). Invalid values fall back to the default.
+pub fn apply_first_frame_timeout() -> Duration {
+    static TIMEOUT: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *TIMEOUT.get_or_init(
+        || match std::env::var("WAYWALLEN_FIRST_FRAME_TIMEOUT_SECS") {
+            Ok(v) => match v.trim().parse::<u64>() {
+                Ok(secs) if secs > 0 => Duration::from_secs(secs),
+                _ => {
+                    tracing::warn!(
+                        "ignoring invalid WAYWALLEN_FIRST_FRAME_TIMEOUT_SECS={v:?}; using default"
+                    );
+                    DEFAULT_APPLY_FIRST_FRAME_TIMEOUT
+                }
+            },
+            Err(_) => DEFAULT_APPLY_FIRST_FRAME_TIMEOUT,
+        },
+    )
+}
 const PLUGIN_UPDATE_NOTIFICATION_ID: &str = "org.waywallen.waywallen.plugin-updates";
 
 pub struct ApplyResult {
