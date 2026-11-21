@@ -301,7 +301,9 @@ MD.ApplicationWindow {
 
                             MD.ToolTip.visible: m_logo_area.containsMouse && m_logo.updateAvailable
                             MD.ToolTip.delay: 300
-                            MD.ToolTip.text: qsTr("Version %1 is available").arg(W.UpdateChecker.latestVersion)
+                            MD.ToolTip.text: W.UpdateChecker.updateReady
+                            ? qsTr("Update ready — restart to finish")
+                            : qsTr("Version %1 is available").arg(W.UpdateChecker.latestVersion)
                         }
 
                         MD.Label {

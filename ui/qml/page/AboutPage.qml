@@ -83,8 +83,50 @@ MD.Page {
         MD.Button {
             Layout.alignment: Qt.AlignHCenter
             visible: W.UpdateChecker.updateAvailable
-            text: qsTr("Version %1 is available").arg(W.UpdateChecker.latestVersion)
+            enabled: !W.UpdateChecker.downloading && !W.UpdateChecker.restarting
+            text: {
+                if (W.UpdateChecker.restarting)
+                    return qsTr("Restarting…");
+                if (W.UpdateChecker.downloading) {
+                    if (W.UpdateChecker.downloadProgress > 0)
+                        return qsTr("Downloading update… %1%").arg(Math.round(W.UpdateChecker.downloadProgress * 100));
+                    return qsTr("Downloading update…");
+                }
+                if (W.UpdateChecker.updateReady)
+                    return qsTr("Restart to update to %1").arg(W.UpdateChecker.latestVersion);
+                if (W.UpdateChecker.selfUpdateAvailable)
+                    return W.UpdateChecker.updateError !== ""
+                        ? qsTr("Retry download")
+                        : qsTr("Download update");
+                return qsTr("Version %1 is available").arg(W.UpdateChecker.latestVersion);
+            }
             mdState.type: MD.Enum.BtFilled
+            onClicked: {
+                if (W.UpdateChecker.updateReady)
+                    W.UpdateChecker.restartToUpdate();
+                else if (W.UpdateChecker.selfUpdateAvailable)
+                    W.UpdateChecker.download();
+                else
+                    MD.Util.openUrlExternally(W.UpdateChecker.releaseUrl);
+            }
+        }
+
+        MD.Text {
+            Layout.alignment: Qt.AlignHCenter
+            Layout.fillWidth: true
+            visible: W.UpdateChecker.updateAvailable && W.UpdateChecker.updateError !== ""
+            text: W.UpdateChecker.updateError
+            typescale: MD.Token.typescale.body_small
+            color: MD.Token.color.error
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+        }
+
+        MD.Button {
+            Layout.alignment: Qt.AlignHCenter
+            visible: W.UpdateChecker.updateAvailable
+            text: qsTr("Release notes")
+            mdState.type: MD.Enum.BtText
             onClicked: MD.Util.openUrlExternally(W.UpdateChecker.releaseUrl)
         }
 
