@@ -964,6 +964,7 @@ impl RendererManager {
                 plugin_version: "0.0.0".to_string(),
                 plugin_system: false,
                 bin: PathBuf::from(bin),
+                args: Vec::new(),
                 types: vec!["scene".to_string()],
                 type_labels: Default::default(),
                 priority: 100,
@@ -1071,6 +1072,7 @@ impl RendererManager {
 
         let mut cmd = Command::new(&renderer_def.bin);
         cmd.process_group(0);
+        cmd.args(&renderer_def.args);
         cmd.arg("--ipc").arg(&sock_path);
         cmd.env("WW_LOG", log_level_name(renderer_log.level));
         // Play through the output chosen in the settings. PulseAudio and
@@ -2783,6 +2785,7 @@ mod init_handshake_tests {
             plugin_version: "0.0.0".to_string(),
             plugin_system: false,
             bin: PathBuf::from("/dev/null"),
+            args: Vec::new(),
             types: vec!["scene".to_string()],
             type_labels: Default::default(),
             priority: 100,
@@ -2810,6 +2813,7 @@ mod init_handshake_tests {
             plugin_version: "0.0.0".to_string(),
             plugin_system: false,
             bin: PathBuf::from("/dev/null"),
+            args: Vec::new(),
             types: vec!["video".into()],
             type_labels: Default::default(),
             priority: 100,
@@ -2893,7 +2897,11 @@ mod init_handshake_tests {
     async fn spawn_reports_early_renderer_exit_without_waiting_for_connect_timeout() {
         let directory = tempfile::tempdir().expect("create renderer directory");
         let renderer = directory.path().join("renderer-exits-127");
-        std::fs::write(&renderer, "#!/bin/sh\nexit 127\n").expect("write renderer script");
+        std::fs::write(
+            &renderer,
+            "#!/bin/sh\n[ \"$1\" = '--renderer' ] && [ \"$2\" = '--ipc' ] || exit 126\nexit 127\n",
+        )
+        .expect("write renderer script");
         let mut permissions = std::fs::metadata(&renderer)
             .expect("read renderer metadata")
             .permissions();
@@ -2902,6 +2910,7 @@ mod init_handshake_tests {
 
         let mut def = def_legacy("early-exit-renderer");
         def.bin = renderer;
+        def.args = vec!["--renderer".into()];
         let mut registry = RendererRegistry::new();
         registry.register(def);
         let manager = RendererManager::new(registry);
@@ -3066,6 +3075,7 @@ mod reuse_tests {
             plugin_version: "0.0.0".to_string(),
             plugin_system: false,
             bin: PathBuf::from("/dev/null"),
+            args: Vec::new(),
             types: vec!["video".into()],
             type_labels: Default::default(),
             priority: 100,

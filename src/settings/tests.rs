@@ -1001,6 +1001,7 @@ fn registry_with_video() -> RendererRegistry {
         plugin_version: "0.0.0".to_string(),
         plugin_system: false,
         bin: PathBuf::from("/dev/null"),
+        args: Vec::new(),
         types: vec!["video".into()],
         type_labels: Default::default(),
         priority: 100,

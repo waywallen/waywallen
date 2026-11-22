@@ -263,6 +263,9 @@ pub struct RendererDef {
     #[serde(skip)]
     pub plugin_system: bool,
     pub bin: PathBuf,
+    /// Fixed arguments placed before the daemon's IPC and resource arguments.
+    #[serde(default)]
+    pub args: Vec<String>,
     pub types: Vec<WallpaperType>,
     /// Display labels for the entries of `types`, keyed by the type.
     /// Presentation only — the key stays what the UI filters and the
@@ -1258,6 +1261,7 @@ types = ["image"]
             plugin_version: version.to_string(),
             plugin_system: system,
             bin: PathBuf::from("/dev/null"),
+            args: Vec::new(),
             types: vec!["image".to_string()],
             type_labels: Default::default(),
             priority: 100,
@@ -1854,6 +1858,7 @@ directory = "../i18n"
 
             [renderers.waywallen-mpv]
             bin = "bin/waywallen-mpv-renderer"
+            args = ["--renderer"]
             types = ["video"]
             priority = 100
             spawn_version = 1
@@ -1867,6 +1872,7 @@ directory = "../i18n"
         assert_eq!(m.plugin.entry.as_ref().unwrap(), &PathBuf::from("mpv.lua"));
         assert_eq!(m.plugin.entry_version, Some(4));
         let r = &m.renderers["waywallen-mpv"];
+        assert_eq!(r.args, ["--renderer"]);
         assert_eq!(r.spawn_version, Some(1));
         assert_eq!(r.extras, vec!["subtitle".to_string()]);
         assert_eq!(r.settings.len(), 2);
