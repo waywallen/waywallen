@@ -2647,6 +2647,20 @@ impl LuaPluginRuntime {
         self.entries.iter().find(|e| e.item_id.to_string() == id)
     }
 
+    async fn wallpaper_libraries(&self, plugin_name: &str) -> Result<Vec<String>> {
+        let Some(db) = &self.db else {
+            return Ok(Vec::new());
+        };
+        let Some(plugin) = repo::find_plugin_by_name(db, plugin_name).await? else {
+            return Ok(Vec::new());
+        };
+        Ok(repo::list_libraries_by_plugin(db, plugin.id)
+            .await?
+            .into_iter()
+            .map(|library| library.path)
+            .collect())
+    }
+
     /// Resolve renderer resources and authored property defaults for `entry`.
     pub async fn call_apply(
         &mut self,
@@ -2664,6 +2678,7 @@ impl LuaPluginRuntime {
             log::warn!("source plugin '{plugin_name}' has no wallpaper.apply capability");
             return Ok(WallpaperApply::default());
         }
+        let libraries = self.wallpaper_libraries(plugin_name).await?;
         let body = async {
             let apply_fn: LuaFunction = self.lua.registry_value(
                 callbacks
@@ -2674,10 +2689,8 @@ impl LuaPluginRuntime {
             let entry_tbl = self
                 .wallpaper_entry_table(entry)
                 .map_err(mlua::Error::external)?;
-            // Build the same ctx scan(ctx) sees; apply runs per item, so
-            // the libraries list is intentionally empty.
             let ctx = self
-                .build_ctx(Some(plugin_name), &[])
+                .build_ctx(Some(plugin_name), &libraries)
                 .map_err(mlua::Error::external)?;
             let result: LuaTable = self
                 .call_plugin_callback_async(plugin_name, &apply_fn, (entry_tbl, ctx))
@@ -2726,7 +2739,8 @@ impl LuaPluginRuntime {
                     Error::Internal(anyhow!("module.wallpaper.properties required"))
                 })?)?;
         let entry_tbl = self.wallpaper_entry_table(entry)?;
-        let ctx = self.build_ctx(Some(plugin_name), &[])?;
+        let libraries = self.wallpaper_libraries(plugin_name).await?;
+        let ctx = self.build_ctx(Some(plugin_name), &libraries)?;
         let result: mlua::Value = self
             .call_plugin_callback_async(plugin_name, &props_fn, (entry_tbl, ctx))
             .await

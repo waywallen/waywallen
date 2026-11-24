@@ -144,6 +144,7 @@ impl Router {
                                     .is_none_or(|name| name == slot.name);
                                 let identity_matches = slot.state.is_running()
                                     && inner.table.get_renderer(renderer_id).is_some()
+                                    && slot.wallpaper_id.as_ref() == Some(&request.wallpaper_id)
                                     && slot.spawn_request.wp_type == request.spawn_request.wp_type
                                     && renderer_name_matches
                                     && slot.spawn_request.extras == request.spawn_request.extras
@@ -408,51 +409,16 @@ impl Router {
         })
     }
 
-    pub async fn reusable_renderer_for_target(
+    pub async fn renderer_ids_by_wallpaper(
         self: &Arc<Self>,
-        request: &crate::wallframe::renderer_manager::SpawnRequest,
-        target_ids: &[DisplayId],
-        duplicate_renderer: bool,
-    ) -> Option<RendererId> {
-        let normalized_defaults = crate::catalog::properties::normalize_renderer_user_properties(
-            request.default_user_properties.clone(),
-        );
-        let inner = self.inner.lock().await;
-        let mut ids = inner
-            .renderer_slots
-            .iter()
-            .filter_map(|(renderer_id, slot)| {
-                let renderer_name_matches = request
-                    .renderer_name
-                    .as_deref()
-                    .is_none_or(|name| name == slot.name);
-                let identity_matches = slot.state.is_running()
-                    && inner.table.get_renderer(renderer_id).is_some()
-                    && slot.spawn_request.wp_type == request.wp_type
-                    && renderer_name_matches
-                    && slot.spawn_request.extras == request.extras
-                    && slot.spawn_request.default_user_properties == normalized_defaults;
-                let target_matches = !duplicate_renderer
-                    || inner
-                        .table
-                        .links_for_renderer(renderer_id)
-                        .iter()
-                        .all(|link| target_ids.contains(&link.display_id));
-                (identity_matches && target_matches).then(|| renderer_id.clone())
-            })
-            .collect::<Vec<_>>();
-        ids.sort();
-        ids.into_iter().next()
-    }
-
-    pub async fn renderer_ids_by_resource(self: &Arc<Self>, resource: &str) -> Vec<RendererId> {
+        wallpaper_id: &str,
+    ) -> Vec<RendererId> {
         let inner = self.inner.lock().await;
         let mut ids = inner
             .renderer_slots
             .iter()
             .filter_map(|(id, slot)| {
-                (slot.spawn_request.extras.get("path").map(String::as_str) == Some(resource))
-                    .then(|| id.clone())
+                (slot.wallpaper_id.as_deref() == Some(wallpaper_id)).then(|| id.clone())
             })
             .collect::<Vec<_>>();
         ids.sort();

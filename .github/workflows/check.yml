@@ -19,7 +19,7 @@ jobs:
           rustup component add rustfmt
 
       - name: Check C and C++ formatting
-        uses: hypengw/lito-action@v0.1.0
+        uses: hypengw/lito-action@v0.1.3
         with:
           command: format-check
 
