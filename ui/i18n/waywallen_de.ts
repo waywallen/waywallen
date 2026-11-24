@@ -20,6 +20,16 @@
         <translation>Daemon-Version %1</translation>
     </message>
     <message>
+        <location filename="../qml/page/AboutPage.qml" line="62"/>
+        <source>Daemon version %1 is older than this window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <location filename="../qml/page/AboutPage.qml" line="64"/>
+        <source>Daemon version %1 is newer than this window</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <location filename="../qml/page/AboutPage.qml" line="58"/>
         <source>Checking for updates…</source>
         <translation>Nach Aktualisierungen wird gesucht …</translation>

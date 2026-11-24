@@ -51,11 +51,18 @@ MD.Page {
 
         MD.Text {
             readonly property string daemonVersion: W.DaemonDBusClient.daemonVersion
+            readonly property int order: W.DaemonDBusClient.daemonVersionOrder
 
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: -12
             visible: daemonVersion.length > 0 && daemonVersion !== W.App.version
-            text: qsTr("Daemon version %1").arg(daemonVersion)
+            text: {
+                if (order < 0)
+                    return qsTr("Daemon version %1 is older than this window").arg(daemonVersion);
+                if (order > 0)
+                    return qsTr("Daemon version %1 is newer than this window").arg(daemonVersion);
+                return qsTr("Daemon version %1").arg(daemonVersion);
+            }
             typescale: MD.Token.typescale.body_medium
             color: MD.Token.color.on_surface_variant
         }

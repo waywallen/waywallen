@@ -204,6 +204,13 @@ quint16 DaemonDBusClient::refreshWsPort() {
     return m_ws_port;
 }
 
+int DaemonDBusClient::daemonVersionOrder() const {
+    const auto daemon = QVersionNumber::fromString(m_daemon_version);
+    const auto self   = QVersionNumber::fromString(QStringLiteral(LITO_PKG_VERSION));
+    if (daemon.isNull() || self.isNull()) return 0;
+    return QVersionNumber::compare(daemon, self);
+}
+
 QStringList DaemonDBusClient::read_capabilities() {
     QDBusMessage reply = call_get(QStringLiteral("Capabilities"));
     if (reply.type() != QDBusMessage::ReplyMessage) {
