@@ -831,6 +831,7 @@ Item {
                 readonly property real minVal: row.value.minVal
                 readonly property real maxVal: row.value.maxVal
                 readonly property real stepVal: row.value.stepVal
+                readonly property int precision: row.value.precision
                 readonly property string valueSuffix: row.value.valueSuffix
                 readonly property string currentValue: row.value.currentValue
                 readonly property bool hasAlpha: row.value.hasAlpha
@@ -961,7 +962,7 @@ Item {
                     Layout.fillWidth: true
                     from: m_prop_delegate.minVal
                     to: m_prop_delegate.maxVal
-                    stepSize: m_prop_delegate.stepVal > 0 ? m_prop_delegate.stepVal : (m_prop_delegate.maxVal > 10 ? 1 : 0)
+                    stepSize: m_prop_delegate.stepVal
                     valueText: displayValue(value)
                     valueMaxText: {
                         const minText = displayValue(from);
@@ -970,7 +971,7 @@ Item {
                     }
                     valueTypescale: MD.Token.typescale.body_small
                     function displayValue(v) {
-                        return Number(v).toFixed(m_prop_delegate.maxVal > 10 ? 0 : 3) + m_prop_delegate.valueSuffix;
+                        return Number(v).toFixed(m_prop_delegate.precision) + m_prop_delegate.valueSuffix;
                     }
                     onValueChangeRequested: value => propertyModel.setValue(m_prop_delegate.key, String(value))
                 }

@@ -8,6 +8,7 @@ module;
 export module waywallen:model.user_property;
 import qextra;
 import rstd.cppstd;
+import :model.user_property_condition;
 
 export namespace waywallen::model
 {
@@ -53,6 +54,7 @@ public:
         IsGroupRole,
         GroupKeyRole,
         ExpandedRole,
+        PrecisionRole,
     };
     Q_ENUM(Roles)
 
@@ -102,27 +104,35 @@ public:
 
 private:
     struct Entry {
-        QString      key;
-        QString      label;
-        QVariant     localized_label;
-        QString      type;
-        QString      section;
-        QString      kind;
-        QString      group_key;
-        bool         supported { false };
-        double       min_val { 0.0 };
-        double       max_val { 1.0 };
-        double       step_val { 0.0 };
-        QString      value_suffix;
-        QString      default_wire;
-        QStringList  option_labels;
-        QVariantList localized_option_labels;
-        QStringList  option_values;
-        double       order { 0.0 };
+        QString               key;
+        QString               label;
+        QVariant              localized_label;
+        QString               type;
+        QString               section;
+        QString               kind;
+        QString               group_key;
+        UserPropertyCondition condition;
+        QJsonValue            default_value;
+        QJsonArray            options;
+        int                   precision { 0 };
+        bool                  supported { false };
+        double                min_val { 0.0 };
+        double                max_val { 1.0 };
+        double                step_val { 0.0 };
+        QString               value_suffix;
+        QString               default_wire;
+        QStringList           option_labels;
+        QVariantList          localized_option_labels;
+        QStringList           option_values;
+        double                order { 0.0 };
     };
 
     void    rebuildEntries_();
     void    rebuildVisibleRows_();
+    auto    visibleRows_() const -> QList<int>;
+    void    updateVisibleRows_();
+    auto    conditionValueFor_(const Entry& entry) const -> QJsonValue;
+    void    resetKind_(const QString& kind);
     void    appendPredefinedEntries_(const QJsonObject& schema);
     QString currentValueFor_(qsizetype entry_index) const;
     void    notifyCurrentChanged_(const QString& key);

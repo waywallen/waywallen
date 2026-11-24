@@ -32,6 +32,7 @@ sources = [
   "src/model/share_store.cppm",
   "src/model/store_item.cpp",
   "src/model/store_item.cppm",
+  "src/model/user_property_condition.cppm",
   "src/model/user_property_model.cpp",
   "src/model/user_property_model.cppm",
   "src/model/wallpaper_select_storage.cpp",
