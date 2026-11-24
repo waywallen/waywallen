@@ -74,8 +74,8 @@ msgid "Cartoon"
 msgstr "卡通"
 
 #: main.lua:37
-msgid "Copy the API key from Wallhaven Account Settings."
-msgstr "从 Wallhaven 账户设置中复制 API 密钥。"
+msgid "Copy the API key from Wallhaven Account Settings: https://wallhaven.cc/settings/account"
+msgstr "从 Wallhaven 账户设置中复制 API 密钥：https://wallhaven.cc/settings/account"
 
 #: wallhaven/api.lua:75
 msgid "Cyberpunk"
