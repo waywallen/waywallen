@@ -28,6 +28,7 @@ export class App : public QObject {
     Q_PROPERTY(LibraryManager* libraryManager READ libraryManager CONSTANT FINAL)
     Q_PROPERTY(GpuManager* gpuManager READ gpuManager CONSTANT FINAL)
     Q_PROPERTY(PresentationManager* presentationManager READ presentationManager CONSTANT FINAL)
+    Q_PROPERTY(QString version READ version CONSTANT FINAL)
     Q_PROPERTY(qint64 networkCacheSize READ networkCacheSize NOTIFY networkCacheSizeChanged FINAL)
     Q_PROPERTY(qint64 networkCacheMaximumSize READ networkCacheMaximumSize NOTIFY
                    networkCacheMaximumSizeChanged FINAL)
@@ -56,6 +57,7 @@ public:
     auto libraryManager() const -> LibraryManager*;
     auto gpuManager() const -> GpuManager*;
     auto presentationManager() const -> PresentationManager*;
+    auto version() const -> QString;
     auto networkCacheSize() const -> qint64;
     auto networkCacheMaximumSize() const -> qint64;
     auto uiLanguage() const -> const QString&;

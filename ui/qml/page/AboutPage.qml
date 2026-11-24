@@ -44,7 +44,7 @@ MD.Page {
 
         MD.Text {
             Layout.alignment: Qt.AlignHCenter
-            text: qsTr("Version %1").arg(Qt.application.version)
+            text: qsTr("Version %1").arg(W.App.version)
             typescale: MD.Token.typescale.body_medium
             color: MD.Token.color.on_surface_variant
         }
@@ -54,7 +54,7 @@ MD.Page {
 
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: -12
-            visible: daemonVersion.length > 0 && daemonVersion !== Qt.application.version
+            visible: daemonVersion.length > 0 && daemonVersion !== W.App.version
             text: qsTr("Daemon version %1").arg(daemonVersion)
             typescale: MD.Token.typescale.body_medium
             color: MD.Token.color.on_surface_variant
