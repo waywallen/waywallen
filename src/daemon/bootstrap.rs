@@ -94,6 +94,10 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
     log::info!("DBus name acquired: {}", system::dbus::BUS_NAME);
 
     let display_sock_path = display::endpoint::default_socket_path();
+    // Held for the whole run: a daemon on another session bus must not
+    // replace (and later delete) this daemon's socket.
+    let _instance_lock =
+        super::instance::InstanceLock::acquire(&display_sock_path.with_file_name("daemon.lock"))?;
     let display_listener = display::endpoint::bind_socket(&display_sock_path).await?;
 
     let mut plugin_roots = plugin::renderer_registry::standard_plugin_roots("plugins");

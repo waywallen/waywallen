@@ -1,6 +1,7 @@
 mod bootstrap;
 mod cli;
 mod context;
+mod instance;
 mod runtime;
 
 pub use bootstrap::run;
