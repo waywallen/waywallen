@@ -1,6 +1,5 @@
 module;
 #include "QExtra/macro_qt.hpp"
-#include "kstore/subscription.hpp"
 
 #ifdef Q_MOC_RUN
 #    include "waywallen/model/store_item.moc"

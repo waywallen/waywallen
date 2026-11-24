@@ -1,10 +1,7 @@
-module;
-#include "control.qpb.h"
-
 export module waywallen:msg.backend_msg;
 export import :proto;
 export import :model.share_store;
-import rstd.cppstd;
+import qextra;
 
 export namespace waywallen::model
 {
