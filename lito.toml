@@ -14,6 +14,7 @@ members = [
   "tools/i18n",
   "tools/i18n/po",
   "tools/probe",
+  "tools/switch",
   "ui",
   "ui/backend",
 ]
@@ -27,6 +28,7 @@ default-members = [
   "plugins/org.waywallen.wallhaven",
   "tools/i18n",
   "tools/probe",
+  "tools/switch",
   "ui",
 ]
 

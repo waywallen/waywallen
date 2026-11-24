@@ -1,0 +1,28 @@
+[package]
+name = "waywallen-switch"
+version.workspace = true
+
+[lib]
+name = "waywallen-switch"
+module = "waywallen.switcher"
+archive = "waywallen.switcher"
+sources = ["src/mod.cppm", "src/client.cppm", "src/client.cpp", "src/cli.cpp", "src/output.cppm"]
+
+[[bin]]
+name = "waywallen-switch"
+sources = ["src/main.cpp"]
+
+[dependencies]
+dbusto = "0.1.0"
+liwebsocketo = "0.1.1"
+liproto = { version = "0.1.1", pub = true }
+liproto-codegen = { version = "0.1.1", usage = "tool" }
+rstd-std = { workspace = true, pub = true }
+rstd-json = { workspace = true, pub = true }
+rstd-argparse = { workspace = true }
+
+[external-sources.waywallen-control]
+workspace = true
+
+[build-tools.protoc]
+path = "protoc"
