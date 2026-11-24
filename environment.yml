@@ -38,6 +38,9 @@ dependencies:
   - zlib
   - libjxl
 
+  # openal
+  - openal-soft
+
   # Build infrastructure
   - cmake>=3.28
   - ninja

@@ -319,6 +319,7 @@ rm -rf ./usr/lib/libk5crypto.so.3
 rm -rf ./usr/lib/libgssapi_krb5*
 rm -rf ./usr/lib/libxkbcommon*
 rm -rf ./usr/lib/*.a
+rm -rf ./usr/plugins/networkinformation
 popd
 
 info "Pruning unused QuickControls2 styles"
