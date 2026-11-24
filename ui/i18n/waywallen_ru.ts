@@ -293,8 +293,8 @@
     </message>
     <message>
         <location filename="../qml/dialog/DaemonNotRunDialog.qml" line="82"/>
-        <source>Daemon version %1 + is incompatible.</source>
-        <translation>Версия демона %1 + несовместима.</translation>
+        <source>Daemon version %1 is incompatible.</source>
+        <translation>Версия демона %1 несовместима.</translation>
     </message>
     <message>
         <location filename="../qml/dialog/DaemonNotRunDialog.qml" line="128"/>
