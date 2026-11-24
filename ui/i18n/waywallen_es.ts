@@ -407,6 +407,10 @@
         <source>No wallpapers found</source>
         <translation>No se han encontrado fondos de pantalla</translation>
     </message>
+    <message>
+        <source>This source is no longer available.</source>
+        <translation>Este origen ya no está disponible.</translation>
+    </message>
 </context>
 <context>
     <name>DisplayEditDialog</name>
@@ -1018,6 +1022,21 @@
         <location filename="../qml/page/PlaylistEditPage.qml" line="432"/>
         <source>Playlist unavailable</source>
         <translation>Lista de reproducción no disponible</translation>
+    </message>
+    <message>
+        <source>h</source>
+        <comment>hours</comment>
+        <translation>h</translation>
+    </message>
+    <message>
+        <source>m</source>
+        <comment>minutes</comment>
+        <translation>min</translation>
+    </message>
+    <message>
+        <source>s</source>
+        <comment>seconds</comment>
+        <translation>s</translation>
     </message>
 </context>
 <context>
@@ -2296,6 +2315,18 @@ Pantalla relacionada: #%1</translation>
         <source>On battery</source>
         <translation>Con batería</translation>
     </message>
+    <message>
+        <source>Default device</source>
+        <translation>Dispositivo predeterminado</translation>
+    </message>
+    <message>
+        <source>%1 (unavailable)</source>
+        <translation>%1 (no disponible)</translation>
+    </message>
+    <message>
+        <source>Audio output</source>
+        <translation>Salida de audio</translation>
+    </message>
 </context>
 <context>
     <name>SidebarNowPlaying</name>
@@ -2381,6 +2412,14 @@ Pantalla relacionada: #%1</translation>
         <location filename="../qml/page/SourceManagePage.qml" line="75"/>
         <source>No libraries</source>
         <translation>No hay bibliotecas</translation>
+    </message>
+    <message>
+        <source>Choose Library Folder</source>
+        <translation>Elegir carpeta de la biblioteca</translation>
+    </message>
+    <message>
+        <source>Change library folder</source>
+        <translation>Cambiar carpeta de la biblioteca</translation>
     </message>
 </context>
 <context>
@@ -2701,6 +2740,18 @@ Puede perderse el estado de fotograma sin guardar.</translation>
     <message>
         <source>Lower values use less GPU memory but may require more texture uploads.</source>
         <translation>Los valores más bajos usan menos memoria de GPU, pero pueden requerir más cargas de texturas.</translation>
+    </message>
+    <message>
+        <source>Card badges</source>
+        <translation>Insignias en las tarjetas</translation>
+    </message>
+    <message>
+        <source>Show card badges</source>
+        <translation>Mostrar insignias en las tarjetas</translation>
+    </message>
+    <message>
+        <source>Edit rules</source>
+        <translation>Editar reglas</translation>
     </message>
 </context>
 <context>
@@ -3420,6 +3471,14 @@ Puede perderse el estado de fotograma sin guardar.</translation>
         <source>About</source>
         <translation>Acerca de</translation>
     </message>
+    <message>
+        <source>Back</source>
+        <translation>Atrás</translation>
+    </message>
+    <message>
+        <source>Menu</source>
+        <translation>Menú</translation>
+    </message>
 </context>
 <context>
     <name>WindowExclusionsPage</name>
@@ -3655,6 +3714,113 @@ Puede perderse el estado de fotograma sin guardar.</translation>
     <message>
         <source>Delete group</source>
         <translation>Eliminar grupo</translation>
+    </message>
+</context>
+<context>
+    <name>NavigationStack</name>
+    <message>
+        <source>Failed to open page</source>
+        <translation>Error al abrir la página</translation>
+    </message>
+</context>
+<context>
+    <name>ArtistPage</name>
+    <message>
+        <source>Artist</source>
+        <translation>Artista</translation>
+    </message>
+    <message>
+        <source>Open web page</source>
+        <translation>Abrir página web</translation>
+    </message>
+</context>
+<context>
+    <name>WallpaperBadgeRulesPage</name>
+    <message>
+        <source>Card badge rules</source>
+        <translation>Reglas de insignias de las tarjetas</translation>
+    </message>
+    <message>
+        <source>Content rating</source>
+        <translation>Clasificación de contenido</translation>
+    </message>
+    <message>
+        <source>Wallpaper type</source>
+        <translation>Tipo de fondo de pantalla</translation>
+    </message>
+    <message>
+        <source>Tag</source>
+        <translation>Etiqueta</translation>
+    </message>
+    <message>
+        <source>Rules ignore case and match the whole value. Use * for any number of characters and ? for one character. A tag rule matches any tag on the wallpaper.</source>
+        <translation>Las reglas no distinguen mayúsculas de minúsculas y comparan el valor completo. Usa * para cualquier número de caracteres y ? para uno solo. Una regla de etiqueta coincide con cualquier etiqueta del fondo de pantalla.</translation>
+    </message>
+    <message>
+        <source>%1: %2 → %3</source>
+        <translation>%1: %2 → %3</translation>
+    </message>
+    <message>
+        <source>Edit</source>
+        <translation>Editar</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>Quitar</translation>
+    </message>
+    <message>
+        <source>Match field</source>
+        <translation>Campo a comparar</translation>
+    </message>
+    <message>
+        <source>Matching value</source>
+        <translation>Valor buscado</translation>
+    </message>
+    <message>
+        <source>Badge text</source>
+        <translation>Texto de la insignia</translation>
+    </message>
+    <message>
+        <source>Save</source>
+        <translation>Guardar</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Añadir</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Cancelar</translation>
+    </message>
+</context>
+<context>
+    <name>I18n</name>
+    <message>
+        <source>B</source>
+        <translation>B</translation>
+    </message>
+    <message>
+        <source>KiB</source>
+        <translation>KiB</translation>
+    </message>
+    <message>
+        <source>MiB</source>
+        <translation>MiB</translation>
+    </message>
+    <message>
+        <source>GiB</source>
+        <translation>GiB</translation>
+    </message>
+    <message>
+        <source>TiB</source>
+        <translation>TiB</translation>
+    </message>
+</context>
+<context>
+    <name>waywallen::RemoteSearchQuery</name>
+    <message>
+        <source>The source returned a repeated continuation token.</source>
+        <translation>El origen devolvió un token de continuación repetido.</translation>
     </message>
 </context>
 </TS>

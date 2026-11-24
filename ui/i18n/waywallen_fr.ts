@@ -407,6 +407,10 @@
         <source>No wallpapers found</source>
         <translation>Aucun fond d'écran trouvé</translation>
     </message>
+    <message>
+        <source>This source is no longer available.</source>
+        <translation>Cette source n'est plus disponible.</translation>
+    </message>
 </context>
 <context>
     <name>DisplayEditDialog</name>
@@ -1018,6 +1022,21 @@
         <location filename="../qml/page/PlaylistEditPage.qml" line="432"/>
         <source>Playlist unavailable</source>
         <translation>Liste de lecture indisponible</translation>
+    </message>
+    <message>
+        <source>h</source>
+        <comment>hours</comment>
+        <translation>h</translation>
+    </message>
+    <message>
+        <source>m</source>
+        <comment>minutes</comment>
+        <translation>min</translation>
+    </message>
+    <message>
+        <source>s</source>
+        <comment>seconds</comment>
+        <translation>s</translation>
     </message>
 </context>
 <context>
@@ -2296,6 +2315,18 @@ Related display: #%1</source>
         <source>On battery</source>
         <translation>Sur batterie</translation>
     </message>
+    <message>
+        <source>Default device</source>
+        <translation>Périphérique par défaut</translation>
+    </message>
+    <message>
+        <source>%1 (unavailable)</source>
+        <translation>%1 (indisponible)</translation>
+    </message>
+    <message>
+        <source>Audio output</source>
+        <translation>Sortie audio</translation>
+    </message>
 </context>
 <context>
     <name>SidebarNowPlaying</name>
@@ -2377,6 +2408,14 @@ Related display: #%1</source>
         <location filename="../qml/page/SourceManagePage.qml" line="75"/>
         <source>No libraries</source>
         <translation>Aucune bibliothèque</translation>
+    </message>
+    <message>
+        <source>Choose Library Folder</source>
+        <translation>Choisir le dossier de la bibliothèque</translation>
+    </message>
+    <message>
+        <source>Change library folder</source>
+        <translation>Changer le dossier de la bibliothèque</translation>
     </message>
 </context>
 <context>
@@ -2697,6 +2736,18 @@ L'état d'image non enregistré risque d'être perdu.</translation>
     <message>
         <source>Lower values use less GPU memory but may require more texture uploads.</source>
         <translation>Des valeurs plus basses consomment moins de mémoire GPU mais entraînent plus de transferts de textures.</translation>
+    </message>
+    <message>
+        <source>Card badges</source>
+        <translation>Badges des cartes</translation>
+    </message>
+    <message>
+        <source>Show card badges</source>
+        <translation>Afficher les badges des cartes</translation>
+    </message>
+    <message>
+        <source>Edit rules</source>
+        <translation>Modifier les règles</translation>
     </message>
 </context>
 <context>
@@ -3416,6 +3467,14 @@ L'état d'image non enregistré risque d'être perdu.</translation>
         <source>About</source>
         <translation>À propos</translation>
     </message>
+    <message>
+        <source>Back</source>
+        <translation>Retour</translation>
+    </message>
+    <message>
+        <source>Menu</source>
+        <translation>Menu</translation>
+    </message>
 </context>
 <context>
     <name>WindowExclusionsPage</name>
@@ -3652,6 +3711,113 @@ L'état d'image non enregistré risque d'être perdu.</translation>
     <message>
         <source>Delete group</source>
         <translation>Supprimer le groupe</translation>
+    </message>
+</context>
+<context>
+    <name>NavigationStack</name>
+    <message>
+        <source>Failed to open page</source>
+        <translation>Échec de l'ouverture de la page</translation>
+    </message>
+</context>
+<context>
+    <name>ArtistPage</name>
+    <message>
+        <source>Artist</source>
+        <translation>Artiste</translation>
+    </message>
+    <message>
+        <source>Open web page</source>
+        <translation>Ouvrir la page web</translation>
+    </message>
+</context>
+<context>
+    <name>WallpaperBadgeRulesPage</name>
+    <message>
+        <source>Card badge rules</source>
+        <translation>Règles des badges des cartes</translation>
+    </message>
+    <message>
+        <source>Content rating</source>
+        <translation>Classification par âge</translation>
+    </message>
+    <message>
+        <source>Wallpaper type</source>
+        <translation>Type de fond d'écran</translation>
+    </message>
+    <message>
+        <source>Tag</source>
+        <translation>Mot-clé</translation>
+    </message>
+    <message>
+        <source>Rules ignore case and match the whole value. Use * for any number of characters and ? for one character. A tag rule matches any tag on the wallpaper.</source>
+        <translation>Les règles ignorent la casse et portent sur la valeur entière. * remplace un nombre quelconque de caractères et ? un seul caractère. Une règle de mot-clé s'applique à n'importe quel mot-clé du fond d'écran.</translation>
+    </message>
+    <message>
+        <source>%1: %2 → %3</source>
+        <translation>%1 : %2 → %3</translation>
+    </message>
+    <message>
+        <source>Edit</source>
+        <translation>Modifier</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>Retirer</translation>
+    </message>
+    <message>
+        <source>Match field</source>
+        <translation>Champ à comparer</translation>
+    </message>
+    <message>
+        <source>Matching value</source>
+        <translation>Valeur recherchée</translation>
+    </message>
+    <message>
+        <source>Badge text</source>
+        <translation>Texte du badge</translation>
+    </message>
+    <message>
+        <source>Save</source>
+        <translation>Enregistrer</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Ajouter</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Annuler</translation>
+    </message>
+</context>
+<context>
+    <name>I18n</name>
+    <message>
+        <source>B</source>
+        <translation>B</translation>
+    </message>
+    <message>
+        <source>KiB</source>
+        <translation>KiB</translation>
+    </message>
+    <message>
+        <source>MiB</source>
+        <translation>MiB</translation>
+    </message>
+    <message>
+        <source>GiB</source>
+        <translation>GiB</translation>
+    </message>
+    <message>
+        <source>TiB</source>
+        <translation>TiB</translation>
+    </message>
+</context>
+<context>
+    <name>waywallen::RemoteSearchQuery</name>
+    <message>
+        <source>The source returned a repeated continuation token.</source>
+        <translation>La source a renvoyé un jeton de continuation déjà reçu.</translation>
     </message>
 </context>
 </TS>

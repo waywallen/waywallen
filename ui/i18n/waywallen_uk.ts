@@ -408,6 +408,10 @@
         <source>No wallpapers found</source>
         <translation>Шпалер не знайдено</translation>
     </message>
+    <message>
+        <source>This source is no longer available.</source>
+        <translation>Це джерело більше недоступне.</translation>
+    </message>
 </context>
 <context>
     <name>DisplayEditDialog</name>
@@ -947,6 +951,21 @@
         <location filename="../qml/page/PlaylistEditPage.qml" line="427"/>
         <source>Playlist unavailable</source>
         <translation>Плейлист недоступний</translation>
+    </message>
+    <message>
+        <source>h</source>
+        <comment>hours</comment>
+        <translation>год</translation>
+    </message>
+    <message>
+        <source>m</source>
+        <comment>minutes</comment>
+        <translation>хв</translation>
+    </message>
+    <message>
+        <source>s</source>
+        <comment>seconds</comment>
+        <translation>с</translation>
     </message>
 </context>
 <context>
@@ -2192,6 +2211,18 @@ Related display: #%1</source>
         <source>On battery</source>
         <translation>Від батареї</translation>
     </message>
+    <message>
+        <source>Default device</source>
+        <translation>Типовий пристрій</translation>
+    </message>
+    <message>
+        <source>%1 (unavailable)</source>
+        <translation>%1 (недоступний)</translation>
+    </message>
+    <message>
+        <source>Audio output</source>
+        <translation>Виведення звуку</translation>
+    </message>
 </context>
 <context>
     <name>EditLibraryPage</name>
@@ -2269,6 +2300,14 @@ Related display: #%1</source>
         <location filename="../qml/page/SourceManagePage.qml" line="75"/>
         <source>No libraries</source>
         <translation>Бібліотек немає</translation>
+    </message>
+    <message>
+        <source>Choose Library Folder</source>
+        <translation>Виберіть папку бібліотеки</translation>
+    </message>
+    <message>
+        <source>Change library folder</source>
+        <translation>Змінити папку бібліотеки</translation>
     </message>
 </context>
 <context>
@@ -2589,6 +2628,18 @@ Unsaved frame state may be lost.</source>
     <message>
         <source>Lower values use less GPU memory but may require more texture uploads.</source>
         <translation>Менше значення зменшує витрату відеопам’яті, але може збільшити частоту завантаження текстур.</translation>
+    </message>
+    <message>
+        <source>Card badges</source>
+        <translation>Значки на картках</translation>
+    </message>
+    <message>
+        <source>Show card badges</source>
+        <translation>Показувати значки на картках</translation>
+    </message>
+    <message>
+        <source>Edit rules</source>
+        <translation>Змінити правила</translation>
     </message>
 </context>
 <context>
@@ -3334,6 +3385,14 @@ Unsaved frame state may be lost.</source>
         <source>Version %1 is available</source>
         <translation>Доступна версія %1</translation>
     </message>
+    <message>
+        <source>Back</source>
+        <translation>Назад</translation>
+    </message>
+    <message>
+        <source>Menu</source>
+        <translation>Меню</translation>
+    </message>
 </context>
 <context>
     <name>WindowExclusionsPage</name>
@@ -3620,6 +3679,113 @@ Unsaved frame state may be lost.</source>
     <message>
         <source>Delete group</source>
         <translation>Видалити групу</translation>
+    </message>
+</context>
+<context>
+    <name>NavigationStack</name>
+    <message>
+        <source>Failed to open page</source>
+        <translation>Не вдалося відкрити сторінку</translation>
+    </message>
+</context>
+<context>
+    <name>ArtistPage</name>
+    <message>
+        <source>Artist</source>
+        <translation>Автор</translation>
+    </message>
+    <message>
+        <source>Open web page</source>
+        <translation>Відкрити вебсторінку</translation>
+    </message>
+</context>
+<context>
+    <name>WallpaperBadgeRulesPage</name>
+    <message>
+        <source>Card badge rules</source>
+        <translation>Правила значків на картках</translation>
+    </message>
+    <message>
+        <source>Content rating</source>
+        <translation>Віковий рейтинг</translation>
+    </message>
+    <message>
+        <source>Wallpaper type</source>
+        <translation>Тип шпалер</translation>
+    </message>
+    <message>
+        <source>Tag</source>
+        <translation>Мітка</translation>
+    </message>
+    <message>
+        <source>Rules ignore case and match the whole value. Use * for any number of characters and ? for one character. A tag rule matches any tag on the wallpaper.</source>
+        <translation>Правила не враховують регістр і порівнюють значення повністю. * — будь-яка кількість символів, ? — один символ. Правило за міткою спрацьовує на будь-яку мітку шпалер.</translation>
+    </message>
+    <message>
+        <source>%1: %2 → %3</source>
+        <translation>%1: %2 → %3</translation>
+    </message>
+    <message>
+        <source>Edit</source>
+        <translation>Змінити</translation>
+    </message>
+    <message>
+        <source>Remove</source>
+        <translation>Видалити</translation>
+    </message>
+    <message>
+        <source>Match field</source>
+        <translation>Поле для порівняння</translation>
+    </message>
+    <message>
+        <source>Matching value</source>
+        <translation>Шукане значення</translation>
+    </message>
+    <message>
+        <source>Badge text</source>
+        <translation>Текст значка</translation>
+    </message>
+    <message>
+        <source>Save</source>
+        <translation>Зберегти</translation>
+    </message>
+    <message>
+        <source>Add</source>
+        <translation>Додати</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>Скасувати</translation>
+    </message>
+</context>
+<context>
+    <name>I18n</name>
+    <message>
+        <source>B</source>
+        <translation>Б</translation>
+    </message>
+    <message>
+        <source>KiB</source>
+        <translation>КіБ</translation>
+    </message>
+    <message>
+        <source>MiB</source>
+        <translation>МіБ</translation>
+    </message>
+    <message>
+        <source>GiB</source>
+        <translation>ГіБ</translation>
+    </message>
+    <message>
+        <source>TiB</source>
+        <translation>ТіБ</translation>
+    </message>
+</context>
+<context>
+    <name>waywallen::RemoteSearchQuery</name>
+    <message>
+        <source>The source returned a repeated continuation token.</source>
+        <translation>Джерело повторно повернуло той самий маркер продовження.</translation>
     </message>
 </context>
 </TS>
