@@ -11,6 +11,7 @@ pub(crate) mod notifications;
 pub(crate) mod power;
 pub(crate) mod session;
 pub(crate) mod tray;
+pub(crate) mod wallpaper;
 
 pub use gpu::{format_drm_dev, parse_drm_dev, GpuInfo, GPU_DRM_DEV_KEY, RENDER_NODE_KEY};
 

@@ -1984,6 +1984,25 @@ pub(super) async fn dispatch_inner(
             })
         }
 
+        Req::SystemWallpaperSnapshots(r) => {
+            if r.clear && r.retake {
+                return Err(Error::InvalidArgument(
+                    "clear and retake are mutually exclusive".into(),
+                ));
+            }
+            let directory = crate::system::wallpaper::cache_directory();
+            if r.clear {
+                crate::system::wallpaper::clear_snapshots(state).await?;
+            } else if r.retake {
+                crate::system::wallpaper::retake_snapshot(state)?;
+            } else {
+                tokio::fs::create_dir_all(&directory).await?;
+            }
+            Res::SystemWallpaperSnapshots(pb::SystemWallpaperSnapshotsResponse {
+                directory: directory.display().to_string(),
+            })
+        }
+
         Req::LogRead(_) => {
             let current = crate::logging::read_current_log().await?;
             Res::LogRead(pb::LogReadResponse {
@@ -2128,6 +2147,11 @@ pub(super) async fn dispatch_inner(
                     s.global.plugin_update_notifications = !g.disable_plugin_update_notifications;
                     s.global.duplicate_renderers_for_same_wallpaper =
                         g.duplicate_renderers_for_same_wallpaper;
+                    if g.system_wallpaper_auto {
+                        s.global.system_wallpaper_enabled = None;
+                    } else if let Some(enabled) = g.system_wallpaper_enabled {
+                        s.global.system_wallpaper_enabled = Some(enabled);
+                    }
                     if let Some(renderer) = g.renderer.as_ref() {
                         if let Some(enable_audio) = renderer.enable_audio {
                             s.global.renderer.enable_audio = enable_audio;
@@ -2146,6 +2170,12 @@ pub(super) async fn dispatch_inner(
                 s.plugins = new_plugins.clone();
             });
             let current_settings = state.settings.snapshot();
+            if current_settings.global.system_wallpaper_enabled
+                != previous_settings.global.system_wallpaper_enabled
+            {
+                // Retain the latest wallpaper so enabling the setting applies it immediately.
+                state.system_wallpaper.send_modify(|_| {});
+            }
             let new_debug_logging = current_settings.global.debug_logging_enabled;
             if new_debug_logging != prev_debug_logging {
                 crate::logging::apply_debug_setting(new_debug_logging);
@@ -2298,6 +2328,8 @@ pub(super) async fn dispatch_inner(
         }
 
         Req::LibraryRemove(r) => {
+            let _invalidate =
+                application::wallpaper_query::InvalidateOnDrop(state.wallpaper_changes.clone());
             repo::remove_library(&state.db, r.id).await?;
             state.router.remove_library(r.id);
             let rescan_state = state.clone();

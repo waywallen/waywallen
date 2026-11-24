@@ -2,7 +2,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use ashpd::desktop::wallpaper::{SetOn, WallpaperRequest};
 
 use crate::application::{
     should_duplicate_renderers, ApplyActivation, ApplyRequest, ApplyResult, ApplySource,
@@ -301,15 +300,9 @@ async fn apply_via_portal_inner(app: &Arc<DaemonContext>, id: &str) -> Result<Po
             entry.resource
         ))
     })?;
-    let request = WallpaperRequest::default()
-        .set_on(SetOn::Background)
-        .show_preview(false)
-        .build_uri(&uri)
+    crate::system::wallpaper::apply_portal(std::path::Path::new(&entry.resource))
         .await
-        .map_err(|e| Error::PortalCallFailed(format!("SetWallpaperURI: {e}")))?;
-    request
-        .response()
-        .map_err(|e| Error::PortalCallFailed(format!("SetWallpaperURI response: {e}")))?;
+        .map_err(|e| Error::PortalCallFailed(format!("{e:#}")))?;
 
     Ok(PortalApplyResult {
         wallpaper_id: entry.item_id.to_string(),
@@ -416,6 +409,14 @@ pub async fn apply_wallpaper(
         .call_apply(&entry.plugin_name, &entry)
         .await?;
     let spawn_settings = app.settings.resolved_renderer_settings(&renderer);
+    let system_image = crate::wallframe::snapshot::source_image(
+        &entry.wp_type,
+        apply
+            .extras
+            .get("path")
+            .map(String::as_str)
+            .unwrap_or(&entry.resource),
+    );
     let (user_property_overrides, wallpaper_layout_override) =
         repo::get_wallpaper_render_properties(&app.db, entry.item_id).await?;
     let spawn_req = renderer_manager::SpawnRequest {
@@ -557,6 +558,15 @@ pub async fn apply_wallpaper(
     // not lose the wallpaper needed by the next startup.
     app.settings.flush_now().await;
     crate::system::dbus::notify_current_wallpaper_id_changed(app).await;
+
+    app.system_wallpaper
+        .send_replace(Some(crate::system::wallpaper::Change {
+            wallpaper_id: entry.item_id,
+            renderer_id: renderer_id.clone(),
+            image: system_image,
+            cleared: false,
+            retake: false,
+        }));
 
     Ok(ApplyResult {
         renderer_id,

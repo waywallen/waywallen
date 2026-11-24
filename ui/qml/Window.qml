@@ -214,6 +214,9 @@ MD.ApplicationWindow {
             const who = clientName.length > 0 ? clientName : qsTr("Display client");
             W.Global.toastError(qsTr("%1 connection failed: %2").arg(who).arg(reason));
         }
+        function onSystemWallpaperFailed(wallpaperId, error) {
+            W.Global.toastError(qsTr("System wallpaper update failed: %1").arg(error));
+        }
         function onPluginRestartFailed(pluginId, error) {
             const who = pluginId.length > 0 ? pluginId : qsTr("Plugin");
             W.Action.toast(qsTr("%1 renderer restart failed: %2").arg(who).arg(error), 6000, 1, null);

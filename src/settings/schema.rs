@@ -592,6 +592,13 @@ pub struct GlobalSettings {
 
     pub duplicate_renderers_for_same_wallpaper: bool,
 
+    /// None follows the active display integration's safe default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_wallpaper_enabled: Option<bool>,
+
+    #[serde(skip)]
+    pub system_wallpaper_default_enabled: bool,
+
     /// Forward pointer input received by the daemon to subscribed renderers.
     pub pointer_forwarding_enabled: bool,
 
@@ -630,6 +637,8 @@ impl Default for GlobalSettings {
             auto_attach_playlist_id: None,
             plugin_update_notifications: true,
             duplicate_renderers_for_same_wallpaper: false,
+            system_wallpaper_enabled: None,
+            system_wallpaper_default_enabled: false,
             pointer_forwarding_enabled: true,
             autostart_enabled: false,
             hide_tray_icon: false,
@@ -639,6 +648,11 @@ impl Default for GlobalSettings {
 }
 
 impl GlobalSettings {
+    pub fn effective_system_wallpaper_enabled(&self) -> bool {
+        self.system_wallpaper_enabled
+            .unwrap_or(self.system_wallpaper_default_enabled)
+    }
+
     pub fn effective_auto_replay(&self) -> AutoReplayPolicy {
         self.auto_replay.clone().unwrap_or_default()
     }

@@ -43,6 +43,8 @@ pub(crate) struct DaemonContext {
     pub(crate) probe: Arc<ProbeService>,
     pub(crate) playlists: playback::playlist::Engine,
     pub(crate) wallpaper_changes: tokio::sync::watch::Sender<u64>,
+    pub(crate) system_wallpaper: tokio::sync::watch::Sender<Option<system::wallpaper::Change>>,
+    pub(crate) system_wallpaper_cache: Arc<tokio::sync::Mutex<system::wallpaper::Cache>>,
     pub(crate) playlist_mutation: tokio::sync::Mutex<()>,
     pub(crate) no_tray: bool,
     pub(crate) tray: tokio::sync::Mutex<Option<system::tray::TrayHandle>>,

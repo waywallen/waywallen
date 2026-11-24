@@ -3547,7 +3547,7 @@ impl Router {
                 }
             })
             .collect();
-        let members = match renderer.register_frame_consumers(identity, consumers) {
+        let members = match renderer.register_frame_consumers(identity, consumers, seq) {
             Ok(members) => members,
             Err(error) => {
                 log::warn!(
@@ -3599,7 +3599,7 @@ impl Router {
 
     /// Compute the current Pause/Play diff and dispatch control
     /// messages outside the inner lock after lifecycle mutations.
-    async fn reconcile_lifecycle(self: &Arc<Self>) {
+    pub(crate) async fn reconcile_lifecycle(self: &Arc<Self>) {
         let reconcile_stop = {
             let inner = self.inner.lock().await;
             inner.auto_effects.stop
@@ -3636,11 +3636,18 @@ impl Router {
                 let manual_paused = inner.renderer_manual_paused.contains(&rid);
                 let manual_muted = inner.manual_muted;
                 let other_playback_active = inner.other_playback_active;
-                let should_pause = manual_paused || !has_frame_demand;
+                let capture_demand = has_active_link
+                    && inner
+                        .table
+                        .get_renderer(&rid)
+                        .is_some_and(|renderer| renderer.snapshot.requested());
+                let policy_paused = manual_paused || !has_frame_demand;
+                let should_pause = policy_paused && !capture_demand;
                 let should_mute = manual_muted
                     || other_playback_active
                     || !has_active_link
-                    || inner.auto_effects.mute;
+                    || inner.auto_effects.mute
+                    || (capture_demand && policy_paused);
                 let previous_state = inner
                     .renderer_slots
                     .get(&rid)
@@ -9343,6 +9350,36 @@ mod tests {
         }
         assert!(router.is_paused("r1").await);
         assert!(!router.inner.lock().await.resume_retries.contains_key("r1"));
+    }
+
+    #[tokio::test]
+    async fn snapshot_request_temporarily_wakes_a_paused_renderer_without_audio() {
+        let mgr = Arc::new(RendererManager::new_default());
+        let router = Router::new(mgr.clone());
+        let (renderer, _peer) = RendererHandle::test_stub_with_peer("r1", "web");
+        mgr.register_test_handle(renderer.clone()).await;
+        router.register_renderer(renderer.clone()).await;
+        let _display = router.register_display(reg("HDMI-A-1", 1920, 1080)).await;
+        router.set_manual_pause(true).await;
+        assert!(router.is_paused("r1").await);
+
+        renderer.snapshot.request().await;
+        router.reconcile_lifecycle().await;
+        assert_eq!(
+            router
+                .snapshot_renderer("r1")
+                .await
+                .unwrap()
+                .state
+                .activity(),
+            Some(RendererActivity::Muted)
+        );
+        assert!(router.inner.lock().await.manual_paused);
+
+        renderer.snapshot.cancel();
+        router.reconcile_lifecycle().await;
+        assert!(router.is_paused("r1").await);
+        assert!(router.inner.lock().await.manual_paused);
     }
 
     #[tokio::test]

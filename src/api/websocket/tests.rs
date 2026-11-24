@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn system_wallpaper_setting_preserves_presence_and_disabled_value() {
+    use prost::Message;
+    assert_eq!(pb::GlobalSettings::default().system_wallpaper_enabled, None);
+    let mut global = crate::settings::GlobalSettings::default();
+    for enabled in [true, false] {
+        global.system_wallpaper_enabled = Some(enabled);
+        let encoded = global_to_pb(&global).encode_to_vec();
+        let decoded = pb::GlobalSettings::decode(encoded.as_slice()).unwrap();
+        assert_eq!(decoded.system_wallpaper_enabled, Some(enabled));
+        assert!(!decoded.system_wallpaper_auto);
+    }
+    global.system_wallpaper_enabled = None;
+    for safe_default in [false, true] {
+        global.system_wallpaper_default_enabled = safe_default;
+        let decoded =
+            pb::GlobalSettings::decode(global_to_pb(&global).encode_to_vec().as_slice()).unwrap();
+        assert!(decoded.system_wallpaper_auto);
+        assert_eq!(decoded.system_wallpaper_enabled, Some(safe_default));
+    }
+}
+
+#[test]
 fn timeline_preview_remains_an_optional_path_on_the_wire() {
     use prost::Message;
     for preview in ["", "/wallpapers/metadata.json", "/backgrounds/entry.xml"] {

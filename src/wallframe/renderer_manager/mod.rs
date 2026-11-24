@@ -534,6 +534,7 @@ pub struct RendererHandle {
 
     /// Most recent frame metadata, tied to the active bind generation.
     latest_frame: Arc<StdMutex<Option<FrameSnapshot>>>,
+    pub(crate) snapshot: Arc<crate::wallframe::snapshot::Snapshot>,
 
     /// Producer-exported timeline drm_syncobj used as the release
     /// fence target. Populated by a ReleaseSyncobj event.
@@ -714,12 +715,45 @@ impl RendererHandle {
     pub fn register_frame_consumers(
         &self,
         identity: crate::wallframe::sync::FrameIdentity,
-        consumers: Vec<crate::wallframe::sync::FrameConsumerIdentity>,
+        mut consumers: Vec<crate::wallframe::sync::FrameConsumerIdentity>,
+        seq: u64,
     ) -> std::result::Result<Vec<crate::wallframe::sync::FrameConsumerMember>, &'static str> {
         let Some(tx) = self.frame_record_tx.as_ref() else {
             return Err("no reaper wired (test stub or unconfigured renderer)");
         };
-        crate::wallframe::sync::register_frame(tx, identity, consumers)
+        let capture = if identity.release_point != 0 && self.snapshot.needs_capture() {
+            self.published_pool()
+                .filter(|pool| pool.generation == identity.buffer_generation)
+                .zip(self.clone_sync_fd(seq))
+        } else {
+            None
+        };
+        if capture.is_some() {
+            consumers.push(crate::wallframe::sync::FrameConsumerIdentity {
+                frame: identity,
+                renderer_id: self.id.clone(),
+                display_id: 0,
+                display_session_id: 0,
+                display_name: "system wallpaper snapshot".into(),
+                frame_seq: seq,
+            });
+        }
+        let mut members = crate::wallframe::sync::register_frame(tx, identity, consumers)?;
+        if let Some((pool, fence)) = capture {
+            let gpu = self.gpu;
+            let member = members.pop().expect("snapshot consumer was appended");
+            self.snapshot.spawn(member, move |member| {
+                use std::os::fd::AsRawFd;
+                crate::wallframe::snapshot::capture(
+                    gpu,
+                    &pool,
+                    identity.buffer_index,
+                    fence.as_raw_fd(),
+                    member,
+                )
+            });
+        }
+        Ok(members)
     }
 
     /// Renderer-published clear color (RGBA, 0..=1). Defaults to
@@ -1179,6 +1213,7 @@ impl RendererManager {
         let sync_fds: Arc<StdMutex<std::collections::VecDeque<(u64, OwnedFd)>>> =
             Arc::new(StdMutex::new(std::collections::VecDeque::new()));
         let latest_frame: Arc<StdMutex<Option<FrameSnapshot>>> = Arc::new(StdMutex::new(None));
+        let snapshot = Arc::new(crate::wallframe::snapshot::Snapshot::default());
         let release_syncobj: Arc<StdMutex<Option<OwnedFd>>> = Arc::new(StdMutex::new(None));
         let format_caps: Arc<StdMutex<Option<crate::wallframe::dma::negotiate::PeerCaps>>> =
             Arc::new(StdMutex::new(None));
@@ -1251,6 +1286,7 @@ impl RendererManager {
             published_pool,
             sync_fds,
             latest_frame,
+            snapshot,
             release_syncobj,
             format_caps,
             last_dispatched_scheme: Arc::new(StdMutex::new(None)),
@@ -2065,6 +2101,7 @@ impl RendererHandle {
             published_pool: Arc::new(StdMutex::new(None)),
             sync_fds: Arc::new(StdMutex::new(std::collections::VecDeque::new())),
             latest_frame: Arc::new(StdMutex::new(None)),
+            snapshot: Arc::new(crate::wallframe::snapshot::Snapshot::default()),
             release_syncobj: Arc::new(StdMutex::new(None)),
             format_caps: Arc::new(StdMutex::new(None)),
             last_dispatched_scheme: Arc::new(StdMutex::new(None)),
@@ -3035,6 +3072,83 @@ mod init_handshake_tests {
 }
 
 #[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn capture_has_its_own_lease_without_consuming_a_displays_lease() {
+        use crate::wallframe::sync::{FrameConsumerIdentity, FrameIdentity, FrameRecord};
+        let (renderer, _peer, mut records) =
+            RendererHandle::test_stub_with_peer_and_frame_records("snapshot", "video");
+        renderer.snapshot.request().await;
+        renderer.test_publish_pool(PublishedPool {
+            generation: 1,
+            flags: 0,
+            count: 1,
+            fourcc: 0,
+            width: 1,
+            height: 1,
+            modifier: 0,
+            planes_per_buffer: 1,
+            stride: vec![],
+            plane_offset: vec![],
+            size: vec![],
+            fds: vec![],
+        });
+        renderer
+            .sync_fds
+            .lock()
+            .unwrap()
+            .push_back((42, std::fs::File::open("/dev/null").unwrap().into()));
+        let identity = FrameIdentity {
+            buffer_generation: 1,
+            buffer_index: 0,
+            release_point: 1,
+        };
+        let consumer = FrameConsumerIdentity {
+            frame: identity,
+            renderer_id: "snapshot".into(),
+            display_id: 7,
+            display_session_id: 1,
+            display_name: "display".into(),
+            frame_seq: 42,
+        };
+        let members = renderer
+            .register_frame_consumers(identity, vec![consumer.clone()], 42)
+            .unwrap();
+        assert_eq!(members.len(), 1);
+        let FrameRecord::Register { consumers, .. } = records.recv().await.unwrap() else {
+            panic!("frame registration must precede delivery");
+        };
+        assert_eq!(consumers.len(), 2);
+        assert_eq!(consumers[0], consumer);
+        // The invalid pool fails before EGL, so this test needs no GPU.
+        assert!(renderer
+            .snapshot
+            .wait()
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("incomplete snapshot buffer planes"));
+        assert!(matches!(
+            records.recv().await.unwrap(),
+            FrameRecord::Skipped {
+                member_index: 1,
+                ..
+            }
+        ));
+        drop(members);
+        assert!(matches!(
+            records.recv().await.unwrap(),
+            FrameRecord::Skipped {
+                member_index: 0,
+                ..
+            }
+        ));
+    }
+}
+
+#[cfg(test)]
 mod reuse_tests {
     use super::*;
     use crate::plugin::renderer_registry::{
@@ -3157,6 +3271,7 @@ mod reuse_tests {
             published_pool: Arc::new(StdMutex::new(None)),
             sync_fds: Arc::new(StdMutex::new(std::collections::VecDeque::new())),
             latest_frame: Arc::new(StdMutex::new(None)),
+            snapshot: Arc::new(crate::wallframe::snapshot::Snapshot::default()),
             release_syncobj: Arc::new(StdMutex::new(None)),
             format_caps: Arc::new(StdMutex::new(None)),
             last_dispatched_scheme: Arc::new(StdMutex::new(None)),
