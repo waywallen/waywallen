@@ -262,6 +262,7 @@ Item {
 
     W.UserPropertyListModel {
         id: propertyModel
+        wallpaperId: root.wallpaperId
         schemaJson: wallpaperGetQuery.wallpaper?.userPropertiesSchema ?? ""
         overridesJson: wallpaperGetQuery.wallpaper?.userPropertyOverrides ?? ""
     }
@@ -824,6 +825,8 @@ Item {
                 readonly property string type: row.value.type
                 readonly property string section: row.value.section
                 readonly property string kind: row.value.kind
+                readonly property bool isGroup: row.value.isGroup
+                readonly property bool expanded: row.value.expanded
                 readonly property bool supported: row.value.supported
                 readonly property real minVal: row.value.minVal
                 readonly property real maxVal: row.value.maxVal
@@ -888,7 +891,46 @@ Item {
                     }
                 }
 
+                MD.ListItem {
+                    id: propertyGroupHeader
+                    Layout.fillWidth: true
+                    visible: m_prop_delegate.isGroup
+                    itemRow: m_prop_delegate.row
+                    text: m_prop_delegate.label
+                    radius: 8
+                    leftPadding: 8
+                    rightPadding: 8
+                    verticalPadding: 6
+                    implicitHeight: Math.max(40, implicitContentHeight + topPadding + bottomPadding)
+                    Accessible.expandable: true
+                    Accessible.expanded: m_prop_delegate.expanded
+                    onClicked: {
+                        root.dismissAnchoredPopups();
+                        propertyModel.setGroupExpanded(m_prop_delegate.key, !m_prop_delegate.expanded);
+                    }
+
+                    contentItem: RowLayout {
+                        spacing: 8
+
+                        MD.Text {
+                            Layout.fillWidth: true
+                            text: propertyGroupHeader.text
+                            textFormat: Text.RichText
+                            typescale: MD.Token.typescale.label_large
+                            color: propertyGroupHeader.mdState.textColor
+                            wrapMode: Text.WordWrap
+                        }
+
+                        MD.Icon {
+                            name: m_prop_delegate.expanded ? MD.Token.icon.expand_less : MD.Token.icon.expand_more
+                            color: propertyGroupHeader.mdState.textColor
+                            size: 20
+                        }
+                    }
+                }
+
                 MD.TextEdit {
+                    visible: !m_prop_delegate.isGroup
                     text: m_prop_delegate.label
                     textFormat: TextEdit.RichText
                     typescale: MD.Token.typescale.label_medium

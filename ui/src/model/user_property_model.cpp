@@ -72,10 +72,8 @@ QString coerceDefaultWireString(const QJsonValue& def, const QString& type) {
 UserPropertyListModel::UserPropertyListModel(QObject* parent): QAbstractListModel(parent) {
     connect(
         PluginTranslationStore::instance(), &PluginTranslationStore::revisionChanged, this, [this] {
-            if (m_entries.isEmpty()) return;
-            Q_EMIT dataChanged(index(0),
-                               index(static_cast<int>(m_entries.size()) - 1),
-                               { LabelRole, OptionLabelsRole });
+            if (m_visible_rows.isEmpty()) return;
+            Q_EMIT dataChanged(index(0), index(rowCount() - 1), { LabelRole, OptionLabelsRole });
         });
 }
 
@@ -83,7 +81,7 @@ UserPropertyListModel::~UserPropertyListModel() = default;
 
 int UserPropertyListModel::rowCount(const QModelIndex& parent) const {
     if (parent.isValid()) return 0;
-    return static_cast<int>(m_entries.size());
+    return static_cast<int>(m_visible_rows.size());
 }
 
 QHash<int, QByteArray> UserPropertyListModel::roleNames() const {
@@ -102,14 +100,18 @@ QHash<int, QByteArray> UserPropertyListModel::roleNames() const {
         { OptionValuesRole, "optionValues" },
         { SectionRole, "section" },
         { KindRole, "kind" },
+        { IsGroupRole, "isGroup" },
+        { GroupKeyRole, "groupKey" },
+        { ExpandedRole, "expanded" },
     };
 }
 
 QVariant UserPropertyListModel::data(const QModelIndex& index, int role) const {
     if (! index.isValid()) return {};
     const auto row = index.row();
-    if (row < 0 || row >= m_entries.size()) return {};
-    const auto& e = m_entries.at(row);
+    if (row < 0 || row >= m_visible_rows.size()) return {};
+    const auto  entry_index = m_visible_rows.at(row);
+    const auto& e           = m_entries.at(entry_index);
     switch (role) {
     case KeyRole: return e.key;
     case LabelRole: {
@@ -122,7 +124,7 @@ QVariant UserPropertyListModel::data(const QModelIndex& index, int role) const {
     case MaxValRole: return e.max_val;
     case StepValRole: return e.step_val;
     case ValueSuffixRole: return e.value_suffix;
-    case CurrentValueRole: return currentValueFor_(row);
+    case CurrentValueRole: return currentValueFor_(entry_index);
     case OptionLabelsRole: {
         auto labels = e.option_labels;
         for (qsizetype i = 0; i < labels.size() && i < e.localized_option_labels.size(); ++i) {
@@ -134,19 +136,24 @@ QVariant UserPropertyListModel::data(const QModelIndex& index, int role) const {
     }
     case OptionValuesRole: return e.option_values;
     case HasAlphaRole: {
-        const QString                   cv = currentValueFor_(row);
+        const QString                   cv = currentValueFor_(entry_index);
         static const QRegularExpression reSpaces(QStringLiteral("\\s+"));
         return cv.trimmed().split(reSpaces, Qt::SkipEmptyParts).size() >= 4;
     }
     case SectionRole: return e.section;
     case KindRole: return e.kind;
+    case IsGroupRole: return e.type == QLatin1String("group");
+    case GroupKeyRole: return e.group_key;
+    case ExpandedRole:
+        return e.type == QLatin1String("group") && ! m_collapsed_groups.contains(e.key);
     default: return {};
     }
 }
 
-QString UserPropertyListModel::currentValueFor_(qsizetype row) const {
-    const auto& e  = m_entries.at(row);
-    const auto  it = m_overrides.constFind(e.key);
+QString UserPropertyListModel::currentValueFor_(qsizetype entry_index) const {
+    const auto& e = m_entries.at(entry_index);
+    if (e.type == QLatin1String("group")) return {};
+    const auto it = m_overrides.constFind(e.key);
     if (it != m_overrides.constEnd()) return it.value();
     return e.default_wire;
 }
@@ -161,7 +168,8 @@ auto UserPropertyListModel::hasUserPropertyOverrides() const -> bool {
 
 auto UserPropertyListModel::hasOverridesForKind_(const QString& kind) const -> bool {
     for (const auto& e : m_entries) {
-        if (e.kind == kind && m_overrides.contains(e.key)) return true;
+        if (e.type != QLatin1String("group") && e.kind == kind && m_overrides.contains(e.key))
+            return true;
     }
     return false;
 }
@@ -171,6 +179,19 @@ void UserPropertyListModel::setSchemaJson(const QString& v) {
     m_schema_json = v;
     Q_EMIT schemaJsonChanged();
     rebuildEntries_();
+}
+
+void UserPropertyListModel::setWallpaperId(const QString& v) {
+    if (v == m_wallpaper_id) return;
+    m_wallpaper_id = v;
+    if (! m_collapsed_groups.isEmpty()) {
+        beginResetModel();
+        m_collapsed_groups.clear();
+        rebuildVisibleRows_();
+        endResetModel();
+        Q_EMIT countChanged();
+    }
+    Q_EMIT wallpaperIdChanged();
 }
 
 void UserPropertyListModel::setOverridesJson(const QString& v) {
@@ -190,10 +211,8 @@ void UserPropertyListModel::setOverridesJson(const QString& v) {
         }
     }
     // Every row's CurrentValue derivation depends on m_overrides.
-    if (! m_entries.isEmpty()) {
-        Q_EMIT dataChanged(index(0),
-                           index(static_cast<int>(m_entries.size()) - 1),
-                           { CurrentValueRole, HasAlphaRole });
+    if (! m_visible_rows.isEmpty()) {
+        Q_EMIT dataChanged(index(0), index(rowCount() - 1), { CurrentValueRole, HasAlphaRole });
     }
     Q_EMIT overrideStateChanged();
 }
@@ -240,23 +259,51 @@ void UserPropertyListModel::rebuildEntries_() {
                     e.localized_option_labels.append(localized_label);
                 }
             }
-            e.supported    = isSupported(e.type, ! e.option_values.isEmpty());
+            e.supported    = e.type == QLatin1String("group") ||
+                             isSupported(e.type, ! e.option_values.isEmpty());
             e.min_val      = v.value(QStringLiteral("min")).toDouble(0.0);
             e.max_val      = v.value(QStringLiteral("max")).toDouble(1.0);
             e.step_val     = v.value(QStringLiteral("step")).toDouble(0.0);
             e.value_suffix = v.value(QStringLiteral("suffix")).toString();
             e.default_wire = coerceDefaultWireString(v.value(QStringLiteral("value")), e.type);
-            e.order        = v.value(QStringLiteral("order")).toDouble(0.0);
+            e.order        = v.value(QStringLiteral("order"))
+                                 .toDouble(v.value(QStringLiteral("index")).toDouble(0.0));
             user_entries.append(std::move(e));
         }
-        std::sort(user_entries.begin(), user_entries.end(), [](const Entry& a, const Entry& b) {
-            return a.order < b.order;
-        });
+        std::stable_sort(
+            user_entries.begin(), user_entries.end(), [](const Entry& a, const Entry& b) {
+                return a.order < b.order;
+            });
+        QString       group_key;
+        QSet<QString> groups;
+        for (auto& entry : user_entries) {
+            if (entry.type == QLatin1String("group")) {
+                group_key = entry.key;
+                groups.insert(group_key);
+            }
+            entry.group_key = group_key;
+        }
+        m_collapsed_groups.intersect(groups);
         m_entries.append(user_entries);
     }
+    rebuildVisibleRows_();
     endResetModel();
     Q_EMIT countChanged();
     Q_EMIT overrideStateChanged();
+}
+
+void UserPropertyListModel::rebuildVisibleRows_() {
+    m_visible_rows.clear();
+    for (int i = 0; i < m_entries.size(); ++i) {
+        const auto& entry = m_entries.at(i);
+        if (entry.type == QLatin1String("group")) {
+            if (i + 1 == m_entries.size() || m_entries.at(i + 1).type == QLatin1String("group"))
+                continue;
+        } else if (! entry.group_key.isEmpty() && m_collapsed_groups.contains(entry.group_key)) {
+            continue;
+        }
+        m_visible_rows.append(i);
+    }
 }
 
 void UserPropertyListModel::appendPredefinedEntries_(const QJsonObject& schema) {
@@ -324,14 +371,52 @@ void UserPropertyListModel::appendPredefinedEntries_(const QJsonObject& schema) 
 }
 
 void UserPropertyListModel::setValue(const QString& key, const QString& value) {
+    const auto entry = std::find_if(m_entries.cbegin(), m_entries.cend(), [&key](const Entry& e) {
+        return e.key == key && e.type != QLatin1String("group");
+    });
+    if (entry == m_entries.cend()) return;
     m_overrides.insert(key, value);
     notifyCurrentChanged_(key);
     Q_EMIT overrideStateChanged();
     Q_EMIT valueChanged(key, value);
 }
 
+void UserPropertyListModel::setGroupExpanded(const QString& key, bool expanded) {
+    if (expanded == ! m_collapsed_groups.contains(key)) return;
+    const auto entry = std::find_if(m_entries.cbegin(), m_entries.cend(), [&key](const Entry& e) {
+        return e.key == key && e.type == QLatin1String("group");
+    });
+    if (entry == m_entries.cend()) return;
+    const auto entry_index = static_cast<int>(entry - m_entries.cbegin());
+    const auto row         = m_visible_rows.indexOf(entry_index);
+    if (row < 0) return;
+    int children = 0;
+    for (int i = entry_index + 1; i < m_entries.size(); ++i) {
+        if (m_entries.at(i).type == QLatin1String("group") || m_entries.at(i).group_key != key)
+            break;
+        ++children;
+    }
+    if (children == 0) return;
+    const auto first = static_cast<int>(row) + 1;
+    if (expanded) {
+        beginInsertRows({}, first, first + children - 1);
+        m_collapsed_groups.remove(key);
+        for (int i = 0; i < children; ++i) m_visible_rows.insert(first + i, entry_index + 1 + i);
+        endInsertRows();
+    } else {
+        beginRemoveRows({}, first, first + children - 1);
+        m_collapsed_groups.insert(key);
+        m_visible_rows.remove(first, children);
+        endRemoveRows();
+    }
+    const auto header = index(static_cast<int>(row));
+    Q_EMIT dataChanged(header, header, { ExpandedRole });
+    Q_EMIT countChanged();
+}
+
 void UserPropertyListModel::resetAll() {
     for (const auto& e : m_entries) {
+        if (e.type == QLatin1String("group")) continue;
         if (! m_overrides.contains(e.key)) continue;
         m_overrides.remove(e.key);
         notifyCurrentChanged_(e.key);
@@ -342,6 +427,7 @@ void UserPropertyListModel::resetAll() {
 
 void UserPropertyListModel::resetPredefinedProperties() {
     for (const auto& e : m_entries) {
+        if (e.type == QLatin1String("group")) continue;
         if (e.kind != builtinKind()) continue;
         if (! m_overrides.contains(e.key)) continue;
         m_overrides.remove(e.key);
@@ -353,6 +439,7 @@ void UserPropertyListModel::resetPredefinedProperties() {
 
 void UserPropertyListModel::resetUserProperties() {
     for (const auto& e : m_entries) {
+        if (e.type == QLatin1String("group")) continue;
         if (e.kind != userKind()) continue;
         if (! m_overrides.contains(e.key)) continue;
         m_overrides.remove(e.key);
@@ -363,8 +450,8 @@ void UserPropertyListModel::resetUserProperties() {
 }
 
 void UserPropertyListModel::notifyCurrentChanged_(const QString& key) {
-    for (qsizetype i = 0; i < m_entries.size(); ++i) {
-        if (m_entries.at(i).key == key) {
+    for (qsizetype i = 0; i < m_visible_rows.size(); ++i) {
+        if (m_entries.at(m_visible_rows.at(i)).key == key) {
             const auto idx = index(static_cast<int>(i));
             Q_EMIT dataChanged(idx, idx, { CurrentValueRole, HasAlphaRole });
             return;

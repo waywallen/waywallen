@@ -16,7 +16,7 @@ export namespace waywallen::model
 // daemon defaults and the source schema; plugin-published user
 // properties are appended from the schema.
 //
-// `schemaJson` is the renderer-published map<string,WPProperty>;
+// `schemaJson` is the plugin-published map<string,WPProperty>;
 // `overridesJson` is the DB column verbatim (object keyed by property
 // name with raw wire-side string values).
 class UserPropertyListModel : public QAbstractListModel {
@@ -24,6 +24,7 @@ class UserPropertyListModel : public QAbstractListModel {
     QML_ELEMENT
 
     Q_PROPERTY(QString schemaJson READ schemaJson WRITE setSchemaJson NOTIFY schemaJsonChanged)
+    Q_PROPERTY(QString wallpaperId READ wallpaperId WRITE setWallpaperId NOTIFY wallpaperIdChanged)
     Q_PROPERTY(
         QString overridesJson READ overridesJson WRITE setOverridesJson NOTIFY overridesJsonChanged)
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
@@ -49,6 +50,9 @@ public:
         OptionValuesRole,
         SectionRole,
         KindRole,
+        IsGroupRole,
+        GroupKeyRole,
+        ExpandedRole,
     };
     Q_ENUM(Roles)
 
@@ -62,6 +66,10 @@ public:
     auto          schemaJson() const -> const QString& { return m_schema_json; }
     void          setSchemaJson(const QString& v);
     Q_SIGNAL void schemaJsonChanged();
+
+    auto          wallpaperId() const -> const QString& { return m_wallpaper_id; }
+    void          setWallpaperId(const QString& v);
+    Q_SIGNAL void wallpaperIdChanged();
 
     auto          overridesJson() const -> const QString& { return m_overrides_json; }
     void          setOverridesJson(const QString& v);
@@ -79,6 +87,7 @@ public:
     // can debounce without seeing the noise from external schema /
     // overrides rebuilds.
     Q_INVOKABLE void setValue(const QString& key, const QString& value);
+    Q_INVOKABLE void setGroupExpanded(const QString& key, bool expanded);
 
     // Clear each matching override. One `resetRequested` per key, in order.
     Q_INVOKABLE void resetAll();
@@ -99,6 +108,7 @@ private:
         QString      type;
         QString      section;
         QString      kind;
+        QString      group_key;
         bool         supported { false };
         double       min_val { 0.0 };
         double       max_val { 1.0 };
@@ -112,15 +122,20 @@ private:
     };
 
     void    rebuildEntries_();
+    void    rebuildVisibleRows_();
     void    appendPredefinedEntries_(const QJsonObject& schema);
-    QString currentValueFor_(qsizetype row) const;
+    QString currentValueFor_(qsizetype entry_index) const;
     void    notifyCurrentChanged_(const QString& key);
     auto    hasOverridesForKind_(const QString& kind) const -> bool;
 
     QString                 m_schema_json;
+    QString                 m_wallpaper_id;
     QString                 m_overrides_json;
     QHash<QString, QString> m_overrides; // parsed view of m_overrides_json
     QList<Entry>            m_entries;
+    // Hidden entries retain their values and participate in resets.
+    QList<int>    m_visible_rows;
+    QSet<QString> m_collapsed_groups;
 };
 
 } // namespace waywallen::model
