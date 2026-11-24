@@ -112,7 +112,7 @@ MD.Dialog {
                     text: W.I18n.tr(fieldItem.modelData.descriptionText).replace(/(https?:\/\/[^\s]+)/g,
                         '<a href="$1"><font color="' + String(MD.Token.color.primary) + '">$1</font></a>')
                     textFormat: Text.StyledText
-                    onLinkActivated: link => MD.Util.openUrlExternally(link)
+                    onLinkActivated: link => W.App.openExternalLink(link)
                     typescale: MD.Token.typescale.body_small
                     color: MD.Token.color.on_surface_variant
                     wrapMode: Text.WordWrap

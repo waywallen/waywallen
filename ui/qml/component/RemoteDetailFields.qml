@@ -2,6 +2,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import Qcm.Material as MD
+import waywallen.ui as W
 
 ColumnLayout {
     id: root
@@ -50,7 +51,7 @@ ColumnLayout {
                 mdState.size: MD.Enum.XS
                 MD.ToolTip.visible: mdState.interactions.hovered
                 MD.ToolTip.text: fieldRow.externalUrl
-                onClicked: MD.Util.openUrlExternally(fieldRow.externalUrl)
+                onClicked: W.App.openExternalLink(fieldRow.externalUrl)
             }
         }
     }

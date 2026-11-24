@@ -74,6 +74,8 @@ public:
     Q_SLOT void      clearNetworkCache();
     Q_INVOKABLE bool setUiLanguage(const QString& language);
     Q_INVOKABLE void setSingleUiEnabled(bool enabled);
+    /// Open a link from untrusted text; only http(s) is passed on.
+    Q_INVOKABLE bool openExternalLink(const QString& link);
 
     Q_SIGNAL void errorOccurred(const QString& error);
     Q_SIGNAL void networkCacheSizeChanged();

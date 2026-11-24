@@ -55,7 +55,7 @@ W.DiscoverPage {
         MD.StandardIconButton {
             icon.name: MD.Token.icon.open_in_new
             visible: root.artistUrl.length > 0
-            onClicked: MD.Util.openUrlExternally(root.artistUrl)
+            onClicked: W.App.openExternalLink(root.artistUrl)
             MD.ToolTip.text: qsTr("Open web page")
             MD.ToolTip.visible: mdState.interactions.hovered
         }
