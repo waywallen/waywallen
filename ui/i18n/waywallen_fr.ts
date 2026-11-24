@@ -292,8 +292,8 @@
     </message>
     <message>
         <location filename="../qml/dialog/DaemonNotRunDialog.qml" line="81"/>
-        <source>Daemon version %1 + is incompatible.</source>
-        <translation>La version %1 ou plus du démon est requise.</translation>
+        <source>Daemon version %1 is incompatible.</source>
+        <translation>La version %1 du démon est incompatible.</translation>
     </message>
     <message>
         <location filename="../qml/dialog/DaemonNotRunDialog.qml" line="127"/>

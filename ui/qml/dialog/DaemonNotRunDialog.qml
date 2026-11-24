@@ -78,7 +78,7 @@ MD.Popup {
                 case W.DaemonDBusClient.VersionMissing:
                     return qsTr("Daemon is online but does not advertise a version.");
                 case W.DaemonDBusClient.VersionMismatch:
-                    return qsTr("Daemon version %1 + is incompatible.").arg(W.DaemonDBusClient.daemonVersion);
+                    return qsTr("Daemon version %1 is incompatible.").arg(W.DaemonDBusClient.daemonVersion);
                 }
                 return "";
             }
