@@ -818,6 +818,26 @@
 <context>
     <name>KdeDisplaysHelp</name>
     <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="23"/>
+        <source>Could not switch the desktop wallpaper: %1</source>
+        <translation>Impossible de changer le fond d'écran du bureau : %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="29"/>
+        <source>The &lt;b&gt;Waywallen&lt;/b&gt; wallpaper plugin is installed, but the desktop does not use it yet.</source>
+        <translation>Le greffon de fond d'écran &lt;b&gt;Waywallen&lt;/b&gt; est installé, mais le bureau ne l'utilise pas encore.</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="41"/>
+        <source>Use Waywallen on this desktop</source>
+        <translation>Utiliser Waywallen sur ce bureau</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="72"/>
+        <source>Or right-click the desktop → &lt;b&gt;Configure Desktop and Wallpaper…&lt;/b&gt; and pick the &lt;b&gt;Waywallen&lt;/b&gt; wallpaper plugin.</source>
+        <translation>Ou faites un clic droit sur le bureau → &lt;b&gt;Configurer le bureau et le fond d'écran…&lt;/b&gt; et choisissez le greffon de fond d'écran &lt;b&gt;Waywallen&lt;/b&gt;.</translation>
+    </message>
+    <message>
         <location filename="../qml/component/KdeDisplaysHelp.qml" line="18"/>
         <source>KDE Plasma needs the &lt;b&gt;waywallen-display&lt;/b&gt; wallpaper extension to bridge wallpapers to the desktop. Install it from either source:</source>
         <translation>KDE Plasma a besoin de l'extension de fond d'écran &lt;b&gt;waywallen-display&lt;/b&gt; pour relier les fonds d'écran au bureau. Installez-la depuis l'une de ces sources :</translation>

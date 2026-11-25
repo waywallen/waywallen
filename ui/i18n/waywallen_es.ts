@@ -818,6 +818,26 @@
 <context>
     <name>KdeDisplaysHelp</name>
     <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="23"/>
+        <source>Could not switch the desktop wallpaper: %1</source>
+        <translation>No se pudo cambiar el fondo de pantalla del escritorio: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="29"/>
+        <source>The &lt;b&gt;Waywallen&lt;/b&gt; wallpaper plugin is installed, but the desktop does not use it yet.</source>
+        <translation>El plugin de fondo de pantalla &lt;b&gt;Waywallen&lt;/b&gt; está instalado, pero el escritorio aún no lo usa.</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="41"/>
+        <source>Use Waywallen on this desktop</source>
+        <translation>Usar Waywallen en este escritorio</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="72"/>
+        <source>Or right-click the desktop → &lt;b&gt;Configure Desktop and Wallpaper…&lt;/b&gt; and pick the &lt;b&gt;Waywallen&lt;/b&gt; wallpaper plugin.</source>
+        <translation>O haz clic con el botón derecho en el escritorio → &lt;b&gt;Configurar el escritorio y el fondo de pantalla…&lt;/b&gt; y elige el plugin de fondo de pantalla &lt;b&gt;Waywallen&lt;/b&gt;.</translation>
+    </message>
+    <message>
         <location filename="../qml/component/KdeDisplaysHelp.qml" line="18"/>
         <source>KDE Plasma needs the &lt;b&gt;waywallen-display&lt;/b&gt; wallpaper extension to bridge wallpapers to the desktop. Install it from either source:</source>
         <translation>KDE Plasma necesita la extensión de fondo de pantalla &lt;b&gt;waywallen-display&lt;/b&gt; para llevar los fondos de pantalla al escritorio. Instálala desde cualquiera de estas fuentes:</translation>

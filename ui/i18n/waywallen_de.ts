@@ -818,6 +818,26 @@
 <context>
     <name>KdeDisplaysHelp</name>
     <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="23"/>
+        <source>Could not switch the desktop wallpaper: %1</source>
+        <translation>Das Hintergrundbild der Arbeitsfläche konnte nicht umgestellt werden: %1</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="29"/>
+        <source>The &lt;b&gt;Waywallen&lt;/b&gt; wallpaper plugin is installed, but the desktop does not use it yet.</source>
+        <translation>Das Hintergrundbild-Plugin &lt;b&gt;Waywallen&lt;/b&gt; ist installiert, wird von der Arbeitsfläche aber noch nicht verwendet.</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="41"/>
+        <source>Use Waywallen on this desktop</source>
+        <translation>Waywallen auf dieser Arbeitsfläche verwenden</translation>
+    </message>
+    <message>
+        <location filename="../qml/component/KdeDisplaysHelp.qml" line="72"/>
+        <source>Or right-click the desktop → &lt;b&gt;Configure Desktop and Wallpaper…&lt;/b&gt; and pick the &lt;b&gt;Waywallen&lt;/b&gt; wallpaper plugin.</source>
+        <translation>Oder klicken Sie mit der rechten Maustaste auf die Arbeitsfläche → &lt;b&gt;Arbeitsfläche und Hintergrundbild einrichten …&lt;/b&gt; und wählen Sie das Hintergrundbild-Plugin &lt;b&gt;Waywallen&lt;/b&gt;.</translation>
+    </message>
+    <message>
         <location filename="../qml/component/KdeDisplaysHelp.qml" line="18"/>
         <source>KDE Plasma needs the &lt;b&gt;waywallen-display&lt;/b&gt; wallpaper extension to bridge wallpapers to the desktop. Install it from either source:</source>
         <translation>KDE Plasma benötigt das Hintergrundbild-Plugin &lt;b&gt;waywallen-display&lt;/b&gt;, um Hintergrundbilder auf die Arbeitsfläche zu bringen. Installieren Sie es aus einer der beiden Quellen:</translation>
