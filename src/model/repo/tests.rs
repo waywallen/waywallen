@@ -290,6 +290,71 @@ fn minimal_args<'a>(
 }
 
 #[tokio::test]
+async fn wallpaper_selector_resolves_only_exact_library_matches() {
+    let db = mem_db().await;
+    let plugin = upsert_plugin(&db, "test-source", "1").await.unwrap();
+    let library = add_library(&db, plugin.id, "/library").await.unwrap();
+    let other = upsert_item(
+        &db,
+        minimal_args(plugin.id, library.id, "other.png", "image"),
+    )
+    .await
+    .unwrap();
+    let external_id = other.id.to_string();
+    let mut args = minimal_args(plugin.id, library.id, "nested/blue sky.png", "image");
+    args.external_id = Some(&external_id);
+    let entry = upsert_item(&db, args).await.unwrap();
+
+    for (selector, expected) in [
+        (WallpaperSelector::Id(&external_id), other.id),
+        (WallpaperSelector::ExternalId(&external_id), entry.id),
+        (
+            WallpaperSelector::FilePath("/library/nested/blue sky.png"),
+            entry.id,
+        ),
+    ] {
+        assert_eq!(
+            resolve_wallpaper_entry(&db, selector)
+                .await
+                .unwrap()
+                .item_id,
+            expected
+        );
+    }
+    for selector in [
+        WallpaperSelector::ExternalId("missing"),
+        WallpaperSelector::FilePath("/library/blue sky.png"),
+        WallpaperSelector::FilePath("/library2/nested/blue sky.png"),
+    ] {
+        assert!(matches!(
+            resolve_wallpaper_entry(&db, selector).await,
+            Err(Error::WallpaperNotFound(_))
+        ));
+    }
+}
+
+#[tokio::test]
+async fn wallpaper_selector_rejects_ambiguous_matches() {
+    let db = mem_db().await;
+    for source in ["source-a", "source-b"] {
+        let plugin = upsert_plugin(&db, source, "1").await.unwrap();
+        let library = add_library(&db, plugin.id, "/library").await.unwrap();
+        let mut args = minimal_args(plugin.id, library.id, "one.png", "image");
+        args.external_id = Some("42");
+        upsert_item(&db, args).await.unwrap();
+    }
+    for selector in [
+        WallpaperSelector::ExternalId("42"),
+        WallpaperSelector::FilePath("/library/one.png"),
+    ] {
+        assert!(matches!(
+            resolve_wallpaper_entry(&db, selector).await,
+            Err(Error::InvalidArgument(_))
+        ));
+    }
+}
+
+#[tokio::test]
 async fn item_can_remove_snapshot_round_trips_and_unknown_clears_it() {
     let db = mem_db().await;
     let plugin = upsert_plugin(&db, "image", "1").await.unwrap();

@@ -39,16 +39,23 @@ enum class Command
     Stop,
     Start
 };
+enum class WallpaperSelector
+{
+    Id,
+    ExternalId,
+    FilePath
+};
 struct Invocation {
-    Command         command { Command::Status };
-    client::Options connection;
-    bool            json {};
-    Vec<String>     arguments;
-    Vec<u64>        displays;
-    Vec<String>     canvases;
-    String          renderer, search, type;
-    u32             page {}, page_size { 100 };
-    i64             playlist_id {};
+    Command           command { Command::Status };
+    WallpaperSelector wallpaper_selector { WallpaperSelector::Id };
+    client::Options   connection;
+    bool              json {};
+    Vec<String>       arguments;
+    Vec<u64>          displays;
+    Vec<String>       canvases;
+    String            renderer, search, type;
+    u32               page {}, page_size { 100 };
+    i64               playlist_id {};
 };
 
 auto usage(ref<str> message) -> Failure {
@@ -81,6 +88,20 @@ template<class T>
 auto get(const ap::Matches& matches, const ap::ArgKey<T>& key) -> Option<ref<T>> {
     return matches.get_one(key).unwrap();
 }
+auto absolute_file_path(ref<str> value) -> CliResult<String> {
+    if (value.is_empty()) return Err(usage("file path must not be empty"_str));
+    auto path = rstd::path::PathBuf::from(value);
+    if (path.as_path().is_relative()) {
+        auto cwd = rstd::fs::canonicalize("."_str);
+        if (cwd.is_err()) return Err(usage("cannot resolve current directory"_str));
+        path = cwd->join(path.as_path());
+    }
+    auto normalized = path.as_path().normalize_lexically();
+    if (normalized.is_err()) return Err(usage("invalid file path"_str));
+    auto utf8 = normalized->as_path().to_str();
+    if (utf8.is_none()) return Err(usage("file path must be UTF-8"_str));
+    return Ok(String::make(*utf8));
+}
 struct CommandSpec {
     Command                    operation;
     Option<ap::CommandKey>     parent;
@@ -90,6 +111,9 @@ struct CommandSpec {
     Option<ap::ArgKey<String>> canvases, renderer, search, type;
     Option<ap::ArgKey<u32>>    page, page_size;
 };
+struct ApplySelectorArgs {
+    ap::ArgKey<String> id, external_id, file;
+};
 
 auto parse_args() -> CliResult<Option<Invocation>> {
     auto root = ap::Command::make("waywallen-switch"_str);
@@ -97,7 +121,8 @@ auto parse_args() -> CliResult<Option<Invocation>> {
     root.version(LITO_PKG_VERSION ""_str);
     root.require_subcommand();
     root.after_help(R"(List commands print tab-separated rows; --json prints structured results.
-IDs come from list commands, not names or paths. Omit targets to use all live targets.
+IDs come from list commands. Wallpaper apply also accepts a library external ID or file path.
+Omit targets to use all live targets.
 Only one write is sent. A timeout does not imply rollback.
 Exit codes: 0 success, 2 usage, 3 connection/protocol, 4 daemon error, 5 timeout.
 
@@ -105,6 +130,8 @@ Examples:
   waywallen-switch wallpaper list --search clouds
   waywallen-switch --json display list
   waywallen-switch wallpaper apply WALLPAPER_ID --display 1
+  waywallen-switch wallpaper apply --external-id 1234567890
+  waywallen-switch wallpaper apply --file ./wallpapers/clouds.png
   waywallen-switch playlist activate 2 --canvas CANVAS_ID
   waywallen-switch property set WALLPAPER_ID speed 0.5)"_str);
     auto json = root.add_arg(ap::Arg<bool>::flag("json"_str)
@@ -123,24 +150,46 @@ Examples:
                          .global()
                          .value_name("PORT"_str)
                          .help("Connect to loopback directly; not supported by next/previous"_str));
-    Vec<CommandSpec>   specs;
-    constexpr unsigned targets = 1, renderer = 2, list = 4;
-    auto               add = [&](ap::Command& group,
-                                 Option<ap::CommandKey>
-                                         parent,
-                                 Command operation,
-                                 ref<str>
-                                     name,
-                                 ref<str>
-                                          about,
-                                 unsigned options,
-                                 auto... positional) {
+    Vec<CommandSpec>          specs;
+    Option<ApplySelectorArgs> apply_selector_args;
+    constexpr unsigned        targets = 1, renderer = 2, list = 4;
+    auto                      add = [&](ap::Command& group,
+                                        Option<ap::CommandKey>
+                                                parent,
+                                        Command operation,
+                                        ref<str>
+                                            name,
+                                        ref<str>
+                                                 about,
+                                        unsigned options,
+                                        auto... positional) {
         auto command = ap::Command::make(name);
         command.about(about);
         CommandSpec spec { operation, parent, command.key() };
         (spec.arguments.push(
              command.add_arg(ap::Arg<String>::value(positional, ap::string_parser()).required())),
          ...);
+        if (operation == Command::Apply) {
+            auto id = command.add_arg(ap::Arg<String>::value("ID"_str, ap::string_parser())
+                                          .help("Library wallpaper ID"_str));
+            auto external_id =
+                command.add_arg(ap::Arg<String>::value("external-id"_str, ap::string_parser())
+                                    .long_name("external-id"_str)
+                                    .value_name("ID"_str)
+                                    .help("Exact source ID of an existing library wallpaper"_str));
+            auto file =
+                command.add_arg(ap::Arg<String>::value("file"_str, ap::string_parser())
+                                    .long_name("file"_str)
+                                    .value_name("PATH"_str)
+                                    .help("Resource path of an existing library wallpaper"_str));
+            command.add_group(ap::ArgGroup::make("wallpaper"_str)
+                                  .arg(id)
+                                  .arg(external_id)
+                                  .arg(file)
+                                  .required()
+                                  .multiple(false));
+            apply_selector_args = Some(ApplySelectorArgs { id, external_id, file });
+        }
         if (options & targets) {
             spec.displays =
                 Some(command.add_arg(ap::Arg<u64>::value("display"_str, ap::from_str_parser<u64>())
@@ -189,8 +238,7 @@ Examples:
         Command::Apply,
         "apply"_str,
         "Apply a wallpaper to selected targets"_str,
-        targets | renderer,
-        "ID"_str);
+        targets | renderer);
     root.add_subcommand(rstd::move(wallpaper));
     auto property = ap::Command::make("property"_str);
     property.about("Read or update wallpaper user properties"_str).require_subcommand();
@@ -331,6 +379,22 @@ Examples:
                 return Err(usage("ID and property key must not be empty"_str));
             result.arguments.push(value->clone());
         }
+        if (result.command == Command::Apply) {
+            const auto& keys = *apply_selector_args;
+            if (auto id = get(values, keys.id); id.is_some()) {
+                if ((*id)->is_empty()) return Err(usage("ID must not be empty"_str));
+                result.arguments.push((*id)->clone());
+            } else if (auto id = get(values, keys.external_id); id.is_some()) {
+                if ((*id)->is_empty()) return Err(usage("external ID must not be empty"_str));
+                result.wallpaper_selector = WallpaperSelector::ExternalId;
+                result.arguments.push((*id)->clone());
+            } else {
+                auto file = absolute_file_path(get(values, keys.file).unwrap()->as_str());
+                if (file.is_err()) return Err(rstd::move(file).unwrap_err());
+                result.wallpaper_selector = WallpaperSelector::FilePath;
+                result.arguments.push(rstd::move(file).unwrap());
+            }
+        }
         if (spec.displays.is_some()) {
             auto all = values.get_many(*spec.displays).unwrap();
             if (all.is_some())
@@ -422,8 +486,19 @@ auto make_request(const Invocation& invocation) -> pb::M_Request {
         break;
     }
     case Command::Apply: {
-        auto value             = Box<pb::M_WallpaperApplyRequest>::make();
-        value->f_wallpaper_id  = wallpaper_id();
+        using Selector = pb::M_WallpaperApplyRequest::C_o_wallpaper;
+        auto value     = Box<pb::M_WallpaperApplyRequest>::make();
+        switch (invocation.wallpaper_selector) {
+        case WallpaperSelector::Id:
+            value->o_wallpaper = Some(Selector::make_wallpaper_id(wallpaper_id()));
+            break;
+        case WallpaperSelector::ExternalId:
+            value->o_wallpaper = Some(Selector::make_external_id(wallpaper_id()));
+            break;
+        case WallpaperSelector::FilePath:
+            value->o_wallpaper = Some(Selector::make_file_path(wallpaper_id()));
+            break;
+        }
         value->f_targets       = targets(invocation);
         value->f_renderer_name = invocation.renderer.clone();
         request.o_payload      = Some(Payload::make_wallpaper_apply(rstd::move(value)));

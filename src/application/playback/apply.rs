@@ -374,11 +374,15 @@ pub async fn apply_wallpaper(
     id: &str,
     request: ApplyRequest,
 ) -> Result<ApplyResult> {
-    let entry = match id.parse::<i64>() {
-        Ok(iid) => repo::get_entry(&app.db, iid).await?,
-        Err(_) => None,
-    };
-    let entry = entry.ok_or_else(|| Error::WallpaperNotFound(id.to_string()))?;
+    apply_wallpaper_selected(app, repo::WallpaperSelector::Id(id), request).await
+}
+
+pub async fn apply_wallpaper_selected(
+    app: &Arc<DaemonContext>,
+    selector: repo::WallpaperSelector<'_>,
+    request: ApplyRequest,
+) -> Result<ApplyResult> {
+    let entry = repo::resolve_wallpaper_entry(&app.db, selector).await?;
 
     if request.require_display && app.router.display_count().await == 0 {
         return Err(Error::NoDisplayRegistered);

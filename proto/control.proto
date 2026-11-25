@@ -762,7 +762,13 @@ message SourcePluginInfo {
 }
 
 message WallpaperApplyRequest {
-  string wallpaper_id = 1;
+  oneof wallpaper {
+    string wallpaper_id = 1;
+    // Exact source ID. Must identify a single entry in the library.
+    string external_id = 7;
+    // Absolute resource path of a library entry, not an import request.
+    string file_path = 8;
+  }
   // Empty means every Canvas once plus every independent live display.
   repeated PresentationTarget targets = 5;
   // Optional renderer plugin name. Empty (default) lets the daemon pick

@@ -1,4 +1,6 @@
 use super::*;
+use sea_orm::Condition;
+use std::path::Path;
 
 // item
 
@@ -222,6 +224,79 @@ pub async fn get_entry(
     item_id: i64,
 ) -> Result<Option<crate::catalog::entry::WallpaperEntry>> {
     Ok(get_entries_ordered(db, &[item_id]).await?.pop())
+}
+
+pub enum WallpaperSelector<'a> {
+    Id(&'a str),
+    ExternalId(&'a str),
+    FilePath(&'a str),
+}
+
+pub async fn resolve_wallpaper_entry(
+    db: &DatabaseConnection,
+    selector: WallpaperSelector<'_>,
+) -> Result<crate::catalog::entry::WallpaperEntry> {
+    let (query, kind, value) = match selector {
+        WallpaperSelector::Id(id) => {
+            let entry = match id.parse::<i64>() {
+                Ok(id) => get_entry(db, id).await?,
+                Err(_) => None,
+            };
+            return entry.ok_or_else(|| Error::WallpaperNotFound(id.to_owned()));
+        }
+        WallpaperSelector::ExternalId(id) => {
+            if id.is_empty() {
+                return Err(Error::InvalidArgument(
+                    "external ID must not be empty".into(),
+                ));
+            }
+            (
+                item::Entity::find().filter(item::Column::ExternalId.eq(id)),
+                "external ID",
+                id,
+            )
+        }
+        WallpaperSelector::FilePath(value) => {
+            let path = Path::new(value);
+            if !path.is_absolute() {
+                return Err(Error::InvalidArgument("file path must be absolute".into()));
+            }
+            let mut matches = Condition::any();
+            for lib in list_libraries(db).await? {
+                let Ok(relative) = path.strip_prefix(&lib.path) else {
+                    continue;
+                };
+                if let Some(relative) = relative.to_str().filter(|path| !path.is_empty()) {
+                    matches = matches.add(
+                        Condition::all()
+                            .add(item::Column::LibraryId.eq(lib.id))
+                            .add(item::Column::Path.eq(relative)),
+                    );
+                }
+            }
+            if matches.is_empty() {
+                return Err(Error::WallpaperNotFound(value.to_owned()));
+            }
+            (item::Entity::find().filter(matches), "file path", value)
+        }
+    };
+    let ids = query
+        .select_only()
+        .column(item::Column::Id)
+        .limit(2)
+        .into_tuple::<i64>()
+        .all(db)
+        .await
+        .with_context(|| format!("look up wallpaper by {kind}"))?;
+    match ids.as_slice() {
+        [] => Err(Error::WallpaperNotFound(value.to_owned())),
+        [id] => get_entry(db, *id)
+            .await?
+            .ok_or_else(|| Error::WallpaperNotFound(value.to_owned())),
+        _ => Err(Error::InvalidArgument(format!(
+            "{kind} '{value}' matches multiple wallpapers; use a library wallpaper ID"
+        ))),
+    }
 }
 
 pub async fn get_entries_ordered<C: ConnectionTrait>(

@@ -1737,10 +1737,21 @@ pub(super) async fn dispatch_inner(
         }
 
         Req::WallpaperApply(r) => {
+            use pb::wallpaper_apply_request::Wallpaper;
+            let selector = match r.wallpaper.as_ref() {
+                Some(Wallpaper::WallpaperId(id)) => repo::WallpaperSelector::Id(id),
+                Some(Wallpaper::ExternalId(id)) => repo::WallpaperSelector::ExternalId(id),
+                Some(Wallpaper::FilePath(path)) => repo::WallpaperSelector::FilePath(path),
+                None => {
+                    return Err(Error::InvalidArgument(
+                        "wallpaper selector is required".into(),
+                    ))
+                }
+            };
             let targets = presentation_targets_from_pb(r.targets)?;
-            let res = application::apply_wallpaper(
+            let res = application::apply_wallpaper_selected(
                 state,
-                &r.wallpaper_id,
+                selector,
                 application::ApplyRequest {
                     source: application::ApplySource::UserWallpaper,
                     targets: (!targets.is_empty()).then_some(targets),
