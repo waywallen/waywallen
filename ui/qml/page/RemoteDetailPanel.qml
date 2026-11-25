@@ -46,7 +46,7 @@ Item {
         if (authorId.length > 0)
             artistRequested(authorId, authorName, authorAvatarUrl, authorAvatarHeaders, authorUrl);
         else if (authorUrl.length > 0)
-            MD.Util.openUrlExternally(authorUrl);
+            W.App.openExternalLink(authorUrl);
     }
 
     MD.Action {
@@ -54,7 +54,7 @@ Item {
         text: qsTr("Open web page")
         icon.name: MD.Token.icon.web
         visible: String(root.details?.webUrl ?? "").length > 0
-        onTriggered: MD.Util.openUrlExternally(root.details.webUrl)
+        onTriggered: W.App.openExternalLink(root.details.webUrl)
     }
 
     MD.Action {

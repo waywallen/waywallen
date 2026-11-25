@@ -214,7 +214,7 @@ ColumnLayout {
         visible: root.description.length > 0
         text: root.descriptionHtml
         textFormat: Text.StyledText
-        onLinkActivated: link => MD.Util.openUrlExternally(link)
+        onLinkActivated: link => W.App.openExternalLink(link)
         typescale: MD.Token.typescale.body_small
         color: MD.Token.color.on_surface_variant
         wrapMode: Text.WordWrap

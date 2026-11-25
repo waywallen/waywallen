@@ -364,7 +364,7 @@ Item {
         text: qsTr("Open web page")
         icon.name: MD.Token.icon.web
         visible: String(root.wp?.webUrl ?? "").length > 0
-        onTriggered: MD.Util.openUrlExternally(root.wp.webUrl)
+        onTriggered: W.App.openExternalLink(root.wp.webUrl)
     }
 
     MD.Action {
@@ -627,7 +627,7 @@ Item {
                         wrapMode: Text.WordWrap
                         maximumLineCount: m_description.expanded ? Number.MAX_SAFE_INTEGER : m_description.collapsedLines
                         elide: m_description.expanded ? Text.ElideNone : Text.ElideRight
-                        onLinkActivated: link => MD.Util.openUrlExternally(link)
+                        onLinkActivated: link => W.App.openExternalLink(link)
                     }
                 }
 
@@ -942,7 +942,7 @@ Item {
                     selectByMouse: false
                     activeFocusOnPress: false
                     wrapMode: TextEdit.WordWrap
-                    onLinkActivated: link => MD.Util.openUrlExternally(link)
+                    onLinkActivated: link => W.App.openExternalLink(link)
                 }
 
                 MD.Switch {

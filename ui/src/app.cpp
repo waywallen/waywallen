@@ -1,5 +1,7 @@
 module;
 #include "waywallen/app.moc.h"
+#include "waywallen/external_link.hpp"
+#include <QDesktopServices>
 #undef assert
 #include <rstd/macro.hpp>
 
@@ -315,6 +317,16 @@ auto App::presentationManager() const -> PresentationManager* {
 }
 
 auto App::version() const -> QString { return QStringLiteral(LITO_PKG_VERSION); }
+
+bool App::openExternalLink(const QString& link) {
+    const QUrl url(link.trimmed());
+    if (! detail::externalLinkAllowed(url)) {
+        qWarning("ignoring external link with unsupported scheme: %s",
+                 qPrintable(url.scheme().isEmpty() ? u"(none)"_s : url.scheme()));
+        return false;
+    }
+    return QDesktopServices::openUrl(url);
+}
 
 auto App::networkCacheSize() const -> qint64 {
     Q_D(const App);
