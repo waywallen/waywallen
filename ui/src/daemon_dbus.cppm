@@ -34,6 +34,9 @@ public:
     Q_PROPERTY(Status status READ status NOTIFY statusChanged FINAL)
     Q_PROPERTY(quint16 wsPort READ wsPort NOTIFY wsPortChanged FINAL)
     Q_PROPERTY(QString daemonVersion READ daemonVersion NOTIFY statusChanged FINAL)
+    /// Daemon release against this build: < 0 older, > 0 newer, 0 same or
+    /// unknown. A window can stay connected to a daemon of another release.
+    Q_PROPERTY(int daemonVersionOrder READ daemonVersionOrder NOTIFY statusChanged FINAL)
     /// `Daemon1.Capabilities`: control-plane revision first, then optional
     /// feature names. Empty when the daemon predates the property.
     Q_PROPERTY(QStringList daemonCapabilities READ daemonCapabilities NOTIFY statusChanged FINAL)
@@ -54,6 +57,7 @@ public:
     quint16            wsPort() const { return m_ws_port; }
     const QString&     daemonVersion() const { return m_daemon_version; }
     const QStringList& daemonCapabilities() const { return m_daemon_capabilities; }
+    int                daemonVersionOrder() const;
     bool               daemonAvailable() const { return m_status == Connected; }
     bool               quitOnDaemonShutdown() const { return m_quit_on_daemon_shutdown; }
     bool               daemonShutdownExpected() const { return m_daemon_shutdown_expected; }
