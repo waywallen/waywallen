@@ -51,6 +51,26 @@ Waywallen собирается с помощью [Lito](https://github.com/litoc
 | **COSMIC** | [waywallen-display/layer_shell](https://github.com/waywallen/waywallen-display/tree/main/src/bin/layer_shell) | ✅ | ✅ |
 | **Sway** | [waywallen-display/layer_shell](https://github.com/waywallen/waywallen-display/tree/main/src/bin/layer_shell) | ✅ | ❌ |
 
+### Управление из командной строки
+
+`waywallen-switch` управляет запущенным демоном Waywallen. Открывать графический интерфейс не нужно.
+
+```bash
+waywallen-switch status
+waywallen-switch wallpaper list --search clouds
+waywallen-switch --json display list
+waywallen-switch wallpaper apply 42 --display 1
+waywallen-switch wallpaper apply --external-id 2387616487
+waywallen-switch wallpaper apply --file './wallpapers/blue sky.png'
+waywallen-switch next
+```
+
+`wallpaper apply` принимает ID из библиотеки, точный внешний ID либо абсолютный или относительный путь к файлу. Обои должны уже быть в библиотеке: `--file` не импортирует их. Укажите `--display` или `--canvas`, чтобы выбрать цель. Без этих параметров обои применяются ко всем активным целям.
+
+Для Flatpak замените `waywallen-switch` на `flatpak run --command=waywallen-switch org.waywallen.waywallen`. Для AppImage распакуйте образ с помощью `--appimage-extract`, добавьте `squashfs-root/usr/lib` в `LD_LIBRARY_PATH` и запустите `squashfs-root/usr/bin/waywallen-switch`.
+
+Чтобы увидеть все команды и параметры, выполните `waywallen-switch --help`.
+
 ## Известная проблема
 
 - Для веб-обоев на видеокартах NVIDIA необходимо отключить параметр `shared_texture_enabled` в настройках веб-рендерера.
@@ -61,19 +81,20 @@ Waywallen собирается с помощью [Lito](https://github.com/litoc
 
 ## Плагины обоев
 
-- Плагин изображений
-- Плагин видео
-  - Аппаратное декодирование через Vulkan и VA-API
-- Плагин glTF
-- Плагин [Wallhaven](https://wallhaven.cc/)
-- Плагин [Sketchfab](https://sketchfab.com/)
-- Плагин [Pixiv](https://www.pixiv.net/)
+| Встроенный плагин | Поддержка |
+|-------------------|-----------|
+| Изображения | Обои из изображений |
+| Видео | Видеообои с аппаратным декодированием через Vulkan и VA-API |
+| glTF | Обои с моделями glTF |
+| [Wallhaven](https://wallhaven.cc/) | Источник обоев |
+| [Sketchfab](https://sketchfab.com/) | Источник 3D-моделей |
+| [Pixiv](https://www.pixiv.net/) | Источник обоев |
 
 ### Сторонние плагины
 
-- [open-wallpaper-engine](https://github.com/waywallen/open-wallpaper-engine)
-  - Поддержка сцен
-  - Поддержка веб-обоев
+| Плагин | Поддержка |
+|--------|-----------|
+| [open-wallpaper-engine](https://github.com/waywallen/open-wallpaper-engine) | Сцены и веб-обои Wallpaper Engine |
 
 > [!NOTE]
 > Для установки стороннего плагина необходимо вручную скачать ZIP-архив и установить его на странице плагинов в интерфейсе.<br>

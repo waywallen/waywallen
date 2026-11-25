@@ -6,7 +6,7 @@
 
 <p align="center"><strong> Wallpaper Manager for Linux </strong></p>
 
-<a href="README.CN.md">中文 README</a> · <a href="README.RU.md">Русский README</a> · <a href="https://discord.gg/2xEdmMrhRF">Discord</a>
+<a href="README.CN.md">中文 README</a> · <a href="README.ES.md">README en español</a> · <a href="README.RU.md">Русский README</a> · <a href="https://discord.gg/2xEdmMrhRF">Discord</a>
 
 ---
 
@@ -51,6 +51,26 @@ Waywallen is built by [Lito](https://github.com/litocpp/lito) (Please star it)
 | **COSMIC** | [waywallen-display/layer_shell](https://github.com/waywallen/waywallen-display/tree/main/src/bin/layer_shell) | ✅ | ✅ |
 | **Sway** | [waywallen-display/layer_shell](https://github.com/waywallen/waywallen-display/tree/main/src/bin/layer_shell) | ✅ | ❌ |
 
+### Command-line control
+
+`waywallen-switch` controls a running Waywallen daemon. The UI does not need to be open.
+
+```bash
+waywallen-switch status
+waywallen-switch wallpaper list --search clouds
+waywallen-switch --json display list
+waywallen-switch wallpaper apply 42 --display 1
+waywallen-switch wallpaper apply --external-id 2387616487
+waywallen-switch wallpaper apply --file './wallpapers/blue sky.png'
+waywallen-switch next
+```
+
+`wallpaper apply` accepts a library ID, an exact external ID, or an absolute or relative file path. The wallpaper must already be in the library; `--file` does not import it. Use `--display` or `--canvas` to choose a target, or omit both to apply to all active targets.
+
+With Flatpak, prefix the CLI arguments with `flatpak run --command=waywallen-switch org.waywallen.waywallen`. For AppImage installs, extract the image with `--appimage-extract`, then run `squashfs-root/usr/bin/waywallen-switch` with `squashfs-root/usr/lib` on `LD_LIBRARY_PATH`.
+
+Run `waywallen-switch --help` for all commands and options.
+
 ## Known issue
 - Web wallpapers on NVIDIA GPUs require `shared_texture_enabled` to be disabled in the web renderer settings.
 - Flatpak requires the `--talk-name=org.mpris.MediaPlayer2.*` D-Bus permission to read information about the currently playing track. Grant it for the current user with:
@@ -60,19 +80,20 @@ Waywallen is built by [Lito](https://github.com/litocpp/lito) (Please star it)
 
 ## Wallpaper plugins
 
-- Image plugin
-- Video plugin
-  - Hardware decoding via Vulkan and VA-API
-- glTF plugin
-- [Wallhaven](https://wallhaven.cc/) plugin
-- [Sketchfab](https://sketchfab.com/) plugin
-- [Pixiv](https://www.pixiv.net/) plugin
+| Bundled plugin | Support |
+|----------------|---------|
+| Image | Image wallpapers |
+| Video | Video wallpapers with Vulkan and VA-API hardware decoding |
+| glTF | glTF model wallpapers |
+| [Wallhaven](https://wallhaven.cc/) | Wallpaper source |
+| [Sketchfab](https://sketchfab.com/) | 3D model source |
+| [Pixiv](https://www.pixiv.net/) | Wallpaper source |
 
 ### Third-party plugins
 
-- [open-wallpaper-engine](https://github.com/waywallen/open-wallpaper-engine)
-  - Scene support
-  - Web support
+| Plugin | Support |
+|--------|---------|
+| [open-wallpaper-engine](https://github.com/waywallen/open-wallpaper-engine) | Wallpaper Engine scene and web wallpapers |
 
 > [!NOTE]
 > To install a third-party plugin, manually download its ZIP archive and install it from the plugins page in the UI.<br>

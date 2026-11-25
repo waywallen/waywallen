@@ -51,6 +51,26 @@ Waywallen se construye con [Lito](https://github.com/litocpp/lito) (por favor, d
 | **COSMIC** | [waywallen-display/layer_shell](https://github.com/waywallen/waywallen-display/tree/main/src/bin/layer_shell) | ✅ | ✅ |
 | **Sway** | [waywallen-display/layer_shell](https://github.com/waywallen/waywallen-display/tree/main/src/bin/layer_shell) | ✅ | ❌ |
 
+### Control desde la línea de comandos
+
+`waywallen-switch` controla el daemon de Waywallen en ejecución. No hace falta abrir la interfaz gráfica.
+
+```bash
+waywallen-switch status
+waywallen-switch wallpaper list --search clouds
+waywallen-switch --json display list
+waywallen-switch wallpaper apply 42 --display 1
+waywallen-switch wallpaper apply --external-id 2387616487
+waywallen-switch wallpaper apply --file './wallpapers/blue sky.png'
+waywallen-switch next
+```
+
+`wallpaper apply` acepta un ID de la biblioteca, un ID externo exacto o una ruta de archivo absoluta o relativa. El fondo debe estar ya en la biblioteca: `--file` no lo importa. Usa `--display` o `--canvas` para elegir un destino. Si no indicas ninguno, el fondo se aplica a todos los destinos activos.
+
+Con Flatpak, sustituye `waywallen-switch` por `flatpak run --command=waywallen-switch org.waywallen.waywallen`. Con AppImage, extrae la imagen con `--appimage-extract`, añade `squashfs-root/usr/lib` a `LD_LIBRARY_PATH` y ejecuta `squashfs-root/usr/bin/waywallen-switch`.
+
+Ejecuta `waywallen-switch --help` para ver todos los comandos y opciones.
+
 ## Problemas conocidos
 - Los fondos web en GPU NVIDIA requieren desactivar `shared_texture_enabled` en los ajustes del renderizador web.
 - Flatpak necesita el permiso D-Bus `--talk-name=org.mpris.MediaPlayer2.*` para leer la información de la pista que se está reproduciendo. Concédelo al usuario actual con:
@@ -60,19 +80,20 @@ Waywallen se construye con [Lito](https://github.com/litocpp/lito) (por favor, d
 
 ## Plugins de fondos de pantalla
 
-- Plugin de imágenes
-- Plugin de vídeo
-  - Decodificación por hardware mediante Vulkan y VA-API
-- Plugin de glTF
-- Plugin de [Wallhaven](https://wallhaven.cc/)
-- Plugin de [Sketchfab](https://sketchfab.com/)
-- Plugin de [Pixiv](https://www.pixiv.net/)
+| Plugin incluido | Compatibilidad |
+|-----------------|----------------|
+| Imágenes | Fondos con imágenes |
+| Vídeo | Fondos de vídeo con decodificación por hardware mediante Vulkan y VA-API |
+| glTF | Fondos con modelos glTF |
+| [Wallhaven](https://wallhaven.cc/) | Fuente de fondos de pantalla |
+| [Sketchfab](https://sketchfab.com/) | Fuente de modelos 3D |
+| [Pixiv](https://www.pixiv.net/) | Fuente de fondos de pantalla |
 
 ### Plugins de terceros
 
-- [open-wallpaper-engine](https://github.com/waywallen/open-wallpaper-engine)
-  - Compatibilidad con escenas
-  - Compatibilidad con contenido web
+| Plugin | Compatibilidad |
+|--------|----------------|
+| [open-wallpaper-engine](https://github.com/waywallen/open-wallpaper-engine) | Fondos de escenas y fondos web de Wallpaper Engine |
 
 > [!NOTE]
 > Para instalar un plugin de terceros, descarga manualmente su archivo ZIP e instálalo desde la página de plugins de la interfaz.<br>
