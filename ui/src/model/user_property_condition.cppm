@@ -43,6 +43,7 @@ private:
         Open,
         Value,
         Not,
+        AssignmentResult,
         Equal,
         NotEqual,
         StrictEqual,
@@ -133,7 +134,10 @@ private:
                 continue;
             }
             if (operand) {
+                const bool assigning_literal =
+                    ! pending.isEmpty() && pending.back() == Op::AssignmentResult;
                 if (character == u'!' || character == u'(') {
+                    if (assigning_literal) return false;
                     pending.append(character == u'!' ? Op::Not : Op::Open);
                     ++offset;
                     continue;
@@ -144,6 +148,10 @@ private:
                                         QRegularExpression::AnchorAtOffsetMatchOption);
                 if (! match.hasMatch()) return false;
                 Instruction instruction { Op::Value, {}, match.captured(1) };
+                if (assigning_literal &&
+                    (! instruction.key.isEmpty() ||
+                     ! QStringView(expression).sliced(match.capturedEnd()).trimmed().isEmpty()))
+                    return false;
                 if (! match.captured(2).isEmpty()) {
                     const auto literal = match.captured(2);
                     instruction.value  = literal == QLatin1String("null")
@@ -168,9 +176,19 @@ private:
                 pending.removeLast();
                 ++offset;
             } else {
+                const auto remaining = QStringView(expression).sliced(offset);
+                // Legacy assignments to a literal contribute only their result.
+                if (character == u'=' && ! remaining.startsWith(QStringView(u"==")) &&
+                    pending.isEmpty() && m_program.size() == 1 &&
+                    ! m_program.front().key.isEmpty()) {
+                    pending.append(Op::AssignmentResult);
+                    ++offset;
+                    operand = true;
+                    continue;
+                }
                 bool found = false;
                 for (const auto& pair : operators) {
-                    if (QStringView(expression).sliced(offset).startsWith(pair.text)) {
+                    if (remaining.startsWith(pair.text)) {
                         while (! pending.isEmpty() &&
                                precedence_(pending.back()) >= precedence_(pair.op))
                             m_program.append({ pending.takeLast(), {}, {} });
@@ -229,6 +247,7 @@ private:
             return op == Op::And;
         }
         if (left.isUndefined() || right.isUndefined()) return QJsonValue::Undefined;
+        if (op == Op::AssignmentResult) return right;
         if (op == Op::Equal || op == Op::NotEqual || op == Op::StrictEqual ||
             op == Op::StrictNotEqual) {
             bool equal = left == right;

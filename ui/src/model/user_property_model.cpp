@@ -278,7 +278,8 @@ void UserPropertyListModel::rebuildEntries_() {
             if (e.type.isEmpty()) e.type = QStringLiteral("text");
             e.condition = UserPropertyCondition(v.value(QStringLiteral("condition")).toString());
             if (! e.condition.isValid())
-                qWarning().noquote() << "unsupported user property condition:" << e.key;
+                qWarning().noquote() << "unsupported user property condition:" << e.key
+                                     << "wallpaper:" << m_wallpaper_id;
             if (v.value(QStringLiteral("options")).isArray()) {
                 const auto opts = v.value(QStringLiteral("options")).toArray();
                 e.options       = opts;
