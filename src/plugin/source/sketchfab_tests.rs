@@ -344,9 +344,22 @@ fn sketchfab_plugin_supports_model_downloads_and_installs_translations() {
     assert!(login.fields[0].secret && login.fields[0].required);
     assert_eq!(sources[0].status.len(), 1);
     assert_eq!(sources[0].status[0].id, "sketchfab_account");
-    assert_eq!(sources[0].filters.len(), 5);
+    assert_eq!(sources[0].filters.len(), 6);
     assert_eq!(sources[0].filters[0].ty, DiscoverFilterType::Select);
     assert_eq!(sources[0].filters[1].ty, DiscoverFilterType::Select);
+    let date = sources[0]
+        .filters
+        .iter()
+        .find(|filter| filter.id == "date")
+        .unwrap();
+    assert_eq!(date.ty, DiscoverFilterType::Select);
+    assert_eq!(date.title.text(), "Publication date");
+    assert!(date.title.is_translated());
+    assert_eq!(date.options.len(), 3);
+    for (option, value) in date.options.iter().zip(["date:1", "date:7", "date:31"]) {
+        assert_eq!(option.value, value);
+        assert!(option.label.is_translated());
+    }
     let restricted = sources[0]
         .filters
         .iter()
@@ -420,6 +433,42 @@ for _, params in ipairs({
 }) do
     local before = request_count()
     assert(not pcall(api.search, ctx, params))
+    assert(request_count() == before)
+end
+"#,
+    );
+}
+
+#[test]
+fn sketchfab_publication_date_filters_are_optional_and_preserved_across_pages() {
+    lua_test(
+        r#"
+for _, days in ipairs({'1', '7', '31'}) do
+    local tags = {'date:' .. days, 'category:nature-plants', 'feature:animated'}
+    reply({ results = {}, cursors = { next = 'date-cursor' } })
+    local first = discover.search(ctx, {
+        query = 'landscape', sort = 'likes', tags = tags, artist_id = 'model-artist'
+    })
+    local q = last_request().query
+    assert(q.date == days and q.categories == 'nature-plants' and q.animated == 'true')
+    assert(q.user == 'model-artist' and q.sort_by == '-likeCount')
+    assert(first.next_cursor == 'date-cursor')
+    reply({ results = {} })
+    discover.search(ctx, {
+        query = 'landscape', sort = 'likes', tags = tags, artist_id = 'model-artist',
+        page = 2, cursor = first.next_cursor
+    })
+    q = last_request().query
+    assert(q.date == days and q.cursor == first.next_cursor and q.user == 'model-artist')
+end
+reply({ results = {} })
+api.search(ctx, { tags = {'category:nature-plants'} })
+assert(last_request().query.date == nil)
+for _, tags in ipairs({
+    {'date:0'}, {'date:30'}, {'date:365'}, {'date:true'}, {'date:1', 'date:7'}
+}) do
+    local before = request_count()
+    assert(not pcall(api.search, ctx, {tags = tags}))
     assert(request_count() == before)
 end
 "#,

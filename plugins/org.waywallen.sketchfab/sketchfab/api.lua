@@ -44,6 +44,16 @@ M.filters = {
         },
     },
     {
+        id = "date",
+        title = tr("Publication date"),
+        type = "select",
+        options = {
+            { value = "date:1", label = tr("Last day") },
+            { value = "date:7", label = tr("Last 7 days") },
+            { value = "date:31", label = tr("Last 31 days") },
+        },
+    },
+    {
         id = "animated",
         title = tr("Animated only"),
         type = "toggle",
@@ -225,6 +235,8 @@ function M.search(ctx, params, headers)
             query.categories = value:sub(#"category:" + 1)
         elseif filter == "license" then
             query.license = value:sub(#"license:" + 1)
+        elseif filter == "date" then
+            query.date = value:sub(#"date:" + 1)
         else
             query[filter] = "true"
         end

@@ -21,7 +21,7 @@ msgstr "API Token 验证失败"
 msgid "Animals & Pets"
 msgstr "动物与宠物"
 
-#: sketchfab/api.lua:48 sketchfab/api.lua:50
+#: sketchfab/api.lua:58 sketchfab/api.lua:60
 msgid "Animated only"
 msgstr "仅含动画"
 
@@ -125,6 +125,18 @@ msgstr "GLB 归档"
 msgid "Guest mode"
 msgstr "访客模式"
 
+#: sketchfab/api.lua:53
+msgid "Last 31 days"
+msgstr "近 31 天"
+
+#: sketchfab/api.lua:52
+msgid "Last 7 days"
+msgstr "近 7 天"
+
+#: sketchfab/api.lua:51
+msgid "Last day"
+msgstr "近 1 天"
+
 #: sketchfab/api.lua:34 sketchfab/map.lua:202
 msgid "License"
 msgstr "许可证"
@@ -173,6 +185,10 @@ msgstr "人物"
 msgid "Places & Travel"
 msgstr "地点与旅行"
 
+#: sketchfab/api.lua:48
+msgid "Publication date"
+msgstr "发布时间"
+
 #: main.lua:72
 msgid "Recently published"
 msgstr "最新发布"
@@ -189,7 +205,7 @@ msgstr "移除 API Token"
 msgid "Science & Technology"
 msgstr "科学与技术"
 
-#: sketchfab/api.lua:60 sketchfab/api.lua:62
+#: sketchfab/api.lua:70 sketchfab/api.lua:72
 msgid "Show restricted content"
 msgstr "显示受限内容"
 
@@ -209,7 +225,7 @@ msgstr "Sketchfab 账户"
 msgid "Sports & Fitness"
 msgstr "体育与健身"
 
-#: sketchfab/api.lua:54 sketchfab/api.lua:56
+#: sketchfab/api.lua:64 sketchfab/api.lua:66
 msgid "Staff picks only"
 msgstr "仅精选"
 
