@@ -1739,9 +1739,9 @@ pub(super) async fn dispatch_inner(
         Req::WallpaperApply(r) => {
             use pb::wallpaper_apply_request::Wallpaper;
             let selector = match r.wallpaper.as_ref() {
-                Some(Wallpaper::WallpaperId(id)) => repo::WallpaperSelector::Id(id),
-                Some(Wallpaper::ExternalId(id)) => repo::WallpaperSelector::ExternalId(id),
-                Some(Wallpaper::FilePath(path)) => repo::WallpaperSelector::FilePath(path),
+                Some(Wallpaper::WallpaperId(id)) => repo::WallpaperSelector::Id(id.as_str()),
+                Some(Wallpaper::ExternalId(id)) => repo::WallpaperSelector::ExternalId(id.as_str()),
+                Some(Wallpaper::FilePath(path)) => repo::WallpaperSelector::FilePath(path.as_str()),
                 None => {
                     return Err(Error::InvalidArgument(
                         "wallpaper selector is required".into(),

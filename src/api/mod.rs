@@ -18,6 +18,7 @@ pub const CONTROL_CAPABILITIES: &[&str] = &[
     // `LogReadRequest` / `SettingsGetResponse.log_dir`, since 0.3.8.
     "log-read",
     "tray-language",
+    "wallpaper-apply-selector",
 ];
 
 #[cfg(test)]

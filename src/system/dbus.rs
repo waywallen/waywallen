@@ -7,6 +7,7 @@ use zbus::names::WellKnownName;
 use zbus::{interface, Connection, SignalContext};
 
 use crate::application;
+use crate::model::repo::WallpaperSelector;
 use crate::tasks::TaskState;
 use crate::DaemonContext;
 
@@ -16,6 +17,19 @@ pub const OBJECT_PATH: &str = "/org/waywallen/waywallen/Daemon";
 pub struct Daemon1 {
     app: Arc<DaemonContext>,
     display_socket_path: String,
+}
+
+impl Daemon1 {
+    async fn apply(&self, selector: WallpaperSelector<String>) -> zbus::fdo::Result<String> {
+        application::apply_wallpaper_globally(
+            &self.app,
+            selector,
+            application::ApplySource::UserWallpaper,
+        )
+        .await
+        .map(|r| r.renderer_id)
+        .map_err(zbus::fdo::Error::from)
+    }
 }
 
 #[interface(name = "org.waywallen.waywallen.Daemon1")]
@@ -154,10 +168,17 @@ impl Daemon1 {
     }
 
     async fn apply_by_id(&self, id: String) -> zbus::fdo::Result<String> {
-        application::apply_wallpaper_by_id(&self.app, &id, application::ApplySource::UserWallpaper)
-            .await
-            .map(|r| r.renderer_id)
-            .map_err(zbus::fdo::Error::from)
+        self.apply(WallpaperSelector::Id(id)).await
+    }
+
+    /// Apply a library wallpaper by its exact source ID.
+    async fn apply_by_external_id(&self, external_id: String) -> zbus::fdo::Result<String> {
+        self.apply(WallpaperSelector::ExternalId(external_id)).await
+    }
+
+    /// Apply a library wallpaper by its absolute resource path, without importing it.
+    async fn apply_by_file_path(&self, file_path: String) -> zbus::fdo::Result<String> {
+        self.apply(WallpaperSelector::FilePath(file_path)).await
     }
 
     /// Apply an image wallpaper via `org.freedesktop.portal.Wallpaper`.

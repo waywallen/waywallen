@@ -36,24 +36,30 @@ async fn apply_targets_for_displays(
         .collect())
 }
 
-/// Apply a wallpaper by id to every registered display.
-/// Supersedes any in-flight global apply task.
 pub async fn apply_wallpaper_by_id(
     app: &Arc<DaemonContext>,
     id: &str,
     source: ApplySource,
 ) -> Result<ApplyResult> {
+    apply_wallpaper_globally(app, repo::WallpaperSelector::Id(id.to_owned()), source).await
+}
+
+/// Apply to every registered display, superseding any in-flight global apply task.
+pub async fn apply_wallpaper_globally(
+    app: &Arc<DaemonContext>,
+    selector: repo::WallpaperSelector<String>,
+    source: ApplySource,
+) -> Result<ApplyResult> {
     let app_clone = app.clone();
-    let id_owned = id.to_string();
     let (tx, rx) = tokio::sync::oneshot::channel::<Result<ApplyResult>>();
     app.tasks.spawn_async_unique(
         crate::tasks::TaskKind::Apply,
         "apply/global",
-        format!("apply/{id_owned}"),
+        format!("apply/{}", selector.value()),
         async move {
-            let res = apply_wallpaper(
+            let res = apply_wallpaper_selected(
                 &app_clone,
-                &id_owned,
+                selector.as_borrowed(),
                 ApplyRequest {
                     source,
                     targets: None,
@@ -379,7 +385,7 @@ pub async fn apply_wallpaper(
 
 pub async fn apply_wallpaper_selected(
     app: &Arc<DaemonContext>,
-    selector: repo::WallpaperSelector<'_>,
+    selector: repo::WallpaperSelector<&str>,
     request: ApplyRequest,
 ) -> Result<ApplyResult> {
     let entry = repo::resolve_wallpaper_entry(&app.db, selector).await?;

@@ -306,8 +306,11 @@ async fn wallpaper_selector_resolves_only_exact_library_matches() {
     let entry = upsert_item(&db, args).await.unwrap();
 
     for (selector, expected) in [
-        (WallpaperSelector::Id(&external_id), other.id),
-        (WallpaperSelector::ExternalId(&external_id), entry.id),
+        (WallpaperSelector::Id(external_id.as_str()), other.id),
+        (
+            WallpaperSelector::ExternalId(external_id.as_str()),
+            entry.id,
+        ),
         (
             WallpaperSelector::FilePath("/library/nested/blue sky.png"),
             entry.id,

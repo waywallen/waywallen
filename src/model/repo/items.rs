@@ -226,37 +226,53 @@ pub async fn get_entry(
     Ok(get_entries_ordered(db, &[item_id]).await?.pop())
 }
 
-pub enum WallpaperSelector<'a> {
-    Id(&'a str),
-    ExternalId(&'a str),
-    FilePath(&'a str),
+pub enum WallpaperSelector<S> {
+    Id(S),
+    ExternalId(S),
+    FilePath(S),
+}
+
+impl<S: AsRef<str>> WallpaperSelector<S> {
+    pub fn value(&self) -> &str {
+        match self {
+            Self::Id(value) | Self::ExternalId(value) | Self::FilePath(value) => value.as_ref(),
+        }
+    }
+
+    pub fn as_borrowed(&self) -> WallpaperSelector<&str> {
+        match self {
+            Self::Id(value) => WallpaperSelector::Id(value.as_ref()),
+            Self::ExternalId(value) => WallpaperSelector::ExternalId(value.as_ref()),
+            Self::FilePath(value) => WallpaperSelector::FilePath(value.as_ref()),
+        }
+    }
 }
 
 pub async fn resolve_wallpaper_entry(
     db: &DatabaseConnection,
-    selector: WallpaperSelector<'_>,
+    selector: WallpaperSelector<&str>,
 ) -> Result<crate::catalog::entry::WallpaperEntry> {
-    let (query, kind, value) = match selector {
-        WallpaperSelector::Id(id) => {
-            let entry = match id.parse::<i64>() {
+    let value = selector.value();
+    let (query, kind) = match selector {
+        WallpaperSelector::Id(_) => {
+            let entry = match value.parse::<i64>() {
                 Ok(id) => get_entry(db, id).await?,
                 Err(_) => None,
             };
-            return entry.ok_or_else(|| Error::WallpaperNotFound(id.to_owned()));
+            return entry.ok_or_else(|| Error::WallpaperNotFound(value.to_owned()));
         }
-        WallpaperSelector::ExternalId(id) => {
-            if id.is_empty() {
+        WallpaperSelector::ExternalId(_) => {
+            if value.is_empty() {
                 return Err(Error::InvalidArgument(
                     "external ID must not be empty".into(),
                 ));
             }
             (
-                item::Entity::find().filter(item::Column::ExternalId.eq(id)),
+                item::Entity::find().filter(item::Column::ExternalId.eq(value)),
                 "external ID",
-                id,
             )
         }
-        WallpaperSelector::FilePath(value) => {
+        WallpaperSelector::FilePath(_) => {
             let path = Path::new(value);
             if !path.is_absolute() {
                 return Err(Error::InvalidArgument("file path must be absolute".into()));
@@ -277,7 +293,7 @@ pub async fn resolve_wallpaper_entry(
             if matches.is_empty() {
                 return Err(Error::WallpaperNotFound(value.to_owned()));
             }
-            (item::Entity::find().filter(matches), "file path", value)
+            (item::Entity::find().filter(matches), "file path")
         }
     };
     let ids = query
