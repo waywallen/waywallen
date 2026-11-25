@@ -16,6 +16,7 @@ namespace waywallen
 {
 int run(int argc, char** argv) {
     QGuiApplication gui_app(argc, argv);
+    QQuickWindow::setTextRenderType(QQuickWindow::CurveTextRendering);
     gui_app.setDesktopFileName(APP_ID);
     gui_app.setOrganizationName("waywallen");
     gui_app.setOrganizationDomain("waywallen.org");
