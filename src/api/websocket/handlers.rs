@@ -661,10 +661,8 @@ pub(super) async fn dispatch_inner(
             };
             repo::set_user_property_override(&state.db, entry.item_id, &r.key, value.as_deref())
                 .await?;
-            let retained_renderer_ids = state
-                .router
-                .renderer_ids_by_wallpaper(&r.wallpaper_id)
-                .await;
+            let wallpaper_id = entry.item_id.to_string();
+            let retained_renderer_ids = state.router.renderer_ids_by_wallpaper(&wallpaper_id).await;
             let persist_tag = format!("item={}", entry.item_id);
             let push_tag = if is_daemon_display_property_key(&r.key) {
                 if retained_renderer_ids.is_empty() {
@@ -783,11 +781,8 @@ pub(super) async fn dispatch_inner(
             let override_layout = layout
                 .map(WallpaperLayoutOverride::from_resolved)
                 .unwrap_or_default();
-            for renderer_id in state
-                .router
-                .renderer_ids_by_wallpaper(&r.wallpaper_id)
-                .await
-            {
+            let wallpaper_id = entry.item_id.to_string();
+            for renderer_id in state.router.renderer_ids_by_wallpaper(&wallpaper_id).await {
                 state
                     .router
                     .update_renderer_assignment_layout(&renderer_id, override_layout)

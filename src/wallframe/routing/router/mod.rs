@@ -5550,30 +5550,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reusable_renderer_is_selected_by_slot_identity() {
+    async fn shared_resource_renderers_are_isolated_by_wallpaper_id() {
         let mgr = Arc::new(RendererManager::new_default());
         let router = Router::new(mgr.clone());
-        add_stub_renderer(&mgr, &router, "r2").await;
         add_stub_renderer(&mgr, &router, "r1").await;
-        let request = crate::wallframe::renderer_manager::SpawnRequest {
-            wp_type: "scene".into(),
-            ..Default::default()
+        let display = router.register_display(reg("DP-1", 1920, 1080)).await;
+        let spawn_request = {
+            let mut inner = router.inner.lock().await;
+            let slot = inner.renderer_slots.get_mut("r1").unwrap();
+            slot.wallpaper_id = Some("1".into());
+            slot.spawn_request
+                .extras
+                .insert("path".into(), "/base.pkg".into());
+            slot.spawn_request.clone()
+        };
+        let mut assignment = ApplyAssignment {
+            wallpaper_id: "1".into(),
+            spawn_request,
+            targets: assignment_targets(vec![display.id]),
+            duplicate_renderers: false,
+            wallpaper_layout_override: WallpaperLayoutOverride::default(),
+            preempt_pending_start: true,
         };
 
-        assert_eq!(
-            router
-                .reusable_renderer_for_target(&request, &[], false)
-                .await
-                .as_deref(),
-            Some("r1")
-        );
+        let same = router.apply_assignment(assignment.clone()).await.unwrap();
+        assert_eq!(same.renderer_id, "r1");
+        assert_eq!(router.renderer_ids_by_wallpaper("1").await, ["r1"]);
+        assert!(router.renderer_ids_by_wallpaper("2").await.is_empty());
 
-        let mut different = request;
-        different.extras.insert("path".into(), "/other".into());
-        assert!(router
-            .reusable_renderer_for_target(&different, &[], false)
-            .await
-            .is_none());
+        assignment.wallpaper_id = "2".into();
+        // The new assignment needs a new process; the stub has no spawnable renderer.
+        assert!(router.apply_assignment(assignment).await.is_err());
+        let preset_ids = router.renderer_ids_by_wallpaper("2").await;
+        assert_eq!(preset_ids.len(), 1);
+        assert_ne!(preset_ids[0], "r1");
     }
 
     #[tokio::test(start_paused = true)]
