@@ -73,9 +73,9 @@ public:
     void          setWallpaperId(const QString& v);
     Q_SIGNAL void wallpaperIdChanged();
 
-    auto          overridesJson() const -> const QString& { return m_overrides_json; }
-    void          setOverridesJson(const QString& v);
-    Q_SIGNAL void overridesJsonChanged();
+    auto             overridesJson() const -> const QString& { return m_overrides_json; }
+    Q_INVOKABLE void setOverridesJson(const QString& v);
+    Q_SIGNAL void    overridesJsonChanged();
 
     Q_SIGNAL void countChanged();
     auto          hasPredefinedPropertyOverrides() const -> bool;

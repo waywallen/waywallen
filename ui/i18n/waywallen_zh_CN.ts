@@ -2646,6 +2646,17 @@ Unsaved frame state may be lost.</source>
 </context>
 <context>
     <name>WallpaperDetailPanel</name>
+    <message><source>Presets</source><translation>预设</translation></message>
+    <message><source>Loading presets…</source><translation>正在加载预设…</translation></message>
+    <message><source>Retry loading presets</source><translation>重试加载预设</translation></message>
+    <message><source>Save current settings…</source><translation>保存当前设置…</translation></message>
+    <message><source>Manage presets…</source><translation>管理预设…</translation></message>
+    <message><source>Preset applied</source><translation>已应用预设</translation></message>
+    <message><source>Preset applied, but the running renderer could not be updated</source><translation>已应用预设，但未能更新正在运行的渲染器</translation></message>
+    <message><source>Preset operation failed</source><translation>预设操作失败</translation></message>
+    <message><source>Preset operation canceled: %1</source><translation>已取消预设操作：%1</translation></message>
+    <message><source>Property update failed</source><translation>属性更新失败</translation></message>
+    <message><source>Could not refresh wallpaper properties</source><translation>无法刷新壁纸属性</translation></message>
     <message>
         <source>Flip</source>
         <translation>翻转</translation>
@@ -3603,5 +3614,22 @@ Unsaved frame state may be lost.</source>
     <message><source>Save</source><translation>保存</translation></message>
     <message><source>Add</source><translation>添加</translation></message>
     <message><source>Cancel</source><translation>取消</translation></message>
+</context>
+<context>
+    <name>WallpaperPresetDialog</name>
+    <message><source>Manage presets</source><translation>管理预设</translation></message>
+    <message><source>Save preset</source><translation>保存预设</translation></message>
+    <message><source>Apply preset</source><translation>应用预设</translation></message>
+    <message><source>Update preset</source><translation>更新预设</translation></message>
+    <message><source>Rename preset</source><translation>重命名预设</translation></message>
+    <message><source>Delete preset</source><translation>删除预设</translation></message>
+    <message><source>Update from current values</source><translation>用当前设置更新</translation></message>
+    <message><source>Preset name</source><translation>预设名称</translation></message>
+    <message><source>Apply "%1" and replace current settings not saved in a preset?</source><translation>应用「%1」并覆盖当前未另存的设置？</translation></message>
+    <message><source>Replace the saved values in "%1" with the current property values?</source><translation>用当前属性替换「%1」中保存的设置？</translation></message>
+    <message><source>Delete preset "%1"?</source><translation>删除预设「%1」？</translation></message>
+    <message><source>Refresh properties</source><translation>刷新属性</translation></message>
+    <message><source>Cancel</source><translation>取消</translation></message>
+    <message><source>Close</source><translation>关闭</translation></message>
 </context>
 </TS>

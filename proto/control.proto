@@ -111,6 +111,7 @@ message Request {
     LibraryRelocateRequest      library_relocate = 94;
     BrowserLoginCancelRequest   browser_login_cancel = 98;
     AudioOutputListRequest      audio_output_list = 99;
+    WallpaperPresetRequest      wallpaper_preset = 100;
   }
 }
 
@@ -209,6 +210,7 @@ message Response {
     Empty                        library_relocate = 94;
     BrowserLoginCancelResponse   browser_login_cancel = 98;
     AudioOutputListResponse      audio_output_list = 99;
+    WallpaperPresetResponse      wallpaper_preset = 100;
   }
 }
 
@@ -655,6 +657,34 @@ message WallpaperPropertySetRequest {
   }
 }
 message WallpaperPropertySetResponse {}
+
+message WallpaperPresetRequest {
+  string wallpaper_id = 1;
+  oneof operation {
+    Empty list = 2;
+    string save_name = 3;
+    int64 update_id = 4;
+    WallpaperPresetRename rename = 5;
+    int64 delete_id = 6;
+    int64 apply_id = 7;
+  }
+  bool protect_unsaved_values = 8;
+}
+message WallpaperPresetRename {
+  int64 preset_id = 1;
+  string name = 2;
+}
+message WallpaperPreset {
+  int64 id = 1;
+  string name = 2;
+}
+message WallpaperPresetResponse {
+  repeated WallpaperPreset presets = 1;
+  // The DB change succeeded, but a live renderer could not be updated.
+  bool renderer_update_failed = 2;
+  // The requested apply would overwrite values not saved in a preset.
+  bool confirmation_required = 3;
+}
 
 // Commit or clear the per-wallpaper display layout override. Unlike
 // `WallpaperPropertySetRequest`, this is daemon-owned data and is

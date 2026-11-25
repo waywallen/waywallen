@@ -648,6 +648,7 @@ pub(super) async fn dispatch_inner(
         }
 
         Req::WallpaperPropertySet(r) => {
+            let _mutation = state.wallpaper_property_mutation.lock().await;
             let entry = match r.wallpaper_id.parse::<i64>() {
                 Ok(iid) => repo::get_entry(&state.db, iid).await?,
                 Err(_) => None,
@@ -662,9 +663,10 @@ pub(super) async fn dispatch_inner(
             repo::set_user_property_override(&state.db, entry.item_id, &r.key, value.as_deref())
                 .await?;
             let wallpaper_id = entry.item_id.to_string();
-            let retained_renderer_ids = state.router.renderer_ids_by_wallpaper(&wallpaper_id).await;
             let persist_tag = format!("item={}", entry.item_id);
             let push_tag = if is_daemon_display_property_key(&r.key) {
+                let retained_renderer_ids =
+                    state.router.renderer_ids_by_wallpaper(&wallpaper_id).await;
                 if retained_renderer_ids.is_empty() {
                     String::from("offline")
                 } else {
@@ -682,63 +684,14 @@ pub(super) async fn dispatch_inner(
                     format!("display-layout={}", retained_renderer_ids.join(","))
                 }
             } else {
-                for renderer_id in &retained_renderer_ids {
-                    state
-                        .router
-                        .update_renderer_assignment_property(renderer_id, &r.key, value.as_deref())
-                        .await;
-                }
-                let mut pushed = Vec::new();
-                let mut schema_default = None;
-                for renderer_id in &retained_renderer_ids {
-                    let Some(handle) = state.renderer_manager.get(renderer_id).await else {
-                        continue;
-                    };
-                    let effective_value = if let Some(value) = value.as_ref() {
-                        value.clone()
-                    } else if let Some(default) = handle.default_user_property(&r.key) {
-                        default
-                    } else {
-                        if schema_default.is_none() {
-                            let schema = state
-                                .source_manager
-                                .call_properties(&entry.plugin_name, &entry)
-                                .await
-                                .ok()
-                                .flatten();
-                            schema_default = schema.as_deref().and_then(|schema| {
-                                user_property_default_wire_value(schema, &r.key)
-                            });
-                        }
-                        schema_default.clone().unwrap_or_else(|| {
-                            log::warn!(
-                                "WallpaperPropertySet: reset {} on {} has no default value",
-                                r.key,
-                                r.wallpaper_id
-                            );
-                            String::new()
-                        })
-                    };
-                    let settings = vec![(
-                        canonical_user_property_key(&r.key).to_string(),
-                        effective_value,
-                    )];
-                    state
-                        .renderer_manager
-                        .send_control(renderer_id, ControlMsg::SettingChanged { settings })
-                        .await
-                        .map_err(|error| {
-                            Error::Internal(anyhow::anyhow!(
-                                "send setting_changed to renderer {renderer_id}: {error}"
-                            ))
-                        })?;
-                    pushed.push(renderer_id.clone());
-                }
-                if pushed.is_empty() {
-                    String::from("offline")
-                } else {
-                    format!("renderer={}", pushed.join(","))
-                }
+                let key = canonical_user_property_key(&r.key).to_string();
+                application::wallpaper_properties::push_changes(
+                    state,
+                    &entry,
+                    &[(key, value.clone())],
+                )
+                .await?;
+                String::from("renderer properties")
             };
             let operation = value.as_deref().unwrap_or("<reset>");
             log::debug!(
@@ -752,7 +705,85 @@ pub(super) async fn dispatch_inner(
             Res::WallpaperPropertySet(pb::WallpaperPropertySetResponse {})
         }
 
+        Req::WallpaperPreset(r) => {
+            use pb::wallpaper_preset_request::Operation;
+            let operation = r.operation.ok_or_else(|| {
+                Error::InvalidArgument("missing wallpaper preset operation".into())
+            })?;
+            let item_id = r
+                .wallpaper_id
+                .parse::<i64>()
+                .map_err(|_| Error::WallpaperNotFound(r.wallpaper_id.clone()))?;
+            let _mutation = if matches!(operation, Operation::List(_)) {
+                None
+            } else {
+                Some(state.wallpaper_property_mutation.lock().await)
+            };
+            let mut renderer_update_failed = false;
+            let mut confirmation_required = false;
+            match operation {
+                Operation::List(_) => {}
+                Operation::SaveName(name) => {
+                    repo::create_wallpaper_preset(&state.db, item_id, &name).await?;
+                }
+                Operation::UpdateId(id) => {
+                    repo::update_wallpaper_preset(&state.db, item_id, id).await?;
+                }
+                Operation::Rename(rename) => {
+                    repo::rename_wallpaper_preset(
+                        &state.db,
+                        item_id,
+                        rename.preset_id,
+                        &rename.name,
+                    )
+                    .await?;
+                }
+                Operation::DeleteId(id) => {
+                    repo::delete_wallpaper_preset(&state.db, item_id, id).await?;
+                }
+                Operation::ApplyId(id) => {
+                    let entry = repo::get_entry(&state.db, item_id)
+                        .await?
+                        .ok_or_else(|| Error::WallpaperNotFound(r.wallpaper_id.clone()))?;
+                    let change = repo::apply_wallpaper_preset(
+                        &state.db,
+                        item_id,
+                        id,
+                        r.protect_unsaved_values,
+                    )
+                    .await?;
+                    if let Some(change) = change {
+                        let changes = application::wallpaper_properties::override_changes(
+                            &change.before,
+                            &change.after,
+                        );
+                        renderer_update_failed = application::wallpaper_properties::push_changes(
+                            state, &entry, &changes,
+                        )
+                        .await
+                        .is_err();
+                    } else {
+                        confirmation_required = true;
+                    }
+                }
+            }
+            let presets = repo::list_wallpaper_presets(&state.db, item_id)
+                .await?
+                .into_iter()
+                .map(|preset| pb::WallpaperPreset {
+                    id: preset.id,
+                    name: preset.name,
+                })
+                .collect();
+            Res::WallpaperPreset(pb::WallpaperPresetResponse {
+                presets,
+                renderer_update_failed,
+                confirmation_required,
+            })
+        }
+
         Req::WallpaperLayoutSet(r) => {
+            let _mutation = state.wallpaper_property_mutation.lock().await;
             let entry = match r.wallpaper_id.parse::<i64>() {
                 Ok(iid) => repo::get_entry(&state.db, iid).await?,
                 Err(_) => None,

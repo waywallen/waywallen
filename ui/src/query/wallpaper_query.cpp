@@ -457,6 +457,12 @@ void WallpaperGetQuery::reload() {
         if (! co_await QAsyncResult::qexecutor()) co_return;
         if (! self || ! self->isCurrentRequest(revision)) co_return;
 
+        if (result && (! result->hasWallpaperGet() ||
+                       result->wallpaperGet().entry().id_proto() != self->m_wallpaper_id)) {
+            self->setError({});
+            self->setStatus(Status::Error);
+            co_return;
+        }
         self->inspect_set(result, [self](const proto::Response& rsp) {
             self->m_wallpaper = rsp.wallpaperGet().entry();
             Q_EMIT self->wallpaperChanged();
@@ -616,51 +622,20 @@ void WallpaperHideQuery::setHiddenForIds(const QStringList& wallpaperIds, bool h
 
 WallpaperPropertySetQuery::WallpaperPropertySetQuery(QObject* parent): Query(parent) {}
 
-auto WallpaperPropertySetQuery::wallpaperId() const -> const QString& { return m_wallpaper_id; }
-void WallpaperPropertySetQuery::setWallpaperId(const QString& v) {
-    if (m_wallpaper_id != v) {
-        m_wallpaper_id = v;
-        Q_EMIT wallpaperIdChanged();
-    }
-}
-
-auto WallpaperPropertySetQuery::propertyKey() const -> const QString& { return m_property_key; }
-void WallpaperPropertySetQuery::setPropertyKey(const QString& v) {
-    if (m_property_key != v) {
-        m_property_key = v;
-        Q_EMIT propertyKeyChanged();
-    }
-}
-
-auto WallpaperPropertySetQuery::propertyValue() const -> const QString& { return m_property_value; }
-void WallpaperPropertySetQuery::setPropertyValue(const QString& v) {
-    if (m_property_value != v) {
-        m_property_value = v;
-        Q_EMIT propertyValueChanged();
-    }
-}
-
-auto WallpaperPropertySetQuery::reset() const -> bool { return m_reset; }
-void WallpaperPropertySetQuery::setReset(bool v) {
-    if (m_reset != v) {
-        m_reset = v;
-        Q_EMIT resetChanged();
-    }
-}
-
-void WallpaperPropertySetQuery::reload() {
-    if (m_wallpaper_id.isEmpty() || m_property_key.isEmpty()) return;
+void WallpaperPropertySetQuery::write(const QString& wallpaperId, const QString& key,
+                                      const QString& value, bool reset) {
+    if (querying()) return;
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
     auto req   = proto::Request {};
     auto inner = proto::WallpaperPropertySetRequest {};
-    inner.setWallpaperId(m_wallpaper_id);
-    inner.setKey(m_property_key);
-    if (m_reset)
+    inner.setWallpaperId(wallpaperId);
+    inner.setKey(key);
+    if (reset)
         inner.setReset(true);
     else
-        inner.setValue(m_property_value);
+        inner.setValue(value);
     req.setWallpaperPropertySet(std::move(inner));
 
     auto self = QWatcher { this };
@@ -668,8 +643,97 @@ void WallpaperPropertySetQuery::reload() {
         auto result = co_await backend->send(std::move(req));
         if (! co_await QAsyncResult::qexecutor()) co_return;
         if (! self) co_return;
+        if (result && ! result->hasWallpaperPropertySet()) {
+            self->setError({});
+            self->setStatus(Status::Error);
+            co_return;
+        }
         self->inspect_set(result, [](const proto::Response&) {
-            // No payload; success is just the absence of an error.
+        });
+        co_return;
+    });
+}
+
+// ---------------------------------------------------------------------------
+// WallpaperPresetQuery
+// ---------------------------------------------------------------------------
+
+WallpaperPresetQuery::WallpaperPresetQuery(QObject* parent): Query(parent) {}
+
+void WallpaperPresetQuery::list(const QString& wallpaperId) {
+    auto inner = proto::WallpaperPresetRequest {};
+    inner.setList(proto::Empty {});
+    send(wallpaperId, std::move(inner));
+}
+
+void WallpaperPresetQuery::save(const QString& wallpaperId, const QString& name) {
+    auto inner = proto::WallpaperPresetRequest {};
+    inner.setSaveName(name);
+    send(wallpaperId, std::move(inner));
+}
+
+void WallpaperPresetQuery::update(const QString& wallpaperId, const QString& presetId) {
+    auto inner = proto::WallpaperPresetRequest {};
+    inner.setUpdateId(presetId.toLongLong());
+    send(wallpaperId, std::move(inner));
+}
+
+void WallpaperPresetQuery::rename(const QString& wallpaperId, const QString& presetId,
+                                  const QString& name) {
+    auto inner  = proto::WallpaperPresetRequest {};
+    auto rename = proto::WallpaperPresetRename {};
+    rename.setPresetId(presetId.toLongLong());
+    rename.setName(name);
+    inner.setRename(std::move(rename));
+    send(wallpaperId, std::move(inner));
+}
+
+void WallpaperPresetQuery::remove(const QString& wallpaperId, const QString& presetId) {
+    auto inner = proto::WallpaperPresetRequest {};
+    inner.setDeleteId(presetId.toLongLong());
+    send(wallpaperId, std::move(inner));
+}
+
+void WallpaperPresetQuery::apply(const QString& wallpaperId, const QString& presetId,
+                                 bool overwrite) {
+    auto inner = proto::WallpaperPresetRequest {};
+    inner.setApplyId(presetId.toLongLong());
+    inner.setProtectUnsavedValues(! overwrite);
+    send(wallpaperId, std::move(inner));
+}
+
+void WallpaperPresetQuery::send(const QString& wallpaperId, proto::WallpaperPresetRequest inner) {
+    if (querying()) return;
+    setStatus(Status::Querying);
+    auto backend = App::instance()->backend();
+    auto req     = proto::Request {};
+    inner.setWallpaperId(wallpaperId);
+    req.setWallpaperPreset(std::move(inner));
+
+    auto self = QWatcher { this };
+    spawn([self, backend, req = std::move(req)]() mutable -> task<void> {
+        auto result = co_await backend->send(std::move(req));
+        if (! co_await QAsyncResult::qexecutor()) co_return;
+        if (! self) co_return;
+
+        if (result && ! result->hasWallpaperPreset()) {
+            self->setError({});
+            self->setStatus(Status::Error);
+            co_return;
+        }
+        self->inspect_set(result, [self](const proto::Response& rsp) {
+            const auto&  payload = rsp.wallpaperPreset();
+            QVariantList presets;
+            for (const auto& preset : payload.presets()) {
+                presets.append(QVariantMap {
+                    { u"id"_s, QString::number(preset.id_proto()) },
+                    { u"name"_s, preset.name() },
+                });
+            }
+            self->m_presets                = std::move(presets);
+            self->m_renderer_update_failed = payload.rendererUpdateFailed();
+            self->m_confirmation_required  = payload.confirmationRequired();
+            Q_EMIT self->presetsChanged();
         });
         co_return;
     });

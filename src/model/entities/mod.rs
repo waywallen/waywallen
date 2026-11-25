@@ -5,3 +5,4 @@ pub mod playlist;
 pub mod playlist_item;
 pub mod source_plugin;
 pub mod tag;
+pub mod wallpaper_property_preset;

@@ -27,6 +27,7 @@ pub(crate) struct DaemonContext {
     pub(crate) settings: Arc<settings::SettingsStore>,
     pub(crate) system_info: Arc<system::SystemInfo>,
     pub(crate) db: sea_orm::DatabaseConnection,
+    pub(crate) wallpaper_property_mutation: tokio::sync::Mutex<()>,
     pub(crate) queue: tokio::sync::Mutex<playback::QueueState>,
     pub(crate) rotation: playback::RotationHandle,
     pub(crate) events: events::EventBus,

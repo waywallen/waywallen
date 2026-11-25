@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 use crate::application;
 use crate::catalog::properties::{
     canonical_user_property_key, dedupe_predefined_schema, is_daemon_display_property_key,
-    user_property_default_wire_value, WallpaperLayoutOverride,
+    WallpaperLayoutOverride,
 };
 use crate::control_proto as pb;
 use crate::error::{ok_response, Error};
@@ -24,7 +24,6 @@ use crate::settings::{
     remote_content_dir, SettingsStore, WallpaperFilterState, WallpaperSortRuleState,
 };
 use crate::tasks;
-use crate::wallframe::ipc::proto::ControlMsg;
 use crate::wallframe::renderer_manager;
 use crate::wallframe::routing::{
     DisplaySnapshot, LayoutSource, LibrarySnapshot, RendererSnapshot, RouterEvent,

@@ -1442,7 +1442,7 @@ impl RendererManager {
         self.send_control_to_handle(id, &handle, msg).await
     }
 
-    async fn send_control_to_handle(
+    pub(crate) async fn send_control_to_handle(
         &self,
         id: &str,
         handle: &RendererHandle,

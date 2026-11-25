@@ -14,6 +14,7 @@ mod m20261024_000001_item_can_remove;
 mod m20261107_000001_item_sub_type;
 mod m20261107_000002_library_settings;
 mod m20261107_000003_native_probe;
+mod m20261124_000001_wallpaper_property_preset;
 
 pub struct Migrator;
 
@@ -35,6 +36,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261107_000001_item_sub_type::Migration),
             Box::new(m20261107_000002_library_settings::Migration),
             Box::new(m20261107_000003_native_probe::Migration),
+            Box::new(m20261124_000001_wallpaper_property_preset::Migration),
         ]
     }
 }

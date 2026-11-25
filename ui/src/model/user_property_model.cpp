@@ -225,10 +225,10 @@ void UserPropertyListModel::setWallpaperId(const QString& v) {
 }
 
 void UserPropertyListModel::setOverridesJson(const QString& v) {
-    if (v == m_overrides_json) return;
-    m_overrides_json = v;
-    Q_EMIT overridesJsonChanged();
+    const bool json_changed = v != m_overrides_json;
+    m_overrides_json        = v;
 
+    // The same server snapshot can still replace optimistic edits.
     m_overrides.clear();
     if (! m_overrides_json.isEmpty()) {
         QJsonParseError err {};
@@ -246,6 +246,7 @@ void UserPropertyListModel::setOverridesJson(const QString& v) {
         Q_EMIT dataChanged(index(0), index(rowCount() - 1), { CurrentValueRole, HasAlphaRole });
     }
     Q_EMIT overrideStateChanged();
+    if (json_changed) Q_EMIT overridesJsonChanged();
 }
 
 void UserPropertyListModel::rebuildEntries_() {

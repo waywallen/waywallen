@@ -264,6 +264,7 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         settings: settings_store,
         system_info,
         db: db.clone(),
+        wallpaper_property_mutation: tokio::sync::Mutex::new(()),
         queue: tokio::sync::Mutex::new(playback::QueueState::default()),
         rotation: rotation_handle,
         events,

@@ -425,29 +425,41 @@ impl Router {
         ids
     }
 
-    pub async fn update_renderer_assignment_property(
+    pub(crate) async fn update_wallpaper_assignment_properties(
         self: &Arc<Self>,
-        renderer_id: &str,
-        key: &str,
-        value: Option<&str>,
-    ) -> bool {
+        wallpaper_id: &str,
+        changes: &[(String, Option<String>)],
+    ) -> Vec<ActiveRenderer> {
         let mut inner = self.inner.lock().await;
-        let Some(slot) = inner.renderer_slots.get_mut(renderer_id) else {
-            return false;
-        };
-        let key = crate::catalog::properties::canonical_user_property_key(key).to_string();
-        match value {
-            Some(value) => {
-                slot.spawn_request
-                    .user_property_overrides
-                    .insert(key, value.to_string());
+        let mut active = Vec::new();
+        for (id, slot) in &mut inner.renderer_slots {
+            if slot.wallpaper_id.as_deref() != Some(wallpaper_id) {
+                continue;
             }
-            None => {
-                slot.spawn_request.user_property_overrides.remove(&key);
+            let mut changed = false;
+            let overrides = &mut slot.spawn_request.user_property_overrides;
+            for (key, value) in changes {
+                if overrides.get(key) == value.as_ref() {
+                    continue;
+                }
+                if let Some(value) = value {
+                    overrides.insert(key.clone(), value.clone());
+                } else {
+                    overrides.remove(key);
+                }
+                changed = true;
+            }
+            if changed {
+                slot.spec_revision = slot.spec_revision.wrapping_add(1).max(1);
+            }
+            if let RendererLifecycleState::Running { generation, .. } = slot.state {
+                active.push(ActiveRenderer {
+                    renderer_id: id.clone(),
+                    process_generation: generation,
+                });
             }
         }
-        slot.spec_revision = slot.spec_revision.wrapping_add(1).max(1);
-        true
+        active
     }
 
     pub async fn update_renderer_assignment_settings(

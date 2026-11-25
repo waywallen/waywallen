@@ -258,45 +258,45 @@ export class WallpaperPropertySetQuery
     Q_OBJECT
     QML_ELEMENT
 
-    /// Wallpaper to edit. Empty disables `reload()`.
-    Q_PROPERTY(
-        QString wallpaperId READ wallpaperId WRITE setWallpaperId NOTIFY wallpaperIdChanged FINAL)
-    /// Property key (matches a key in the schema, e.g. `u_brightness`).
-    Q_PROPERTY(
-        QString propertyKey READ propertyKey WRITE setPropertyKey NOTIFY propertyKeyChanged FINAL)
-    /// Serialized value: color → "r g b" / "r g b a"; slider → number;
-    /// bool → "true"/"false"; string → raw. Empty is a valid string value.
-    Q_PROPERTY(QString propertyValue READ propertyValue WRITE setPropertyValue NOTIFY
-                   propertyValueChanged FINAL)
-    Q_PROPERTY(bool reset READ reset WRITE setReset NOTIFY resetChanged FINAL)
-
 public:
     WallpaperPropertySetQuery(QObject* parent = nullptr);
 
-    auto wallpaperId() const -> const QString&;
-    void setWallpaperId(const QString&);
+    Q_INVOKABLE void write(const QString& wallpaperId, const QString& key, const QString& value,
+                           bool reset);
+};
 
-    auto propertyKey() const -> const QString&;
-    void setPropertyKey(const QString&);
+export class WallpaperPresetQuery : public Query,
+                                    public QueryExtra<control::v1::Response, WallpaperPresetQuery> {
+    Q_OBJECT
+    QML_ELEMENT
 
-    auto propertyValue() const -> const QString&;
-    void setPropertyValue(const QString&);
+    Q_PROPERTY(QVariantList presets READ presets NOTIFY presetsChanged FINAL)
+    Q_PROPERTY(bool rendererUpdateFailed READ rendererUpdateFailed NOTIFY presetsChanged FINAL)
+    Q_PROPERTY(bool confirmationRequired READ confirmationRequired NOTIFY presetsChanged FINAL)
 
-    auto reset() const -> bool;
-    void setReset(bool);
+public:
+    WallpaperPresetQuery(QObject* parent = nullptr);
 
-    void reload() override;
+    auto presets() const -> const QVariantList& { return m_presets; }
+    bool rendererUpdateFailed() const { return m_renderer_update_failed; }
+    bool confirmationRequired() const { return m_confirmation_required; }
 
-    Q_SIGNAL void wallpaperIdChanged();
-    Q_SIGNAL void propertyKeyChanged();
-    Q_SIGNAL void propertyValueChanged();
-    Q_SIGNAL void resetChanged();
+    Q_INVOKABLE void list(const QString& wallpaperId);
+    Q_INVOKABLE void save(const QString& wallpaperId, const QString& name);
+    Q_INVOKABLE void update(const QString& wallpaperId, const QString& presetId);
+    Q_INVOKABLE void rename(const QString& wallpaperId, const QString& presetId,
+                            const QString& name);
+    Q_INVOKABLE void remove(const QString& wallpaperId, const QString& presetId);
+    Q_INVOKABLE void apply(const QString& wallpaperId, const QString& presetId, bool overwrite);
+
+    Q_SIGNAL void presetsChanged();
 
 private:
-    QString m_wallpaper_id;
-    QString m_property_key;
-    QString m_property_value;
-    bool    m_reset { false };
+    void send(const QString& wallpaperId, control::v1::WallpaperPresetRequest);
+
+    QVariantList m_presets;
+    bool         m_renderer_update_failed { false };
+    bool         m_confirmation_required { false };
 };
 
 export class WallpaperLayoutSetQuery
