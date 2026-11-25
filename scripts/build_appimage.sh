@@ -11,7 +11,7 @@ ENV_NAME="${WAYWALLEN_CONDA_ENV:-waywallen}"
 ENV_PREFIX="${WAYWALLEN_CONDA_PREFIX:-$PROJECT_DIR/build/conda-envs/$ENV_NAME}"
 TMP_DIR="${TMPDIR:-/tmp}"
 WAYWALLEN_DISPLAY_REPO="${WAYWALLEN_DISPLAY_REPO:-https://github.com/waywallen/waywallen-display.git}"
-WAYWALLEN_DISPLAY_REF="${WAYWALLEN_DISPLAY_REF:-729f1d919a62230f4529f356621a169b59de4325}"
+WAYWALLEN_DISPLAY_REF="${WAYWALLEN_DISPLAY_REF:-5431d988ca050e2e138ff5de0c677aff74392cbd}"
 APPDIR="$PROJECT_DIR/build/AppDir"
 INSTALL_DIR="$APPDIR/usr"
 TOOLS_DIR="$PROJECT_DIR/build/_tools"
@@ -273,7 +273,6 @@ ICON_FILE="$INSTALL_DIR/share/icons/hicolor/scalable/apps/org.waywallen.waywalle
 [[ -f "$ICON_FILE" ]] || fail "missing icon: $ICON_FILE"
 
 pushd "$TOOLS_DIR"
-"$LINUXDEPLOY_QT" --appimage-extract
 "$LINUXDEPLOY" --appimage-extract
 LINUXDEPLOY="$TOOLS_DIR/squashfs-root/AppRun"
 popd
@@ -287,21 +286,33 @@ LINUXDEPLOY_EXECUTABLE_ARGS=(
 )
 PATH="$TOOLS_DIR:$PATH" \
 LD_LIBRARY_PATH="$INSTALL_DIR/lib:$CONDA_PREFIX/lib" \
-QMAKE="$CONDA_PREFIX/bin/qmake6" \
-EXTRA_PLATFORM_PLUGINS="libqwayland.so" \
-EXTRA_QT_PLUGINS="wayland-decoration-client;wayland-shell-integration" \
-QML_SOURCES_PATHS="$PROJECT_DIR/ui/qml" \
 "$LINUXDEPLOY" \
     --appdir "$APPDIR" \
-    --plugin qt \
     "${LINUXDEPLOY_EXECUTABLE_ARGS[@]}" \
     --desktop-file "$DESKTOP_FILE" \
     --icon-file "$ICON_FILE" \
     --custom-apprun "$APPRUN_TMP"
 
+QT_PLUGINS_DIR="$("$CONDA_PREFIX/bin/qmake6" -query QT_INSTALL_PLUGINS)"
+QT_PLUGIN_EXCLUDE_ARGS=()
+for qt_plugin in "$QT_PLUGINS_DIR/networkinformation/"*.so*; do
+    [[ -f "$qt_plugin" ]] || continue
+    QT_PLUGIN_EXCLUDE_ARGS+=(--exclude-library "${qt_plugin##*/}")
+done
+PATH="$TOOLS_DIR:$PATH" \
+LD_LIBRARY_PATH="$INSTALL_DIR/lib:$CONDA_PREFIX/lib" \
+QMAKE="$CONDA_PREFIX/bin/qmake6" \
+EXTRA_PLATFORM_PLUGINS="libqwayland.so" \
+EXTRA_QT_PLUGINS="wayland-decoration-client;wayland-shell-integration" \
+QML_SOURCES_PATHS="$PROJECT_DIR/ui/qml" \
+"$LINUXDEPLOY_QT" --appimage-extract-and-run \
+    --appdir "$APPDIR" \
+    "${QT_PLUGIN_EXCLUDE_ARGS[@]}"
+
 cp -rv "$CONDA_PREFIX/lib/qt6/plugins/wayland-graphics-integration-client" "$APPDIR/usr/plugins/"
 cp -v "$CONDA_PREFIX/lib/libstdc++.so.6" "$APPDIR/usr/lib/"
 cp -v "$CONDA_PREFIX/lib/libgcc_s.so.1" "$APPDIR/usr/lib/"
+cp -v "$CONDA_PREFIX/lib/libopenal.so.1" "$APPDIR/usr/lib/"
 
 pushd "$APPDIR"
 rm -rf ./usr/lib/qt6
@@ -319,7 +330,6 @@ rm -rf ./usr/lib/libk5crypto.so.3
 rm -rf ./usr/lib/libgssapi_krb5*
 rm -rf ./usr/lib/libxkbcommon*
 rm -rf ./usr/lib/*.a
-rm -rf ./usr/plugins/networkinformation
 popd
 
 info "Pruning unused QuickControls2 styles"
