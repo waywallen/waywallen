@@ -1,3 +1,33 @@
+<release version="0.6.2" date="2026-11-25">
+  <description>
+    <p>Added:</p>
+    <ul>
+      <li>Save, switch, rename and delete named wallpaper property presets.</li>
+      <li>Control wallpapers and playback from the waywallen-switch command-line tool.</li>
+      <li>Select the audio output device for wallpaper playback and audio capture. #416 by @HarleyGaniere</li>
+    </ul>
+    <p>Improved:</p>
+    <ul>
+      <li>Wallpaper properties support collapsible groups, descriptions, visibility conditions and numeric precision.</li>
+      <li>Allow configuring the first-frame timeout with WAYWALLEN_FIRST_FRAME_TIMEOUT_SECS. #411 by @HarleyGaniere</li>
+      <li>Offer a button to activate the installed Waywallen wallpaper plugin on Plasma desktops. #431 by @wehrwolfmann</li>
+      <li>Show the QML module version on the About page. #426 by @wehrwolfmann</li>
+      <li>Indicate whether the connected daemon is older or newer than the UI. #430 by @wehrwolfmann</li>
+      <li>Link the Wallhaven API key field to account settings. #425 by @wehrwolfmann</li>
+      <li>Translate wallpaper badges, artist pages and units in German, Russian, Ukrainian, French and Spanish. #424 by @wehrwolfmann</li>
+      <li>Transfer keyboard focus when selecting wallpaper cards and menu chips.</li>
+    </ul>
+    <p>Fixed:</p>
+    <ul>
+      <li>Support linear DMA-BUF buffers on Vulkan drivers without DRM format modifier support. #409 by @HarleyGaniere</li>
+      <li>Use canonical wallpaper IDs when updating running renderers.</li>
+      <li>Handle literal assignments in wallpaper property visibility conditions.</li>
+      <li>Restrict links opened from remote text to HTTP and HTTPS. #432 by @wehrwolfmann</li>
+      <li>Exclude the unused Qt network information plugin from AppImage bundles.</li>
+      <li>Avoid accessing Qt windows after display rendering resources have shut down.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.6.1" date="2026-11-18">
   <description>
     <p>Added:</p>

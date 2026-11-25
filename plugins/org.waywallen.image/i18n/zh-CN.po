@@ -1,53 +1,37 @@
-#: main.lua
-msgid "Scan mode"
-msgstr "扫描模式"
-
-#: main.lua
-msgid "Image files"
-msgstr "图片文件"
-
-#: main.lua
-msgid "Desktop wallpapers"
-msgstr "桌面壁纸"
-
-#: main.lua
-msgid "Scan image files or desktop wallpaper definitions such as KDE and GNOME wallpapers."
-msgstr "扫描图片文件，或 KDE、GNOME 等桌面壁纸的描述文件。"
-
 msgid ""
-msgstr "Project-Id-Version: org.waywallen.image 0.6.1\nLanguage: zh-CN\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: org.waywallen.image 0.6.2\nLanguage: zh-CN\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
-#: image/wallpaper.lua
-msgid "Wallpaper variant"
-msgstr "壁纸变体"
+#: main.lua:20
+msgid "A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Auto-detect also finds installed KDE and GNOME system wallpapers."
+msgstr "包含图片文件的目录。同时扫描最多两级子目录。支持格式：PNG、JPEG、WebP、BMP、TIFF、AVIF、GIF。自动检测还会查找已安装的 KDE 和 GNOME 系统壁纸。"
 
-#: image/wallpaper.lua
-msgid "Simulated day and night"
-msgstr "模拟昼夜"
-
-#: image/wallpaper.lua
-msgid "Always light"
-msgstr "始终浅色"
-
-#: image/wallpaper.lua
+#: image/wallpaper.lua:17
 msgid "Always dark"
 msgstr "始终深色"
 
-#: main.lua:15
-msgid "A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Auto-detect also finds installed KDE and GNOME system wallpapers."
-msgstr "包含图片文件的目录。同时扫描最多两级子目录。支持格式：PNG、JPEG、WebP、BMP、TIFF、AVIF、GIF。自动检测还会查找已安装的 KDE 和 GNOME 系统壁纸。"
+#: image/wallpaper.lua:16
+msgid "Always light"
+msgstr "始终浅色"
+
+#: plugin.toml
+msgid "Custom resolution"
+msgstr "自定义分辨率"
+
+#: main.lua:16
+msgid "Desktop wallpapers"
+msgstr "桌面壁纸"
 
 #: plugin.toml
 msgid "Frame rate"
 msgstr "帧率"
 
-#: plugin.toml
-msgid "Image"
-msgstr "图片"
-
-#: main.lua:14
+#: main.lua:19
 msgid "Image Folder"
 msgstr "图片文件夹"
+
+#: main.lua:16
+msgid "Image files"
+msgstr "图片文件"
 
 #: plugin.toml
 msgid "Render node"
@@ -61,6 +45,26 @@ msgstr "渲染"
 msgid "Resolution"
 msgstr "分辨率"
 
+#: main.lua:17
+msgid "Scan image files or desktop wallpaper definitions such as KDE and GNOME wallpapers."
+msgstr "扫描图片文件，或 KDE、GNOME 等桌面壁纸的描述文件。"
+
+#: main.lua:17
+msgid "Scan mode"
+msgstr "扫描模式"
+
 #: image/wallpaper.lua:6
 msgid "Scheme color"
 msgstr "配色"
+
+#: image/wallpaper.lua:15
+msgid "Simulated day and night"
+msgstr "模拟昼夜"
+
+#: image/wallpaper.lua:13
+msgid "Wallpaper variant"
+msgstr "壁纸变体"
+
+#: plugin.toml
+msgid "Image"
+msgstr "图片"

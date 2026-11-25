@@ -1,51 +1,51 @@
 msgid ""
 msgstr "Project-Id-Version: org.waywallen.wallhaven 0.1.0\nLanguage: zh-CN\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
-#: wallhaven/api.lua:109
+#: wallhaven/api.lua:111
 msgid "1080 x 1920"
 msgstr "1080 x 1920"
 
-#: wallhaven/api.lua:100
+#: wallhaven/api.lua:102
 msgid "1280 x 720"
 msgstr "1280 x 720"
 
-#: wallhaven/api.lua:111
+#: wallhaven/api.lua:113
 msgid "1440 x 2560"
 msgstr "1440 x 2560"
 
-#: wallhaven/api.lua:101
+#: wallhaven/api.lua:103
 msgid "1920 x 1080"
 msgstr "1920 x 1080"
 
-#: wallhaven/api.lua:104
+#: wallhaven/api.lua:106
 msgid "2560 x 1080"
 msgstr "2560 x 1080"
 
-#: wallhaven/api.lua:102
+#: wallhaven/api.lua:104
 msgid "2560 x 1440"
 msgstr "2560 x 1440"
 
-#: wallhaven/api.lua:105
+#: wallhaven/api.lua:107
 msgid "3440 x 1440"
 msgstr "3440 x 1440"
 
-#: wallhaven/api.lua:107
+#: wallhaven/api.lua:109
 msgid "3840 x 1080"
 msgstr "3840 x 1080"
 
-#: wallhaven/api.lua:103
+#: wallhaven/api.lua:105
 msgid "3840 x 2160"
 msgstr "3840 x 2160"
 
-#: wallhaven/api.lua:106
+#: wallhaven/api.lua:108
 msgid "5120 x 1440"
 msgstr "5120 x 1440"
 
-#: wallhaven/api.lua:110
+#: wallhaven/api.lua:112
 msgid "720 x 1280"
 msgstr "720 x 1280"
 
-#: wallhaven/api.lua:108
+#: wallhaven/api.lua:110
 msgid "7680 x 2160"
 msgstr "7680 x 2160"
 
@@ -53,23 +53,23 @@ msgstr "7680 x 2160"
 msgid "API key"
 msgstr "API 密钥"
 
-#: wallhaven/api.lua:70
+#: wallhaven/api.lua:72
 msgid "Abstract"
 msgstr "抽象"
 
-#: wallhaven/api.lua:71
+#: wallhaven/api.lua:73
 msgid "Animal"
 msgstr "动物"
 
-#: wallhaven/api.lua:72
+#: wallhaven/api.lua:74
 msgid "Anime"
 msgstr "动漫"
 
-#: wallhaven/api.lua:74
+#: wallhaven/api.lua:76
 msgid "CG"
 msgstr "CG"
 
-#: wallhaven/api.lua:73
+#: wallhaven/api.lua:75
 msgid "Cartoon"
 msgstr "卡通"
 
@@ -77,27 +77,27 @@ msgstr "卡通"
 msgid "Copy the API key from Wallhaven Account Settings: https://wallhaven.cc/settings/account"
 msgstr "从 Wallhaven 账户设置中复制 API 密钥：https://wallhaven.cc/settings/account"
 
-#: wallhaven/api.lua:75
+#: wallhaven/api.lua:77
 msgid "Cyberpunk"
 msgstr "赛博朋克"
 
-#: wallhaven/api.lua:76
+#: wallhaven/api.lua:78
 msgid "Fantasy"
 msgstr "奇幻"
 
-#: wallhaven/api.lua:77
+#: wallhaven/api.lua:79
 msgid "Game"
 msgstr "游戏"
 
-#: wallhaven/api.lua:78
+#: wallhaven/api.lua:80
 msgid "Girls"
 msgstr "女孩"
 
-#: wallhaven/api.lua:79
+#: wallhaven/api.lua:81
 msgid "Guys"
 msgstr "男孩"
 
-#: wallhaven/api.lua:80
+#: wallhaven/api.lua:82
 msgid "Landscape"
 msgstr "风景"
 
@@ -105,19 +105,19 @@ msgstr "风景"
 msgid "Log in to Wallhaven"
 msgstr "登录 Wallhaven"
 
-#: wallhaven/api.lua:83
+#: wallhaven/api.lua:85
 msgid "MMD"
 msgstr "MMD"
 
-#: wallhaven/api.lua:81
+#: wallhaven/api.lua:83
 msgid "Medieval"
 msgstr "中世纪"
 
-#: wallhaven/api.lua:82
+#: wallhaven/api.lua:84
 msgid "Memes"
 msgstr "梗图"
 
-#: wallhaven/api.lua:84
+#: wallhaven/api.lua:86
 msgid "Music"
 msgstr "音乐"
 
@@ -125,7 +125,7 @@ msgstr "音乐"
 msgid "NSFW wallpapers require a Wallhaven API key."
 msgstr "NSFW 壁纸需要 Wallhaven API 密钥。"
 
-#: wallhaven/api.lua:85
+#: wallhaven/api.lua:87
 msgid "Nature"
 msgstr "自然"
 
@@ -133,15 +133,11 @@ msgstr "自然"
 msgid "Not safe for work"
 msgstr "NSFW"
 
-#: main.lua:28
-msgid "Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password."
-msgstr "使用 Wallhaven 账户设置中的 API 密钥。请勿输入 Wallhaven 密码。"
-
-#: wallhaven/api.lua:86
+#: wallhaven/api.lua:88
 msgid "Pixel art"
 msgstr "像素艺术"
 
-#: main.lua:61
+#: main.lua:62
 msgid "Popular"
 msgstr "热门"
 
@@ -153,11 +149,11 @@ msgstr "内容分级"
 msgid "Questionable"
 msgstr "Sketchy"
 
-#: main.lua:60
+#: main.lua:61
 msgid "Recent"
 msgstr "最新"
 
-#: wallhaven/api.lua:87
+#: wallhaven/api.lua:89
 msgid "Relaxing"
 msgstr "舒缓"
 
@@ -165,11 +161,11 @@ msgstr "舒缓"
 msgid "Remove API key"
 msgstr "移除 API 密钥"
 
-#: wallhaven/api.lua:97
+#: wallhaven/api.lua:99
 msgid "Resolution"
 msgstr "分辨率"
 
-#: wallhaven/api.lua:88
+#: wallhaven/api.lua:90
 msgid "Retro"
 msgstr "复古"
 
@@ -177,11 +173,11 @@ msgstr "复古"
 msgid "Safe for work"
 msgstr "SFW"
 
-#: wallhaven/api.lua:89
+#: wallhaven/api.lua:91
 msgid "Sci-Fi"
 msgstr "科幻"
 
-#: wallhaven/api.lua:90
+#: wallhaven/api.lua:92
 msgid "Sports"
 msgstr "体育"
 
@@ -189,7 +185,7 @@ msgstr "体育"
 msgid "Status"
 msgstr "状态"
 
-#: wallhaven/api.lua:91
+#: wallhaven/api.lua:93
 msgid "Technology"
 msgstr "科技"
 
@@ -197,11 +193,15 @@ msgstr "科技"
 msgid "Topics"
 msgstr "主题"
 
-#: main.lua:59
+#: main.lua:60
 msgid "Trending"
 msgstr "趋势"
 
-#: wallhaven/api.lua:92
+#: main.lua:28
+msgid "Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password."
+msgstr "使用 Wallhaven 账户设置中的 API 密钥。请勿输入 Wallhaven 密码。"
+
+#: wallhaven/api.lua:94
 msgid "Vehicle"
 msgstr "载具"
 

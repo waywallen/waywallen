@@ -1,131 +1,174 @@
 msgid ""
-msgstr "Project-Id-Version: org.waywallen.pixiv 0.1.0\nPO-Revision-Date: 2026-11-16 00:00+0000\nLast-Translator: Waywallen contributors\nLanguage-Team: Chinese\nLanguage: zh-CN\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: org.waywallen.pixiv 0.1.0\nLanguage: zh-CN\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\nLanguage-Team: Chinese\nLast-Translator: Waywallen contributors\nPO-Revision-Date: 2026-11-16 00:00+0000\n"
 
-msgid "Pixiv account"
-msgstr "Pixiv 账户"
-
-msgid "Status"
-msgstr "状态"
-
-msgid "Log in to Pixiv"
-msgstr "登录 Pixiv"
-
-msgid "Complete sign-in in the browser window. If unavailable, use session ID sign-in."
-msgstr "请在浏览器窗口中完成登录。如不可用，可使用会话 ID 登录。"
-
-msgid "Log in with session ID"
-msgstr "使用会话 ID 登录"
-
-msgid "Enter only the PHPSESSID in browser dev storage tab."
-msgstr "请填写浏览器开发者工具“存储”标签页中的 PHPSESSID 值。"
-
-msgid "Session ID"
-msgstr "会话 ID"
-
-msgid "Copy the PHPSESSID value from a signed-in browser session."
-msgstr "从已登录的浏览器会话中复制 PHPSESSID 的值。"
-
-msgid "Log in to Pixiv."
-msgstr "登录 Pixiv。"
-
-msgid "Log out"
-msgstr "登出"
-
-msgid "Recommended"
-msgstr "推荐"
-
-msgid "Ranking"
-msgstr "排行"
-
-msgid "Bookmarks"
-msgstr "收藏"
-
-msgid "Public"
-msgstr "公开"
-
-msgid "Private"
-msgstr "非公开"
-
-msgid "Daily"
-msgstr "每日"
-
-msgid "Popular among men"
-msgstr "男性向"
-
-msgid "Popular among women"
-msgstr "女性向"
-
-msgid "Original"
-msgstr "原创"
-
-msgid "Rookie"
-msgstr "新人"
-
-msgid "Weekly"
-msgstr "每周"
-
-msgid "Monthly"
-msgstr "每月"
-
+#: pixiv/discover.lua:36
 msgid "AI daily"
 msgstr "AI 每日"
 
-msgid "R-18 AI daily"
-msgstr "R-18 AI 每日"
-
-msgid "R-18 daily"
-msgstr "R-18 每日"
-
-msgid "R-18 weekly"
-msgstr "R-18 每周"
-
-msgid "R-18G weekly"
-msgstr "R-18G 每周"
-
-msgid "Not signed in"
-msgstr "未登录"
-
-msgid "Session expired"
-msgstr "登录已过期"
-
-msgid "Could not refresh the Pixiv session"
-msgstr "无法刷新 Pixiv 登录凭证"
-
-msgid "Could not refresh the Pixiv session. Try again later or log in again."
-msgstr "无法刷新 Pixiv 登录凭证，请稍后重试或重新登录。"
-
-msgid "Complete sign-in in the browser window. The window will close when authorization finishes."
-msgstr "请在浏览器窗口中完成登录，授权完成后窗口将自动关闭。"
-
-msgid "This Pixiv sign-in is no longer active. Start again."
-msgstr "本次 Pixiv 登录已失效，请重新开始。"
-
-msgid "Pixiv did not return an authorization code. Start again."
-msgstr "Pixiv 未返回授权码，请重新开始。"
-
-msgid "Pixiv sign-in failed. Please try again."
-msgstr "Pixiv 登录失败，请重试。"
-
-msgid "Pages"
-msgstr "页数"
-
-msgid "Download page"
-msgstr "下载页"
-
-msgid "Content rating"
-msgstr "内容分级"
-
-msgid "Everyone"
-msgstr "全年龄"
-
-msgid "Potentially sensitive"
-msgstr "可能包含敏感内容"
-
-msgid "Show AI-generated works"
-msgstr "显示 AI 生成作品"
-
+#: pixiv/map.lua:26
 msgid "AI-generated"
 msgstr "AI 生成"
 
+#: pixiv/discover.lua:44
+msgid "Bookmarks"
+msgstr "收藏"
+
+#: main.lua:21
+msgid "Complete sign-in in the browser window. If unavailable, use session ID sign-in."
+msgstr "请在浏览器窗口中完成登录。如不可用，可使用会话 ID 登录。"
+
+#: pixiv/browser.lua:17
+msgid "Complete sign-in in the browser window. The window will close when authorization finishes."
+msgstr "请在浏览器窗口中完成登录，授权完成后窗口将自动关闭。"
+
+#: pixiv/discover.lua:10
+msgid "Content rating"
+msgstr "内容分级"
+
+#: main.lua:34
+msgid "Copy the PHPSESSID value from a signed-in browser session."
+msgstr "从已登录的浏览器会话中复制 PHPSESSID 的值。"
+
+#: pixiv/session.lua:142
+msgid "Could not refresh the Pixiv session"
+msgstr "无法刷新 Pixiv 登录凭证"
+
+#: pixiv/session.lua:143
+msgid "Could not refresh the Pixiv session. Try again later or log in again."
+msgstr "无法刷新 Pixiv 登录凭证，请稍后重试或重新登录。"
+
+#: pixiv/discover.lua:29
+msgid "Daily"
+msgstr "每日"
+
+#: pixiv/map.lua:122
+msgid "Download page"
+msgstr "下载页"
+
+#: main.lua:31
+msgid "Enter only the PHPSESSID in browser dev storage tab."
+msgstr "请填写浏览器开发者工具“存储”标签页中的 PHPSESSID 值。"
+
+#: pixiv/discover.lua:12
+msgid "Everyone"
+msgstr "全年龄"
+
+#: pixiv/map.lua:27
 msgid "Image count"
 msgstr "图片数量"
+
+#: main.lua:20 main.lua:23 pixiv/browser.lua:16
+msgid "Log in to Pixiv"
+msgstr "登录 Pixiv"
+
+#: main.lua:22
+msgid "Log in to Pixiv."
+msgstr "登录 Pixiv。"
+
+#: main.lua:30
+msgid "Log in with session ID"
+msgstr "使用会话 ID 登录"
+
+#: main.lua:36
+msgid "Log out"
+msgstr "登出"
+
+#: pixiv/discover.lua:35
+msgid "Monthly"
+msgstr "每月"
+
+#: pixiv/session.lua:161 pixiv/session.lua:54 pixiv/session.lua:9
+msgid "Not signed in"
+msgstr "未登录"
+
+#: pixiv/discover.lua:32
+msgid "Original"
+msgstr "原创"
+
+#: pixiv/map.lua:117
+msgid "Pages"
+msgstr "页数"
+
+#: main.lua:7
+msgid "Pixiv account"
+msgstr "Pixiv 账户"
+
+#: pixiv/browser.lua:36
+msgid "Pixiv did not return an authorization code. Start again."
+msgstr "Pixiv 未返回授权码，请重新开始。"
+
+#: pixiv/browser.lua:42
+msgid "Pixiv sign-in failed. Please try again."
+msgstr "Pixiv 登录失败，请重试。"
+
+#: pixiv/discover.lua:30
+msgid "Popular among men"
+msgstr "男性向"
+
+#: pixiv/discover.lua:31
+msgid "Popular among women"
+msgstr "女性向"
+
+#: pixiv/discover.lua:13
+msgid "Potentially sensitive"
+msgstr "可能包含敏感内容"
+
+#: pixiv/discover.lua:47
+msgid "Private"
+msgstr "非公开"
+
+#: pixiv/discover.lua:46
+msgid "Public"
+msgstr "公开"
+
+#: pixiv/discover.lua:37
+msgid "R-18 AI daily"
+msgstr "R-18 AI 每日"
+
+#: pixiv/discover.lua:38
+msgid "R-18 daily"
+msgstr "R-18 每日"
+
+#: pixiv/discover.lua:39
+msgid "R-18 weekly"
+msgstr "R-18 每周"
+
+#: pixiv/discover.lua:40
+msgid "R-18G weekly"
+msgstr "R-18G 每周"
+
+#: pixiv/discover.lua:27
+msgid "Ranking"
+msgstr "排行"
+
+#: pixiv/discover.lua:25
+msgid "Recommended"
+msgstr "推荐"
+
+#: pixiv/discover.lua:33
+msgid "Rookie"
+msgstr "新人"
+
+#: main.lua:33
+msgid "Session ID"
+msgstr "会话 ID"
+
+#: pixiv/session.lua:125
+msgid "Session expired"
+msgstr "登录已过期"
+
+#: pixiv/discover.lua:19 pixiv/discover.lua:20
+msgid "Show AI-generated works"
+msgstr "显示 AI 生成作品"
+
+#: main.lua:14
+msgid "Status"
+msgstr "状态"
+
+#: pixiv/browser.lua:24
+msgid "This Pixiv sign-in is no longer active. Start again."
+msgstr "本次 Pixiv 登录已失效，请重新开始。"
+
+#: pixiv/discover.lua:34
+msgid "Weekly"
+msgstr "每周"

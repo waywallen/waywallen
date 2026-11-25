@@ -2939,6 +2939,62 @@ Unsaved frame state may be lost.</source>
         <source>Update available</source>
         <translation>Доступне оновлення</translation>
     </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="135" />
+        <source>Preset applied, but the running renderer could not be updated</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="137" />
+        <source>Preset applied</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="143" />
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="145" />
+        <source>Preset operation failed</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="274" />
+        <source>Could not refresh wallpaper properties</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="393" />
+        <source>Retry loading presets</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="393" />
+        <source>Loading presets…</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="408" />
+        <source>Save current settings…</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="419" />
+        <source>Manage presets…</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="489" />
+        <source>Property update failed</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="492" />
+        <source>Preset operation canceled: %1</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="1074" />
+        <source>Presets</source>
+        <translation type="unfinished" />
+    </message>
 </context>
 <context>
     <name>WallpaperFilter</name>
@@ -3816,6 +3872,81 @@ Unsaved frame state may be lost.</source>
     <message>
         <source>The source returned a repeated continuation token.</source>
         <translation>Джерело повторно повернуло той самий маркер продовження.</translation>
+    </message>
+</context>
+<context>
+    <name>WallpaperPresetDialog</name>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="31" />
+        <source>Save preset</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="32" />
+        <source>Apply preset</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="33" />
+        <source>Update preset</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="34" />
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="144" />
+        <source>Rename preset</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="35" />
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="153" />
+        <source>Delete preset</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="36" />
+        <source>Manage presets</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="135" />
+        <source>Update from current values</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="168" />
+        <source>Preset name</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="180" />
+        <source>Apply "%1" and replace current settings not saved in a preset?</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="181" />
+        <source>Replace the saved values in "%1" with the current property values?</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="182" />
+        <source>Delete preset "%1"?</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="190" />
+        <source>Refresh properties</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="203" />
+        <source>Close</source>
+        <translation type="unfinished" />
+    </message>
+    <message>
+        <location filename="../qml/dialog/WallpaperPresetDialog.qml" line="203" />
+        <source>Cancel</source>
+        <translation type="unfinished" />
     </message>
 </context>
 </TS>

@@ -1,5 +1,5 @@
 msgid ""
-msgstr "Project-Id-Version: org.waywallen.video 0.6.1\nLanguage: ru\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: org.waywallen.video 0.6.2\nLanguage: ru\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
 #: main.lua:15
 msgid "A directory containing video files. Subdirectories up to two levels deep are also scanned. Supported formats: MP4, MKV, WebM, MOV, AVI, and other common containers."
@@ -8,6 +8,10 @@ msgstr "Каталог с видеофайлами. Также сканирую�
 #: plugin.toml
 msgid "Audio"
 msgstr "Звук"
+
+#: plugin.toml
+msgid "Custom resolution"
+msgstr ""
 
 #: plugin.toml
 msgid "Decoding"
@@ -53,10 +57,6 @@ msgstr "Разрешение"
 msgid "Scheme color"
 msgstr "Цветовая схема"
 
-#: plugin.toml
-msgid "Video"
-msgstr "Видео"
-
 #: main.lua:14
 msgid "Video Folder"
 msgstr "Папка с видео"
@@ -64,3 +64,7 @@ msgstr "Папка с видео"
 #: plugin.toml
 msgid "Volume"
 msgstr "Громкость"
+
+#: plugin.toml
+msgid "Video"
+msgstr "Видео"

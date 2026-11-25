@@ -33,7 +33,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.6.1"
+version = "0.6.2"
 
 [workspace.dependencies]
 waywallen-image-definition = { path = "plugins/org.waywallen.image/definition" }

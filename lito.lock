@@ -1,6 +1,15 @@
 version = 1
 
 [[packages]]
+name = "dbusto"
+version = "0.1.0"
+source = "registry+https://registry.litocpp.org/"
+checksum = "f57e05338943c6b15260019a23124e342b6d4e12db4bd4497864945456f32b12"
+dependencies = [
+  "rstd-std",
+]
+
+[[packages]]
 name = "licompto"
 version = "0.1.0"
 source = "registry+https://registry.litocpp.org/"
@@ -46,6 +55,28 @@ source = "registry+https://registry.litocpp.org/"
 checksum = "f574b8b3cb5dc35f38226907cb5799d3f81ef9a71f68e26938870565bbc3d4ad"
 dependencies = [
   "rstd-parse",
+  "rstd-std",
+]
+
+[[packages]]
+name = "liproto"
+version = "0.1.1"
+source = "registry+https://registry.litocpp.org/"
+checksum = "c41af6c843b2895d89dade419d5e0f03901609db15e840aaab9dd93f0e74345d"
+dependencies = [
+  "rstd-alloc",
+  "rstd-core",
+  "rstd-parse",
+]
+
+[[packages]]
+name = "liproto-codegen"
+version = "0.1.1"
+source = "registry+https://registry.litocpp.org/"
+checksum = "58e828f3429df5ec896dc9a427b600512eda1f91b51340f1e519602b4153d907"
+dependencies = [
+  "liproto",
+  "rstd-nostd",
   "rstd-std",
 ]
 
@@ -191,6 +222,12 @@ dependencies = [
 ]
 
 [[packages]]
+name = "rstd-nostd"
+version = "0.1.15"
+source = "registry+https://registry.litocpp.org/"
+checksum = "9a882ae276858cf0d33109beee26cdce65a48586043c9fd4a0b52d582a221b70"
+
+[[packages]]
 name = "rstd-parse"
 version = "0.1.14"
 source = "registry+https://registry.litocpp.org/"
@@ -296,7 +333,7 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-backend-connection"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "ncrequest",
   "rstd-cppstd",
@@ -305,11 +342,11 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-bridge"
-version = "0.6.1"
+version = "0.6.2"
 
 [[packages]]
 name = "waywallen-gltf-plugin"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "rstd-argparse",
   "rstd-json",
@@ -324,7 +361,7 @@ runtime-dependencies = [
 
 [[packages]]
 name = "waywallen-i18n"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "luato",
   "rstd-argparse",
@@ -335,7 +372,7 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-image-definition"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "rstd-json",
   "rstd-std",
@@ -343,7 +380,7 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-image-plugin"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "rstd-argparse",
   "rstd-json",
@@ -360,11 +397,11 @@ runtime-dependencies = [
 
 [[packages]]
 name = "waywallen-pixiv-plugin"
-version = "0.6.1"
+version = "0.6.2"
 
 [[packages]]
 name = "waywallen-plugin-common"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "rstd-cppstd",
   "rstd-log",
@@ -376,14 +413,14 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-plugin-i18n"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "rstd-std",
 ]
 
 [[packages]]
 name = "waywallen-probe"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "luato",
   "rstd-json",
@@ -394,7 +431,7 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-sketchfab-plugin"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "licompto",
   "rstd-json",
@@ -402,8 +439,21 @@ dependencies = [
 ]
 
 [[packages]]
+name = "waywallen-switch"
+version = "0.6.2"
+dependencies = [
+  "dbusto",
+  "liproto",
+  "liproto-codegen",
+  "liwebsocketo",
+  "rstd-argparse",
+  "rstd-json",
+  "rstd-std",
+]
+
+[[packages]]
 name = "waywallen-ui"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "lito-qt",
   "qextra",
@@ -421,7 +471,7 @@ source = "git+https://github.com/hypengw/QmlMaterial.git#9b942c175e89711de1a6646
 
 [[packages]]
 name = "waywallen-video-plugin"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "rstd-argparse",
   "rstd-cppstd",
@@ -436,11 +486,11 @@ runtime-dependencies = [
 
 [[packages]]
 name = "waywallen-wallhaven-plugin"
-version = "0.6.1"
+version = "0.6.2"
 
 [[packages]]
 name = "waywallen-web-helper"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
   "rstd-dlopn",
   "rstd-json",

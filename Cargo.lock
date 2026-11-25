@@ -3900,7 +3900,7 @@ version = "0.1.0"
 
 [[package]]
 name = "waywallen"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "anyhow",
  "ash",

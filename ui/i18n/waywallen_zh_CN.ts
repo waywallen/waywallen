@@ -22,12 +22,12 @@
     <message>
         <location filename="../qml/page/AboutPage.qml" line="62"/>
         <source>Daemon version %1 is older than this window</source>
-        <translation type="unfinished"></translation>
+        <translation>守护进程版本 %1 比当前界面旧</translation>
     </message>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="64"/>
         <source>Daemon version %1 is newer than this window</source>
-        <translation type="unfinished"></translation>
+        <translation>守护进程版本 %1 比当前界面新</translation>
     </message>
     <message>
         <location filename="../qml/page/AboutPage.qml" line="58"/>
@@ -970,6 +970,24 @@
         <location filename="../qml/page/PlaylistEditPage.qml" line="427"/>
         <source>Playlist unavailable</source>
         <translation>播放列表不可用</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/PlaylistEditPage.qml" line="453" />
+        <source>h</source>
+        <comment>hours</comment>
+        <translation>时</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/PlaylistEditPage.qml" line="474" />
+        <source>m</source>
+        <comment>minutes</comment>
+        <translation>分</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/PlaylistEditPage.qml" line="495" />
+        <source>s</source>
+        <comment>seconds</comment>
+        <translation>秒</translation>
     </message>
 </context>
 <context>
@@ -2227,6 +2245,21 @@ Related display: #%1</source>
         <source>On battery</source>
         <translation>使用电池时</translation>
     </message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="461" />
+        <source>Default device</source>
+        <translation>默认设备</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="469" />
+        <source>%1 (unavailable)</source>
+        <translation>%1（不可用）</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/SettingsPage.qml" line="1452" />
+        <source>Audio output</source>
+        <translation>音频输出</translation>
+    </message>
 </context>
 <context>
     <name>EditLibraryPage</name>
@@ -2304,6 +2337,16 @@ Related display: #%1</source>
         <location filename="../qml/page/SourceManagePage.qml" line="75"/>
         <source>No libraries</source>
         <translation>没有库</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/SourceManagePage.qml" line="68" />
+        <source>Choose Library Folder</source>
+        <translation>选择库文件夹</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/SourceManagePage.qml" line="166" />
+        <source>Change library folder</source>
+        <translation>更改库文件夹</translation>
     </message>
 </context>
 <context>
@@ -3651,5 +3694,41 @@ Unsaved frame state may be lost.</source>
     <message><source>Refresh properties</source><translation>刷新属性</translation></message>
     <message><source>Cancel</source><translation>取消</translation></message>
     <message><source>Close</source><translation>关闭</translation></message>
+</context>
+<context>
+    <name>I18n</name>
+    <message>
+        <location filename="../qml/I18n.qml" line="31" />
+        <source>B</source>
+        <translation>B</translation>
+    </message>
+    <message>
+        <location filename="../qml/I18n.qml" line="31" />
+        <source>KiB</source>
+        <translation>KiB</translation>
+    </message>
+    <message>
+        <location filename="../qml/I18n.qml" line="31" />
+        <source>MiB</source>
+        <translation>MiB</translation>
+    </message>
+    <message>
+        <location filename="../qml/I18n.qml" line="31" />
+        <source>GiB</source>
+        <translation>GiB</translation>
+    </message>
+    <message>
+        <location filename="../qml/I18n.qml" line="31" />
+        <source>TiB</source>
+        <translation>TiB</translation>
+    </message>
+</context>
+<context>
+    <name>waywallen::RemoteSearchQuery</name>
+    <message>
+        <location filename="../src/query/remote_query.cpp" line="436" />
+        <source>The source returned a repeated continuation token.</source>
+        <translation>来源返回了重复的翻页令牌。</translation>
+    </message>
 </context>
 </TS>

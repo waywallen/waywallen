@@ -1,53 +1,37 @@
-#: main.lua
-msgid "Scan mode"
-msgstr "Режим сканування"
-
-#: main.lua
-msgid "Image files"
-msgstr "Файли зображень"
-
-#: main.lua
-msgid "Desktop wallpapers"
-msgstr "Шпалери робочого столу"
-
-#: main.lua
-msgid "Scan image files or desktop wallpaper definitions such as KDE and GNOME wallpapers."
-msgstr "Сканувати зображення або описи шпалер робочого столу KDE і GNOME."
-
 msgid ""
-msgstr "Project-Id-Version: org.waywallen.image 0.6.1\nLanguage: uk\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+msgstr "Project-Id-Version: org.waywallen.image 0.6.2\nLanguage: uk\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
 
-#: image/wallpaper.lua
-msgid "Wallpaper variant"
-msgstr "Варіант шпалер"
+#: main.lua:20
+msgid "A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Auto-detect also finds installed KDE and GNOME system wallpapers."
+msgstr "Каталог із файлами зображень. Також скануються підкаталоги глибиною до двох рівнів. Підтримувані формати: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Автовизначення також знаходить встановлені системні шпалери KDE і GNOME."
 
-#: image/wallpaper.lua
-msgid "Simulated day and night"
-msgstr "Імітація дня і ночі"
-
-#: image/wallpaper.lua
-msgid "Always light"
-msgstr "Завжди світлий"
-
-#: image/wallpaper.lua
+#: image/wallpaper.lua:17
 msgid "Always dark"
 msgstr "Завжди темний"
 
-#: main.lua:15
-msgid "A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Auto-detect also finds installed KDE and GNOME system wallpapers."
-msgstr "Каталог із файлами зображень. Також скануються підкаталоги глибиною до двох рівнів. Підтримувані формати: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Автовизначення також знаходить встановлені системні шпалери KDE і GNOME."
+#: image/wallpaper.lua:16
+msgid "Always light"
+msgstr "Завжди світлий"
+
+#: plugin.toml
+msgid "Custom resolution"
+msgstr ""
+
+#: main.lua:16
+msgid "Desktop wallpapers"
+msgstr "Шпалери робочого столу"
 
 #: plugin.toml
 msgid "Frame rate"
 msgstr "Частота кадрів"
 
-#: plugin.toml
-msgid "Image"
-msgstr "Зображення"
-
-#: main.lua:14
+#: main.lua:19
 msgid "Image Folder"
 msgstr "Папка із зображеннями"
+
+#: main.lua:16
+msgid "Image files"
+msgstr "Файли зображень"
 
 #: plugin.toml
 msgid "Render node"
@@ -61,6 +45,26 @@ msgstr "Рендеринг"
 msgid "Resolution"
 msgstr "Роздільність"
 
+#: main.lua:17
+msgid "Scan image files or desktop wallpaper definitions such as KDE and GNOME wallpapers."
+msgstr "Сканувати зображення або описи шпалер робочого столу KDE і GNOME."
+
+#: main.lua:17
+msgid "Scan mode"
+msgstr "Режим сканування"
+
 #: image/wallpaper.lua:6
 msgid "Scheme color"
 msgstr "Колірна схема"
+
+#: image/wallpaper.lua:15
+msgid "Simulated day and night"
+msgstr "Імітація дня і ночі"
+
+#: image/wallpaper.lua:13
+msgid "Wallpaper variant"
+msgstr "Варіант шпалер"
+
+#: plugin.toml
+msgid "Image"
+msgstr "Зображення"
