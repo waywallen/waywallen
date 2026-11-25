@@ -530,6 +530,7 @@ MD.Page {
                     MD.EmbedChip {
                         id: sortChip
 
+                        focusPolicy: Qt.StrongFocus
                         mdState.borderWidth: 1
                         text: root.sortOptions[root.sortIndex].name
                         trailingIconName: root.sortAsc ? MD.Token.icon.arrow_downward : MD.Token.icon.arrow_upward
@@ -614,7 +615,10 @@ MD.Page {
                             shimmer: m_grid_view.shimmer
                             spacing: m_grid_view.itemSpacing
 
-                            onClicked: modifiers => root.handleWallpaperClick(index, modifiers)
+                            onClicked: modifiers => {
+                                m_grid_view.forceActiveFocus(Qt.MouseFocusReason);
+                                root.handleWallpaperClick(index, modifiers);
+                            }
                             onSelectionRequested: modifiers => root.requestWallpaperSelection(index)
                         }
 

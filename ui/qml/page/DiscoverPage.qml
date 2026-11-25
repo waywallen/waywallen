@@ -376,6 +376,7 @@ MD.Page {
                     MD.EmbedChip {
                         id: sourceChip
 
+                        focusPolicy: Qt.StrongFocus
                         mdState.borderWidth: 1
                         text: root.sourceName(root.sourceId)
                         trailingIconName: MD.Token.icon.arrow_drop_down
@@ -406,6 +407,7 @@ MD.Page {
                     MD.EmbedChip {
                         id: sortChip
 
+                        focusPolicy: Qt.StrongFocus
                         mdState.borderWidth: 1
                         text: root.sortLabel()
                         trailingIconName: MD.Token.icon.arrow_drop_down
@@ -437,6 +439,7 @@ MD.Page {
                     MD.EmbedChip {
                         id: sortChoiceChip
 
+                        focusPolicy: Qt.StrongFocus
                         mdState.borderWidth: 1
                         text: W.I18n.tr(root.sortChoices[root.sortChoiceIndex]?.labelText ?? "")
                         trailingIconName: MD.Token.icon.arrow_drop_down
@@ -513,6 +516,7 @@ MD.Page {
                             spacing: m_grid.itemSpacing
 
                             onClicked: {
+                                m_grid.forceActiveFocus(Qt.MouseFocusReason);
                                 m_grid.currentIndex = index;
                                 root.selectItem(index);
                             }
