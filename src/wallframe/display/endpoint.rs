@@ -175,6 +175,9 @@ async fn handle_client(
 ) -> Result<()> {
     log::info!("display client connected; performing handshake");
     let registration = do_handshake(&stream, &events_tx, &mut shutdown_rx).await?;
+    let consumer_gpu = registration
+        .follow_producer_gpu
+        .then_some(registration.consumer_caps.identity.drm);
     let handle = router.try_register_display(registration).await?;
     let DisplayHandle {
         id: display_id,
@@ -205,6 +208,7 @@ async fn handle_client(
             router.clone(),
             display_id,
             session_id,
+            consumer_gpu,
             rx,
             shutdown_rx,
         )
@@ -335,6 +339,7 @@ async fn handshake_steps(
 
     let (mut reg, _fds) = recv_handshake_frame(stream, "registration", shutdown_rx).await?;
     let mut window_observation_caps = None;
+    let mut follow_producer_gpu = false;
     let mut pause_effect_caps = None;
     let mut transition_caps = None;
     let mut role = crate::wallframe::scheduler::DisplayRole::Desktop;
@@ -343,8 +348,10 @@ async fn handshake_steps(
         pause_effect,
         transition,
         identity,
+        follow_producer_gpu: follow_gpu,
     } = reg
     {
+        follow_producer_gpu = follow_gpu == Some(1);
         if let Some(identity) = identity {
             role = match identity.role {
                 0 => crate::wallframe::scheduler::DisplayRole::Desktop,
@@ -444,6 +451,7 @@ async fn handshake_steps(
         drm.minor,
     );
     Ok(DisplayRegistration {
+        follow_producer_gpu,
         role,
         window_observation_caps,
         name,
@@ -468,6 +476,7 @@ async fn run_frame_loop(
     router: Arc<Router>,
     display_id: crate::wallframe::scheduler::DisplayId,
     display_session_id: crate::wallframe::sync::DisplaySessionId,
+    consumer_gpu: Option<crate::wallframe::renderer_manager::DrmNode>,
     mut rx: tokio::sync::mpsc::UnboundedReceiver<DisplayOutEvent>,
     mut shutdown_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
@@ -487,6 +496,9 @@ async fn run_frame_loop(
     // Most-recently-bound renderer, kept so inbound pointer events can
     // be forwarded without a routing-table walk.
     let mut bound_renderer: Option<Arc<RendererHandle>> = None;
+    let mut redirecting_gpu = false;
+    let gpu_reconnect_deadline = tokio::time::sleep(std::time::Duration::from_secs(5));
+    tokio::pin!(gpu_reconnect_deadline);
     // Latest SetCompositionConfig pushed to this display. Used to inverse-map
     // pointer coords from display pixels into renderer texture pixels.
     let mut latest_config: Option<CompositionConfig> = None;
@@ -499,11 +511,14 @@ async fn run_frame_loop(
 
     let result = loop {
         tokio::select! {
+            _ = &mut gpu_reconnect_deadline, if redirecting_gpu => {
+                break Err(Error::Internal(anyhow!("display did not reconnect on the producer GPU")));
+            }
             _ = wait_shutdown(&mut shutdown_rx) => {
                 log::info!("display {display_id}: shutdown signalled");
                 break Ok(());
             }
-            evt = rx.recv() => match evt {
+            evt = rx.recv(), if !redirecting_gpu => match evt {
                 None => {
                     log::info!("display {display_id}: router rx closed");
                     break Ok(());
@@ -516,6 +531,19 @@ async fn run_frame_loop(
                     content_token,
                     presentation_config_generation,
                 }) => {
+                    if consumer_gpu.is_some_and(|gpu| renderer.gpu != gpu && renderer.gpu.major != 0) {
+                        let event = Event::PreferredRenderDevice {
+                            drm_render_major: renderer.gpu.major,
+                            drm_render_minor: renderer.gpu.minor,
+                        };
+                        if let Err(error) = send_preferred_render_device(&stream, event).await {
+                            break Err(error);
+                        }
+                        log::info!("display {display_id}: requesting producer GPU {}:{}", renderer.gpu.major, renderer.gpu.minor);
+                        gpu_reconnect_deadline.as_mut().reset(tokio::time::Instant::now() + std::time::Duration::from_secs(5));
+                        redirecting_gpu = true;
+                        continue;
+                    }
                     if let Some(old) = bound_renderer.as_ref() {
                         if old.id != renderer.id {
                             leave_pointer(&router, display_id, old).await;
@@ -1125,6 +1153,16 @@ async fn send_composition_config(stream: &StdUnixStream, cfg: &CompositionConfig
     Ok(())
 }
 
+async fn send_preferred_render_device(stream: &StdUnixStream, event: Event) -> Result<()> {
+    let stream = stream
+        .try_clone()
+        .context("clone for preferred render device")?;
+    tokio::task::spawn_blocking(move || codec::send_event(&stream, &event, &[]))
+        .await
+        .context("preferred render device send join")?
+        .map_err(|e| Error::Internal(anyhow!("send preferred render device: {e}")))
+}
+
 async fn send_bind(
     stream: &StdUnixStream,
     pool: &PublishedPool,
@@ -1466,7 +1504,7 @@ mod tests {
             shutdown_tx.send(true).unwrap();
         });
         let (result, client_result) = tokio::join!(
-            run_frame_loop(server, router, 1, 1, rx, shutdown_rx),
+            run_frame_loop(server, router, 1, 1, None, rx, shutdown_rx),
             client_task,
         );
         result.unwrap();
@@ -1516,6 +1554,7 @@ mod tests {
                             codec::send_request(
                                 &client,
                                 &Request::ClientCapabilities {
+                                    follow_producer_gpu: None,
                                     identity: role.map(|role| wire::DisplayIdentity { role }),
                                     window_observation: caps.flatten(),
                                     pause_effect: pause_effect

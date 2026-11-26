@@ -373,6 +373,8 @@
     <arg name="transition" type="transition_capabilities" tag="3" optional="true"/>
     <!-- Registration metadata, not a capability bit. Immutable until reconnect. -->
     <arg name="identity" type="display_identity" tag="4" optional="true"/>
+    <!-- Can reconnect on the producer GPU before accepting its buffers. -->
+    <arg name="follow_producer_gpu" type="u32" tag="5" optional="true"/>
   </request>
 
   <request name="set_window_observation_state" opcode="15" encoding="tagged">
@@ -461,6 +463,13 @@
        Complete replacement; reply immediately even when flags do not change. -->
   <event name="set_window_observation_config" opcode="10" encoding="tagged">
     <arg name="config" type="window_observation_config" tag="1"/>
+  </event>
+
+  <!-- Only sent to clients declaring follow_producer_gpu=1. The daemon
+       withholds buffers and frames until the client reconnects. -->
+  <event name="preferred_render_device" opcode="11" encoding="tagged">
+    <arg name="drm_render_major" type="u32" tag="1"/>
+    <arg name="drm_render_minor" type="u32" tag="2"/>
   </event>
 
 </protocol>
