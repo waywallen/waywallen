@@ -332,7 +332,7 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-backend-connection"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "ncrequest",
   "rstd-cppstd",
@@ -341,11 +341,11 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-bridge"
-version = "0.6.2"
+version = "0.6.3"
 
 [[packages]]
 name = "waywallen-gltf-plugin"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "rstd-argparse",
   "rstd-json",
@@ -360,7 +360,7 @@ runtime-dependencies = [
 
 [[packages]]
 name = "waywallen-i18n"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "luato",
   "rstd-argparse",
@@ -371,7 +371,7 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-image-definition"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "rstd-json",
   "rstd-std",
@@ -379,7 +379,7 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-image-plugin"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "rstd-argparse",
   "rstd-json",
@@ -396,11 +396,11 @@ runtime-dependencies = [
 
 [[packages]]
 name = "waywallen-pixiv-plugin"
-version = "0.6.2"
+version = "0.6.3"
 
 [[packages]]
 name = "waywallen-plugin-common"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "rstd-cppstd",
   "rstd-log",
@@ -412,14 +412,14 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-plugin-i18n"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "rstd-std",
 ]
 
 [[packages]]
 name = "waywallen-probe"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "luato",
   "rstd-json",
@@ -430,7 +430,7 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-sketchfab-plugin"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "licompto",
   "rstd-json",
@@ -439,7 +439,7 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-switch"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "dbusto",
   "liproto",
@@ -452,7 +452,7 @@ dependencies = [
 
 [[packages]]
 name = "waywallen-ui"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "lito-qt",
   "qextra",
@@ -470,7 +470,7 @@ source = "git+https://github.com/hypengw/QmlMaterial.git#712fb288660c470e7883b59
 
 [[packages]]
 name = "waywallen-video-plugin"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "rstd-argparse",
   "rstd-cppstd",
@@ -485,11 +485,11 @@ runtime-dependencies = [
 
 [[packages]]
 name = "waywallen-wallhaven-plugin"
-version = "0.6.2"
+version = "0.6.3"
 
 [[packages]]
 name = "waywallen-web-helper"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
   "rstd-dlopn",
   "rstd-json",

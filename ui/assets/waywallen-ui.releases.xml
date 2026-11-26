@@ -1,3 +1,12 @@
+<release version="0.6.3" date="2026-11-26">
+  <description>
+    <p>Fixed:</p>
+    <ul>
+      <li>Fix the wallpaper page failing to load on Qt 6.11, including Flatpak.</li>
+      <li>Fix corrupted wallpapers on Vulkan in the AppImage's bundled layer-shell and X11 clients.</li>
+    </ul>
+  </description>
+</release>
 <release version="0.6.2" date="2026-11-25">
   <description>
     <p>Added:</p>
