@@ -26,9 +26,10 @@ MD.Page {
                 W.Global.toastError(error.length > 0 ? error : qsTr("Action failed"));
         }
     }
-    function runAction(actionId) {
+    function runAction(action, browserHelperId = "") {
         actionQuery.pluginId = root.pluginName;
-        actionQuery.actionId = actionId;
+        actionQuery.actionId = action.id;
+        actionQuery.browserHelperId = Number(action.kind) === 4 ? browserHelperId : "";
         actionQuery.reload();
     }
 
@@ -54,6 +55,9 @@ MD.Page {
             availabilityQuery.reload();
         }
         function onPluginStateChanged() {
+            availabilityQuery.reload();
+        }
+        function onPluginChanged() {
             availabilityQuery.reload();
         }
     }
@@ -280,13 +284,34 @@ MD.Page {
 
                 Repeater {
                     model: root.actionList
-                    delegate: MD.Button {
+                    delegate: Column {
+                        id: pluginAction
                         required property var modelData
-                        text: W.I18n.tr(modelData.labelText)
                         visible: modelData.visible === undefined || modelData.visible
-                        enabled: modelData.enabled === undefined || modelData.enabled
-                        mdState.type: MD.Enum.BtFilledTonal
-                        onClicked: root.runAction(modelData.id)
+                        width: Number(modelData.kind) === 4 ? parent.width : implicitWidth
+
+                        MD.Button {
+                            visible: Number(pluginAction.modelData.kind) !== 4
+                            text: W.I18n.tr(pluginAction.modelData.labelText)
+                            enabled: !actionQuery.querying && (pluginAction.modelData.enabled === undefined || pluginAction.modelData.enabled)
+                            mdState.type: MD.Enum.BtFilledTonal
+                            onClicked: root.runAction(pluginAction.modelData)
+                        }
+                        W.BrowserLoginButton {
+                            width: parent.width
+                            visible: Number(pluginAction.modelData.kind) === 4
+                            sourceId: root.pluginName
+                            actionId: pluginAction.modelData.id
+                            text: W.I18n.tr(pluginAction.modelData.labelText)
+                            browserHelpers: availabilityQuery.browserHelpers
+                            defaultBrowserHelperId: availabilityQuery.defaultBrowserHelperId
+                            actionEnabled: pluginAction.modelData.enabled === undefined || pluginAction.modelData.enabled
+                            busy: actionQuery.querying
+                            refreshing: availabilityQuery.querying
+                            availabilityError: availabilityQuery.status === 3 ? availabilityQuery.error : ""
+                            onLoginRequested: helperId => root.runAction(pluginAction.modelData, helperId)
+                            onRefreshRequested: availabilityQuery.refreshBrowserHelpers()
+                        }
                     }
                 }
             }

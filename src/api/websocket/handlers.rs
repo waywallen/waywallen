@@ -364,12 +364,7 @@ pub(super) async fn dispatch_inner(
         }
 
         Req::PluginDelete(r) => {
-            let plugin_id = r.plugin_id.clone();
-            let plugin_id = tokio::task::spawn_blocking(move || {
-                crate::plugin::installer::delete_user_plugin(&plugin_id)
-            })
-            .await
-            .map_err(|e| Error::Internal(anyhow::anyhow!("plugin delete join: {e}")))??;
+            let plugin_id = crate::application::delete_plugin(state, r.plugin_id.clone()).await?;
             Res::PluginDelete(pb::PluginDeleteResponse {
                 plugin_id,
                 needs_restart: true,
@@ -1301,8 +1296,23 @@ pub(super) async fn dispatch_inner(
             Res::DisplayRename(pb::DisplayRenameResponse { display })
         }
 
-        Req::RemoteAvailability(_) => {
+        Req::RemoteAvailability(r) => {
             let sources = state.source_manager.discover_sources_with_status().await?;
+            let browser_helpers = state
+                .browser_login
+                .helpers
+                .availability(r.refresh_browser_helpers)
+                .await
+                .into_iter()
+                .map(|(definition, availability)| pb::BrowserHelperInfo {
+                    id: definition.id,
+                    label: definition.label.text().to_owned(),
+                    label_text: crate::control_proto::plugin_message_to_proto(&definition.label),
+                    plugin_id: definition.plugin_id,
+                    available: availability.available,
+                    error: availability.error,
+                })
+                .collect();
             let default_source_id = sources
                 .first()
                 .map(|s| s.plugin_id.clone())
@@ -1462,6 +1472,9 @@ pub(super) async fn dispatch_inner(
                     })
                     .collect(),
                 default_source_id,
+                browser_helpers,
+                default_browser_helper_id: crate::plugin::web_helper_registry::DEFAULT_HELPER_ID
+                    .into(),
             })
         }
 
@@ -1868,7 +1881,11 @@ pub(super) async fn dispatch_inner(
                     }
                 }
                 Some(SourceActionKind::BrowserLogin) => {
-                    match state.browser_login.start(&r.plugin_id, &r.action_id).await {
+                    match state
+                        .browser_login
+                        .start(&r.plugin_id, &r.action_id, &r.browser_helper_id)
+                        .await
+                    {
                         Ok(session_id) => Res::PluginAction(pb::PluginActionResponse {
                             accepted: true,
                             error: String::new(),

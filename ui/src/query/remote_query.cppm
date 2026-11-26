@@ -20,20 +20,30 @@ export class RemoteAvailabilityQuery
 
     Q_PROPERTY(QVariantList sources READ sources NOTIFY sourcesChanged FINAL)
     Q_PROPERTY(QString defaultSourceId READ defaultSourceId NOTIFY sourcesChanged FINAL)
+    Q_PROPERTY(QVariantList browserHelpers READ browserHelpers NOTIFY browserHelpersChanged FINAL)
+    Q_PROPERTY(QString defaultBrowserHelperId READ defaultBrowserHelperId NOTIFY
+                   browserHelpersChanged FINAL)
 
 public:
     RemoteAvailabilityQuery(QObject* parent = nullptr);
 
     auto sources() const -> const QVariantList&;
     auto defaultSourceId() const -> const QString&;
+    auto browserHelpers() const -> const QVariantList&;
+    auto defaultBrowserHelperId() const -> const QString&;
 
-    void reload() override;
+    void             reload() override;
+    Q_INVOKABLE void refreshBrowserHelpers();
 
     Q_SIGNAL void sourcesChanged();
+    Q_SIGNAL void browserHelpersChanged();
 
 private:
+    void         reloadAvailability(bool refreshBrowserHelpers);
     QVariantList m_sources;
     QString      m_default_source_id;
+    QVariantList m_browser_helpers;
+    QString      m_default_browser_helper_id;
 };
 
 export class RemoteSearchQuery : public QueryList,

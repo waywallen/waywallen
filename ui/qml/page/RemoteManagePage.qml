@@ -126,19 +126,21 @@ MD.Page {
         flushPending();
     }
 
-    function runAction(action) {
+    function runAction(action, browserHelperId = "") {
         if (Number(action.kind) === 3) {
             actionForm.openFor(action);
             return;
         }
         actionQuery.pluginId = sourceId;
         actionQuery.actionId = action.id;
+        actionQuery.browserHelperId = Number(action.kind) === 4 ? browserHelperId : "";
         actionQuery.reload();
     }
 
     function submitAction(action, values) {
         actionQuery.pluginId = sourceId;
         actionQuery.actionId = action.id;
+        actionQuery.browserHelperId = "";
         actionQuery.invoke(values);
     }
 
@@ -208,6 +210,9 @@ MD.Page {
                 settingsQuery.reload();
         }
         function onPluginStateChanged() {
+            availabilityQuery.reload();
+        }
+        function onPluginChanged() {
             availabilityQuery.reload();
         }
     }
@@ -326,10 +331,27 @@ MD.Page {
                                     }
 
                                     MD.Button {
+                                        visible: Number(actionItem.modelData.kind) !== 4
                                         text: W.I18n.tr(actionItem.modelData.labelText)
                                         enabled: !actionQuery.querying && (actionItem.modelData.enabled === undefined || actionItem.modelData.enabled)
                                         mdState.type: MD.Enum.BtFilledTonal
                                         onClicked: root.runAction(actionItem.modelData)
+                                    }
+
+                                    W.BrowserLoginButton {
+                                        Layout.fillWidth: true
+                                        visible: Number(actionItem.modelData.kind) === 4
+                                        sourceId: root.sourceId
+                                        actionId: actionItem.modelData.id
+                                        text: W.I18n.tr(actionItem.modelData.labelText)
+                                        browserHelpers: availabilityQuery.browserHelpers
+                                        defaultBrowserHelperId: availabilityQuery.defaultBrowserHelperId
+                                        actionEnabled: actionItem.modelData.enabled === undefined || actionItem.modelData.enabled
+                                        busy: actionQuery.querying
+                                        refreshing: availabilityQuery.querying
+                                        availabilityError: availabilityQuery.status === 3 ? availabilityQuery.error : ""
+                                        onLoginRequested: helperId => root.runAction(actionItem.modelData, helperId)
+                                        onRefreshRequested: availabilityQuery.refreshBrowserHelpers()
                                     }
                                 }
                             }

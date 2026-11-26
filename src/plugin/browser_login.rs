@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,12 +11,14 @@ use super::browser_protocol::{self, BrowserCommand, BrowserEvent, FRAME_LIMIT};
 use super::i18n::LocalizedText;
 use super::source::BrowserLoginOutcome;
 use super::source::{redact_secrets, SourceManager};
+use super::web_helper_registry::{WebHelper, WebHelperDef, WebHelperRegistry};
 use crate::control_proto::BrowserLoginState as State;
 use crate::events::GlobalEvent;
 
 struct Control {
     cancel: CancellationToken,
     done: CancellationToken,
+    helper_plugin: String,
 }
 
 pub(crate) struct BrowserLoginManager {
@@ -27,7 +27,7 @@ pub(crate) struct BrowserLoginManager {
     shutdown: watch::Receiver<bool>,
     sessions: Mutex<HashMap<String, Control>>,
     slot: Arc<Semaphore>,
-    tool: Option<PathBuf>,
+    pub(crate) helpers: WebHelperRegistry,
 }
 
 impl BrowserLoginManager {
@@ -35,7 +35,7 @@ impl BrowserLoginManager {
         sources: Arc<SourceManager>,
         events: broadcast::Sender<GlobalEvent>,
         shutdown: watch::Receiver<bool>,
-        tool: Option<PathBuf>,
+        helpers: WebHelperRegistry,
     ) -> Arc<Self> {
         Arc::new(Self {
             sources,
@@ -43,20 +43,30 @@ impl BrowserLoginManager {
             shutdown,
             sessions: Mutex::new(HashMap::new()),
             slot: Arc::new(Semaphore::new(1)),
-            tool,
+            helpers,
         })
     }
 
-    pub(crate) async fn start(self: &Arc<Self>, plugin: &str, action: &str) -> Result<String> {
+    pub(crate) async fn start(
+        self: &Arc<Self>,
+        plugin: &str,
+        action: &str,
+        helper_id: &str,
+    ) -> Result<String> {
         let permit = self
             .slot
             .clone()
             .try_acquire_owned()
             .context("another browser login is already active")?;
-        let tool = self
-            .tool
-            .clone()
-            .context("waywallen-web-helper was not found; install it next to waywallen or set --web-helper PATH")?;
+        let helper = self.helpers.select(helper_id)?;
+        let availability = helper.availability(true).await;
+        if !availability.available {
+            bail!("{}", availability.error);
+        }
+        anyhow::ensure!(
+            helper.active(),
+            "selected browser helper was removed or reloaded"
+        );
         let id = uuid::Uuid::new_v4().to_string();
         let cancel = CancellationToken::new();
         let done = CancellationToken::new();
@@ -65,6 +75,7 @@ impl BrowserLoginManager {
             Control {
                 cancel: cancel.clone(),
                 done: done.clone(),
+                helper_plugin: helper.definition.plugin_id.clone(),
             },
         );
         self.publish(
@@ -82,7 +93,7 @@ impl BrowserLoginManager {
         tokio::spawn(async move {
             let _permit = permit;
             manager
-                .run(&session_id, &plugin, &action, tool, &cancel)
+                .run(&session_id, &plugin, &action, helper, &cancel)
                 .await;
             manager.sessions.lock().await.remove(&session_id);
             done.cancel();
@@ -110,6 +121,33 @@ impl BrowserLoginManager {
                 })
                 .collect::<Vec<_>>()
         };
+        Self::wait_for_cleanup(done).await
+    }
+
+    pub(crate) async fn suspend_helper_plugin(&self, plugin: &str) -> Result<()> {
+        if plugin.is_empty() {
+            return Ok(());
+        }
+        self.helpers.suspend_plugin(plugin).await;
+        let done = self
+            .sessions
+            .lock()
+            .await
+            .values()
+            .filter(|control| control.helper_plugin == plugin)
+            .map(|control| {
+                control.cancel.cancel();
+                control.done.clone()
+            })
+            .collect();
+        Self::wait_for_cleanup(done).await
+    }
+
+    pub(crate) fn replace_helpers(&self, helpers: Vec<WebHelperDef>) {
+        self.helpers.replace(helpers);
+    }
+
+    async fn wait_for_cleanup(done: Vec<CancellationToken>) -> Result<()> {
         tokio::time::timeout(Duration::from_secs(55), async {
             for token in done {
                 token.cancelled().await;
@@ -124,7 +162,7 @@ impl BrowserLoginManager {
         id: &str,
         plugin: &str,
         action: &str,
-        tool: PathBuf,
+        helper: Arc<WebHelper>,
         cancel: &CancellationToken,
     ) {
         let mut shutdown = self.shutdown.clone();
@@ -139,6 +177,7 @@ impl BrowserLoginManager {
         let started = tokio::select! {
             biased;
             _ = cancel.cancelled() => None,
+            _ = helper.cancelled() => None,
             _ = &mut shutdown_wait => None,
             begin = self.sources.begin_browser_login(plugin, action) => Some(begin),
         };
@@ -164,7 +203,8 @@ impl BrowserLoginManager {
         };
         let title = begin.title.clone();
         let instruction = begin.instruction.clone();
-        if cancel.is_cancelled() || *self.shutdown.borrow() || !session.active() {
+        if cancel.is_cancelled() || !helper.active() || *self.shutdown.borrow() || !session.active()
+        {
             if let Err(error) = session.cancel().await {
                 log::error!(
                     "browser login cleanup failed: {}",
@@ -184,10 +224,7 @@ impl BrowserLoginManager {
             return;
         }
         let result = async {
-            let mut command = tokio::process::Command::new(&tool);
-            command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-            command.process_group(0);
-            let mut child = Child { process: command.spawn().context("could not start waywallen-web-helper")? };
+            let mut child = helper.spawn(false)?;
             let mut input = child.process.stdin.take().context("browser helper stdin unavailable")?;
             let mut output = BufReader::new(child.process.stdout.take().context("browser helper stdout unavailable")?);
             let stderr = child.process.stderr.take().context("browser helper stderr unavailable")?;
@@ -217,6 +254,7 @@ impl BrowserLoginManager {
                     let event = tokio::select! {
                         biased;
                         _ = cancel.cancelled() => return Ok((State::Cancelled, LocalizedText::default(), LocalizedText::default())),
+                        _ = helper.cancelled() => return Ok((State::Cancelled, LocalizedText::default(), LocalizedText::default())),
                         _ = &mut shutdown_wait => return Ok((State::Cancelled, LocalizedText::default(), LocalizedText::default())),
                         _ = &mut stale => return Ok((State::Cancelled, LocalizedText::default(), LocalizedText::default())),
                         _ = &mut deadline => return Ok((State::Expired, LocalizedText::default(), "Browser login expired".into())),
@@ -235,12 +273,13 @@ impl BrowserLoginManager {
                             let update = tokio::select! {
                                 biased;
                                 _ = cancel.cancelled() => return Ok((State::Cancelled, LocalizedText::default(), LocalizedText::default())),
+                                _ = helper.cancelled() => return Ok((State::Cancelled, LocalizedText::default(), LocalizedText::default())),
                                 _ = &mut shutdown_wait => return Ok((State::Cancelled, LocalizedText::default(), LocalizedText::default())),
                                 _ = &mut stale => return Ok((State::Cancelled, LocalizedText::default(), LocalizedText::default())),
                                 _ = &mut deadline => return Ok((State::Expired, LocalizedText::default(), "Browser login expired".into())),
                                 result = session.handle_event(&event) => result?,
                             };
-                            if cancel.is_cancelled() || *self.shutdown.borrow() || !session.active() {
+                            if cancel.is_cancelled() || !helper.active() || *self.shutdown.borrow() || !session.active() {
                                 return Ok((State::Cancelled, LocalizedText::default(), LocalizedText::default()));
                             }
                             match update.state {
@@ -370,32 +409,4 @@ async fn read_event(reader: &mut (impl AsyncBufRead + Unpin)) -> Result<BrowserE
         bail!("browser helper exited without completing login");
     }
     browser_protocol::parse_event(&bytes)
-}
-
-struct Child {
-    process: tokio::process::Child,
-}
-impl Child {
-    async fn stop(&mut self) {
-        if tokio::time::timeout(Duration::from_millis(500), self.process.wait())
-            .await
-            .is_err()
-        {
-            self.kill();
-            let _ = self.process.wait().await;
-        }
-    }
-    fn kill(&mut self) {
-        if let Some(id) = self.process.id() {
-            unsafe {
-                libc::kill(-(id as i32), libc::SIGKILL);
-            }
-        }
-        let _ = self.process.start_kill();
-    }
-}
-impl Drop for Child {
-    fn drop(&mut self) {
-        self.kill();
-    }
 }

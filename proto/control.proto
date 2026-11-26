@@ -1106,7 +1106,9 @@ message DisplayRenameResponse {
   DisplayInfo display = 1;
 }
 
-message RemoteAvailabilityRequest {}
+message RemoteAvailabilityRequest {
+  bool refresh_browser_helpers = 1;
+}
 
 message RemoteSortOption {
   string key = 1;
@@ -1281,6 +1283,7 @@ message PluginActionRequest {
   string plugin_id = 1;
   string action_id = 2;
   map<string, string> values = 3;
+  string browser_helper_id = 4;
 }
 message PluginActionResponse {
   bool accepted = 1;
@@ -1291,6 +1294,17 @@ message PluginActionResponse {
 message RemoteAvailabilityResponse {
   repeated RemoteSourceInfo sources = 1;
   string default_source_id = 2;
+  repeated BrowserHelperInfo browser_helpers = 3;
+  string default_browser_helper_id = 4;
+}
+
+message BrowserHelperInfo {
+  string id = 1;
+  string label = 2;
+  string plugin_id = 3;
+  bool available = 4;
+  string error = 5;
+  PluginMessage label_text = 6;
 }
 
 message RemoteItem {

@@ -52,6 +52,7 @@ async fn reload_source_entries(
     installed_plugin_id: &str,
 ) -> Result<()> {
     app.qr_login.cancel_all_and_wait().await?;
+    app.browser_login.cancel_all_and_wait().await?;
     let mut suspended = SourcePluginSuspendGuard::new(app.source_manager.clone());
     suspended.suspend().await;
     let installed_plugin_id = installed_plugin_id.to_string();
@@ -122,6 +123,8 @@ pub(super) async fn apply_scan(
     let translation_documents = scan.translation_documents().map_err(|error| {
         Error::PluginInstallFailed(format!("load plugin translations: {error}"))
     })?;
+
+    app.browser_login.replace_helpers(scan.web_helpers);
 
     reload_source_entries(app, scan.entries, installed_plugin_id).await?;
     app.renderer_manager.replace_registry(registry.clone());

@@ -33,14 +33,26 @@ auto RemoteAvailabilityQuery::sources() const -> const QVariantList& { return m_
 auto RemoteAvailabilityQuery::defaultSourceId() const -> const QString& {
     return m_default_source_id;
 }
+auto RemoteAvailabilityQuery::browserHelpers() const -> const QVariantList& {
+    return m_browser_helpers;
+}
+auto RemoteAvailabilityQuery::defaultBrowserHelperId() const -> const QString& {
+    return m_default_browser_helper_id;
+}
 
-void RemoteAvailabilityQuery::reload() {
+void RemoteAvailabilityQuery::reload() { reloadAvailability(false); }
+
+void RemoteAvailabilityQuery::refreshBrowserHelpers() { reloadAvailability(true); }
+
+void RemoteAvailabilityQuery::reloadAvailability(bool refreshBrowserHelpers) {
     const auto revision = beginRequest();
     setStatus(Status::Querying);
     auto backend = App::instance()->backend();
 
-    auto req = proto::Request {};
-    req.setRemoteAvailability(proto::RemoteAvailabilityRequest {});
+    auto req   = proto::Request {};
+    auto inner = proto::RemoteAvailabilityRequest {};
+    inner.setRefreshBrowserHelpers(refreshBrowserHelpers);
+    req.setRemoteAvailability(std::move(inner));
 
     auto self = QWatcher { this };
     spawn([self, backend, req = std::move(req), revision]() mutable -> task<void> {
@@ -239,6 +251,21 @@ void RemoteAvailabilityQuery::reload() {
             }
             self->m_sources           = std::move(sources);
             self->m_default_source_id = av.defaultSourceId();
+            QVariantList browser_helpers;
+            browser_helpers.reserve(av.browserHelpers().size());
+            for (const auto& helper : av.browserHelpers()) {
+                browser_helpers.push_back(QVariantMap {
+                    { u"id"_s, helper.id_proto() },
+                    { u"label"_s, helper.label() },
+                    { u"labelText"_s, pluginMessageFromPb(helper.labelText(), helper.label()) },
+                    { u"pluginId"_s, helper.pluginId() },
+                    { u"available"_s, helper.available() },
+                    { u"error"_s, helper.error() },
+                });
+            }
+            self->m_browser_helpers           = std::move(browser_helpers);
+            self->m_default_browser_helper_id = av.defaultBrowserHelperId();
+            Q_EMIT self->browserHelpersChanged();
             Q_EMIT self->sourcesChanged();
         });
         co_return;

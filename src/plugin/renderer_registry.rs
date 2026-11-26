@@ -5,6 +5,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::catalog::entry::WallpaperType;
 use crate::plugin::i18n::{LocalizedTextDef, PluginTranslationDocument, PluginTranslationMeta};
+use crate::plugin::web_helper_registry::{WebHelperDeclaration, WebHelperDef};
 
 // ---------------------------------------------------------------------------
 // Installable-plugin manifest (`plugins/<dir>/plugin.toml`)
@@ -18,6 +19,8 @@ pub struct PluginManifest {
     /// `RendererDef.name`).
     #[serde(default)]
     pub renderers: HashMap<String, RendererDef>,
+    #[serde(default)]
+    pub web_helpers: HashMap<String, WebHelperDeclaration>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -52,6 +55,8 @@ pub struct PluginMeta {
     pub system: bool,
     #[serde(skip)]
     pub translations: Vec<PluginTranslationDocument>,
+    #[serde(skip)]
+    pub root: PathBuf,
 }
 
 /// Hard-coded name of the per-plugin file manifest every plugin must
@@ -139,6 +144,7 @@ fn resolve_prepare(
 #[derive(Debug, Default)]
 pub struct PluginScan {
     pub renderers: Vec<RendererDef>,
+    pub web_helpers: Vec<WebHelperDef>,
     pub entries: Vec<EntryRef>,
     /// Parsed plugin metadata (id/name/version + resolved `files`),
     /// retained for introspection.
@@ -163,6 +169,7 @@ pub struct PluginIncompat {
 impl PluginScan {
     pub fn merge(&mut self, other: PluginScan) {
         self.renderers.extend(other.renderers);
+        self.web_helpers.extend(other.web_helpers);
         self.entries.extend(other.entries);
         self.plugins.extend(other.plugins);
         self.inactive_system.extend(other.inactive_system);
@@ -798,6 +805,7 @@ pub fn scan_plugins(dir: &Path, system: bool) -> PluginScan {
 
         let mut meta = manifest.plugin;
         meta.system = system;
+        meta.root = plugin_dir.clone();
 
         // Every plugin must ship a newline-separated `files.txt` manifest.
         let files_path = plugin_dir.join(PLUGIN_FILES_MANIFEST);
@@ -908,6 +916,24 @@ pub fn scan_plugins(dir: &Path, system: bool) -> PluginScan {
                 "plugin {}: plugin.entry_version ignored without plugin.entry",
                 meta.id
             );
+        }
+
+        for (component, definition) in manifest.web_helpers {
+            let error = definition
+                .validate(&component)
+                .err()
+                .map(|error| error.to_string());
+            out.web_helpers.push(WebHelperDef {
+                id: format!("{}/{component}", meta.id),
+                plugin_id: meta.id.clone(),
+                package_root: plugin_dir.clone(),
+                plugin_version: meta.version.clone(),
+                plugin_system: meta.system,
+                bin: Some(resolve_rel(&plugin_dir, definition.bin)),
+                args: definition.args,
+                label: definition.label.resolve(&meta.id),
+                error,
+            });
         }
 
         for (name, mut def) in manifest.renderers {
@@ -1040,8 +1066,26 @@ fn select_active_plugins(mut scan: PluginScan) -> PluginScan {
         })
         .collect();
 
-    scan.plugins
-        .retain(|m| active_keys.contains(&(m.id.clone(), m.version.clone(), m.system)));
+    let active_roots: HashSet<PathBuf> = selected_by_id
+        .values()
+        .map(|idx| scan.plugins[*idx].root.clone())
+        .collect();
+    let mut plugin_index = 0;
+    scan.plugins.retain(|meta| {
+        let selected = selected_by_id.get(&meta.id) == Some(&plugin_index);
+        plugin_index += 1;
+        selected
+    });
+    let mut helper_ids = HashSet::new();
+    scan.web_helpers.retain(|helper| {
+        active_roots.contains(&helper.package_root)
+            && active_keys.contains(&(
+                helper.plugin_id.clone(),
+                helper.plugin_version.clone(),
+                helper.plugin_system,
+            ))
+            && helper_ids.insert(helper.id.clone())
+    });
     scan.entries.retain(|e| {
         active_keys.contains(&(
             e.plugin_id.clone(),
@@ -1251,6 +1295,7 @@ types = ["image"]
             files: Vec::new(),
             system,
             translations: Vec::new(),
+            root: PathBuf::new(),
         }
     }
 

@@ -8,3 +8,4 @@ pub mod renderer_registry;
 pub mod source;
 pub mod state_store;
 pub mod update;
+pub(crate) mod web_helper_registry;

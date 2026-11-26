@@ -216,7 +216,10 @@ pub async fn run(cli: DaemonConfig) -> anyhow::Result<()> {
         source_mgr.clone(),
         events.sender(),
         shutdown_tx.subscribe(),
-        web_helper_bin,
+        plugin::web_helper_registry::WebHelperRegistry::new(
+            web_helper_bin,
+            plugin_scan.web_helpers,
+        ),
     );
 
     let (rotation_handle, rotation_rx) = playback::rotation::make_handle();

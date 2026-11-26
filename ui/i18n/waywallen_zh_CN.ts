@@ -2,6 +2,13 @@
 <!DOCTYPE TS>
 <TS version="2.1" language="zh_CN">
 <context>
+    <name>BrowserLoginButton</name>
+    <message><source>This browser is unavailable.</source><translation>此浏览器不可用。</translation></message>
+    <message><source>Browser: %1</source><translation>浏览器：%1</translation></message>
+    <message><source>Refresh browsers</source><translation>刷新浏览器</translation></message>
+    <message><source>%1: %2</source><translation>%1：%2</translation></message>
+</context>
+<context>
     <name>BrowserLoginDialog</name>
     <message><source>Opening the sign-in window…</source><translation>正在打开登录窗口…</translation></message>
     <message><source>Verifying sign-in…</source><translation>正在验证登录…</translation></message>
@@ -309,6 +316,7 @@
 </context>
 <context>
     <name>DiscoverPage</name>
+    <message><source>Login action failed</source><translation>登录操作失败</translation></message>
     <message>
         <source>This source is no longer available.</source>
         <translation>此来源已不可用。</translation>

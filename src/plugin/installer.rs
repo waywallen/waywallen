@@ -156,9 +156,48 @@ pub fn inspect_user_plugin(plugin_id: &str) -> Result<Option<PluginArchiveInfo>>
     Ok(Some(info))
 }
 
-/// Extract a plugin `.zip` into the user plugin directory and return the
-/// installed plugin id.
+pub struct PreparedPluginInstall {
+    staging: PathBuf,
+    extract_root: PathBuf,
+    dest_root: PathBuf,
+    id: String,
+}
+
+impl PreparedPluginInstall {
+    pub fn plugin_id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn install(self) -> Result<String> {
+        let target = self.dest_root.join(&self.id);
+        remove_existing(&target)?;
+        std::fs::rename(&self.extract_root, &target).map_err(|error| {
+            install_fail(format!(
+                "install {} to {}: {error}",
+                self.extract_root.display(),
+                target.display()
+            ))
+        })?;
+        log::info!("installed plugin '{}' into {}", self.id, target.display());
+        Ok(self.id.clone())
+    }
+}
+
+impl Drop for PreparedPluginInstall {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::remove_dir_all(&self.staging) {
+            if error.kind() != ErrorKind::NotFound {
+                log::warn!("cleanup {} failed: {error}", self.staging.display());
+            }
+        }
+    }
+}
+
 pub fn install_zip(zip_path: &str) -> Result<String> {
+    prepare_install_zip(zip_path)?.install()
+}
+
+pub fn prepare_install_zip(zip_path: &str) -> Result<PreparedPluginInstall> {
     let file =
         std::fs::File::open(zip_path).map_err(|e| install_fail(format!("open {zip_path}: {e}")))?;
     let mut archive =
@@ -175,6 +214,12 @@ pub fn install_zip(zip_path: &str) -> Result<String> {
     let extract_root = staging.join("archive");
     std::fs::create_dir_all(&extract_root)
         .map_err(|e| install_fail(format!("mkdir {}: {e}", extract_root.display())))?;
+    let mut prepared = PreparedPluginInstall {
+        staging,
+        extract_root: extract_root.clone(),
+        dest_root,
+        id: String::new(),
+    };
 
     let result = (|| {
         for i in 0..archive.len() {
@@ -225,26 +270,10 @@ pub fn install_zip(zip_path: &str) -> Result<String> {
         }
         let id = info.id;
         validate_plugin_dir_name(&id)?;
-        let target = dest_root.join(&id);
-        remove_existing(&target)?;
-        std::fs::rename(&extract_root, &target).map_err(|e| {
-            install_fail(format!(
-                "install {} to {}: {e}",
-                extract_root.display(),
-                target.display()
-            ))
-        })?;
-        log::info!("installed plugin '{id}' into {}", target.display());
         Ok(id)
     })();
-
-    if let Err(e) = std::fs::remove_dir_all(&staging) {
-        if e.kind() != ErrorKind::NotFound {
-            log::warn!("cleanup {} failed: {e}", staging.display());
-        }
-    }
-
-    result
+    prepared.id = result?;
+    Ok(prepared)
 }
 
 pub fn delete_user_plugin(plugin_id: &str) -> Result<String> {

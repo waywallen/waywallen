@@ -29,6 +29,13 @@ void    PluginActionQuery::setActionId(const QString& v) {
     Q_EMIT actionIdChanged();
 }
 
+QString PluginActionQuery::browserHelperId() const { return m_browser_helper_id; }
+void    PluginActionQuery::setBrowserHelperId(const QString& v) {
+    if (m_browser_helper_id == v) return;
+    m_browser_helper_id = v;
+    Q_EMIT browserHelperIdChanged();
+}
+
 void PluginActionQuery::reload() { invoke({}); }
 
 void PluginActionQuery::invoke(const QVariantMap& values) {
@@ -39,6 +46,7 @@ void PluginActionQuery::invoke(const QVariantMap& values) {
     auto inner = proto::PluginActionRequest {};
     inner.setPluginId(m_plugin_id);
     inner.setActionId(m_action_id);
+    inner.setBrowserHelperId(m_browser_helper_id);
     proto::PluginActionRequest::ValuesEntry wire_values;
     for (auto it = values.cbegin(); it != values.cend(); ++it) {
         wire_values.insert(it.key(), it.value().toString());

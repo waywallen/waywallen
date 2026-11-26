@@ -99,10 +99,14 @@ pub async fn install_plugin_archive(
     zip_path: String,
 ) -> Result<PluginInstallResult> {
     let _guard = app.plugin_mutation.lock().await;
-    let plugin_id =
-        tokio::task::spawn_blocking(move || crate::plugin::installer::install_zip(&zip_path))
-            .await
-            .map_err(|error| Error::Internal(anyhow!("install join: {error}")))??;
+    let prepared = tokio::task::spawn_blocking(move || {
+        crate::plugin::installer::prepare_install_zip(&zip_path)
+    })
+    .await
+    .map_err(|error| Error::Internal(anyhow!("install join: {error}")))??;
+    let plugin_id = prepared.plugin_id().to_string();
+    app.browser_login.suspend_helper_plugin(&plugin_id).await?;
+    let install_result = tokio::task::spawn_blocking(move || prepared.install()).await;
     let old_active = active_plugin_identity(&app.plugins.read().await, &plugin_id);
     let old_renderer_ids = app
         .renderer_manager
@@ -114,6 +118,9 @@ pub async fn install_plugin_archive(
     })
     .await
     .map_err(|error| Error::Internal(anyhow!("plugin scan join: {error}")))?;
+    app.browser_login
+        .replace_helpers(plugin_scan.web_helpers.clone());
+    install_result.map_err(|error| Error::Internal(anyhow!("install join: {error}")))??;
 
     let new_packages = reload::apply_scan(app, plugin_scan, &plugin_id).await?;
     let new_active = active_plugin_identity(&new_packages, &plugin_id);
@@ -128,4 +135,24 @@ pub async fn install_plugin_archive(
         plugin_id,
         needs_restart: false,
     })
+}
+
+pub async fn delete_plugin(app: &Arc<DaemonContext>, plugin_id: String) -> Result<String> {
+    let _guard = app.plugin_mutation.lock().await;
+    app.browser_login.suspend_helper_plugin(&plugin_id).await?;
+    let deletion = tokio::task::spawn_blocking(move || {
+        crate::plugin::installer::delete_user_plugin(&plugin_id)
+    })
+    .await;
+    let roots = app.plugin_roots.clone();
+    let scan = tokio::task::spawn_blocking(move || {
+        crate::plugin::renderer_registry::scan_plugin_roots(&roots)
+    })
+    .await
+    .map_err(|error| Error::Internal(anyhow!("plugin scan join: {error}")))?;
+    app.browser_login.replace_helpers(scan.web_helpers);
+    let plugin_id =
+        deletion.map_err(|error| Error::Internal(anyhow!("plugin delete join: {error}")))??;
+    app.events.publish(GlobalEvent::PluginChanged);
+    Ok(plugin_id)
 }

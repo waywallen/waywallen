@@ -44,6 +44,7 @@ qt.qml_module({
   qml_files = {
     "qml/Window.qml",
     "qml/Global.qml",
+    "qml/BrowserLoginState.qml",
     "qml/I18n.qml",
     "qml/component/StatusDot.qml",
     "qml/component/WindowState.qml",
@@ -51,6 +52,7 @@ qt.qml_module({
     "qml/component/NavigationStack.qml",
     "qml/component/Tag.qml",
     "qml/component/CardBadges.qml",
+    "qml/component/BrowserLoginButton.qml",
     "qml/component/WallpaperBadgeSettings.qml",
     "qml/component/GpuDetails.qml",
     "qml/component/GpuTag.qml",
@@ -133,6 +135,7 @@ qt.qml_module({
   },
   singletons = {
     "qml/Global.qml",
+    "qml/BrowserLoginState.qml",
     "qml/I18n.qml",
     "qml/component/GpuDetails.qml",
     "qml/component/ThumbnailLoading.qml",
