@@ -134,8 +134,8 @@ using proto::DisplayRenameRequest;
 using proto::DisplayRenameResponse;
 using proto::LayoutOverride;
 
-using proto::BrowserLoginCancelRequest;
 using proto::BrowserHelperInfo;
+using proto::BrowserLoginCancelRequest;
 using proto::BrowserLoginCancelResponse;
 using proto::BrowserLoginProgress;
 using proto::PluginActionDef;

@@ -5,8 +5,8 @@ channels:
   - nodefaults
 dependencies:
   # Qt6 >= 6.10 (UI uses Quick / DBus / Protobuf)
-  - qt6-main>=6.10
-  - qt6-wayland>=6.10
+  - qt6-main=6.12.0
+  - qt6-wayland==6.12.0
   - freetype
   - expat
   - libxml2-devel
