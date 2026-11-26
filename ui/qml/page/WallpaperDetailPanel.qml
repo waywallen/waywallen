@@ -1107,8 +1107,7 @@ Item {
                     rightPadding: 8
                     verticalPadding: 6
                     implicitHeight: Math.max(40, implicitContentHeight + topPadding + bottomPadding)
-                    Accessible.expandable: true
-                    Accessible.expanded: m_prop_delegate.expanded
+                    Accessible.description: m_prop_delegate.expanded ? qsTr("Expanded") : qsTr("Collapsed")
                     onClicked: {
                         root.dismissAnchoredPopups();
                         propertyModel.setGroupExpanded(m_prop_delegate.key, !m_prop_delegate.expanded);

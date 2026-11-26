@@ -2930,6 +2930,16 @@ Unsaved frame state may be lost.</source>
         <translation>恢复默认值</translation>
     </message>
     <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="1110"/>
+        <source>Expanded</source>
+        <translation>已展开</translation>
+    </message>
+    <message>
+        <location filename="../qml/page/WallpaperDetailPanel.qml" line="1110"/>
+        <source>Collapsed</source>
+        <translation>已折叠</translation>
+    </message>
+    <message>
         <location filename="../qml/page/WallpaperDetailPanel.qml" line="954"/>
         <source>(%1 — not yet supported)</source>
         <translation>（%1 — 尚不支持）</translation>
