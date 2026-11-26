@@ -68,14 +68,62 @@ Item {
 
             MD.Menu {
                 id: helperMenu
+                maximumWidth: 420
                 model: root.browserHelpers
                 contentDelegate: MD.SelectionMenuItem {
+                    id: helperItem
                     required property var modelData
+                    readonly property string pluginId: modelData.pluginId || ""
                     text: W.I18n.tr(modelData.labelText) || modelData.label || modelData.id
                     supportText: modelData.available ? "" : (modelData.error || qsTr("This browser is unavailable."))
+                    Accessible.description: [pluginId, supportText].filter(value => value.length > 0).join("\n")
+                    supporting: pluginId.length > 0 ? pluginSupporting : null
+                    verticalPadding: pluginId.length > 0 ? 6 : 0
                     enabled: modelData.available
                     selected: modelData.id === root.browserHelperId
                     onTriggered: W.BrowserLoginState.selectHelper(root.sourceId, root.actionId, modelData.id)
+
+                    Component {
+                        id: pluginSupporting
+
+                        Item {
+                            implicitWidth: Math.max(pluginTag.implicitWidth, errorLabel.visible ? errorLabel.implicitWidth : 0)
+                            implicitHeight: 4 + pluginTag.implicitHeight + (errorLabel.visible ? 4 + errorLabel.implicitHeight : 0)
+
+                            W.Tag {
+                                id: pluginTag
+                                y: 4
+                                x: helperItem.mirrored ? parent.width - width : 0
+                                width: Math.min(implicitWidth, parent.width)
+                                text: helperItem.pluginId
+                                bgColor: MD.Token.color.surface_container_high
+                                fgColor: MD.Token.color.on_surface_variant
+                                textItem.width: Math.max(0, width - 16)
+                                textItem.maximumLineCount: 1
+                                textItem.elide: Text.ElideRight
+                                textItem.wrapMode: Text.NoWrap
+
+                                HoverHandler {
+                                    id: pluginHover
+                                }
+
+                                MD.ToolTip.text: helperItem.pluginId
+                                MD.ToolTip.visible: pluginHover.hovered && textItem.truncated
+                            }
+
+                            MD.Text {
+                                id: errorLabel
+                                y: pluginTag.y + pluginTag.height + 4
+                                width: parent.width
+                                visible: text.length > 0
+                                text: helperItem.supportText
+                                color: helperItem.mdState.supportTextColor
+                                typescale: MD.Token.typescale.body_small
+                                horizontalAlignment: helperItem.mirrored ? Text.AlignRight : Text.AlignLeft
+                                wrapMode: Text.NoWrap
+                            }
+                        }
+                    }
                 }
                 MD.MenuSeparator {}
                 MD.MenuItem {
