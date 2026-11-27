@@ -1,0 +1,214 @@
+msgid ""
+msgstr "Project-Id-Version: org.waywallen.wallhaven 0.1.0\nLanguage: fr\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+#: wallhaven/api.lua:111
+msgid "1080 x 1920"
+msgstr "1080 x 1920"
+
+#: wallhaven/api.lua:102
+msgid "1280 x 720"
+msgstr "1280 x 720"
+
+#: wallhaven/api.lua:113
+msgid "1440 x 2560"
+msgstr "1440 x 2560"
+
+#: wallhaven/api.lua:103
+msgid "1920 x 1080"
+msgstr "1920 x 1080"
+
+#: wallhaven/api.lua:106
+msgid "2560 x 1080"
+msgstr "2560 x 1080"
+
+#: wallhaven/api.lua:104
+msgid "2560 x 1440"
+msgstr "2560 x 1440"
+
+#: wallhaven/api.lua:107
+msgid "3440 x 1440"
+msgstr "3440 x 1440"
+
+#: wallhaven/api.lua:109
+msgid "3840 x 1080"
+msgstr "3840 x 1080"
+
+#: wallhaven/api.lua:105
+msgid "3840 x 2160"
+msgstr "3840 x 2160"
+
+#: wallhaven/api.lua:108
+msgid "5120 x 1440"
+msgstr "5120 x 1440"
+
+#: wallhaven/api.lua:112
+msgid "720 x 1280"
+msgstr "720 x 1280"
+
+#: wallhaven/api.lua:110
+msgid "7680 x 2160"
+msgstr "7680 x 2160"
+
+#: main.lua:36
+msgid "API key"
+msgstr "Clé API"
+
+#: wallhaven/api.lua:72
+msgid "Abstract"
+msgstr "Abstrait"
+
+#: wallhaven/api.lua:73
+msgid "Animal"
+msgstr "Animaux"
+
+#: wallhaven/api.lua:74
+msgid "Anime"
+msgstr "Anime"
+
+#: wallhaven/api.lua:76
+msgid "CG"
+msgstr "Images de synthèse"
+
+#: wallhaven/api.lua:75
+msgid "Cartoon"
+msgstr "Dessins animés"
+
+#: main.lua:37
+msgid "Copy the API key from Wallhaven Account Settings: https://wallhaven.cc/settings/account"
+msgstr "Copiez la clé API depuis les paramètres du compte Wallhaven : https://wallhaven.cc/settings/account"
+
+#: wallhaven/api.lua:77
+msgid "Cyberpunk"
+msgstr "Cyberpunk"
+
+#: wallhaven/api.lua:78
+msgid "Fantasy"
+msgstr "Fantasy"
+
+#: wallhaven/api.lua:79
+msgid "Game"
+msgstr "Jeux vidéo"
+
+#: wallhaven/api.lua:80
+msgid "Girls"
+msgstr "Filles"
+
+#: wallhaven/api.lua:81
+msgid "Guys"
+msgstr "Garçons"
+
+#: wallhaven/api.lua:82
+msgid "Landscape"
+msgstr "Paysages"
+
+#: main.lua:27
+msgid "Log in to Wallhaven"
+msgstr "Se connecter à Wallhaven"
+
+#: wallhaven/api.lua:85
+msgid "MMD"
+msgstr "MMD"
+
+#: wallhaven/api.lua:83
+msgid "Medieval"
+msgstr "Médiéval"
+
+#: wallhaven/api.lua:84
+msgid "Memes"
+msgstr "Mèmes"
+
+#: wallhaven/api.lua:86
+msgid "Music"
+msgstr "Musique"
+
+#: wallhaven/api.lua:58
+msgid "NSFW wallpapers require a Wallhaven API key."
+msgstr "Les fonds d'écran NSFW nécessitent une clé API Wallhaven."
+
+#: wallhaven/api.lua:87
+msgid "Nature"
+msgstr "Nature"
+
+#: wallhaven/api.lua:62
+msgid "Not safe for work"
+msgstr "Déconseillé au travail"
+
+#: wallhaven/api.lua:88
+msgid "Pixel art"
+msgstr "Pixel art"
+
+#: main.lua:62
+msgid "Popular"
+msgstr "Populaires"
+
+#: wallhaven/api.lua:56
+msgid "Purity"
+msgstr "Classification du contenu"
+
+#: wallhaven/api.lua:61
+msgid "Questionable"
+msgstr "Douteux"
+
+#: main.lua:61
+msgid "Recent"
+msgstr "Récents"
+
+#: wallhaven/api.lua:89
+msgid "Relaxing"
+msgstr "Relaxant"
+
+#: main.lua:47
+msgid "Remove API key"
+msgstr "Supprimer la clé API"
+
+#: wallhaven/api.lua:99
+msgid "Resolution"
+msgstr "Résolution"
+
+#: wallhaven/api.lua:90
+msgid "Retro"
+msgstr "Rétro"
+
+#: wallhaven/api.lua:60
+msgid "Safe for work"
+msgstr "Adapté au travail"
+
+#: wallhaven/api.lua:91
+msgid "Sci-Fi"
+msgstr "Science-fiction"
+
+#: wallhaven/api.lua:92
+msgid "Sports"
+msgstr "Sports"
+
+#: main.lua:17
+msgid "Status"
+msgstr "État"
+
+#: wallhaven/api.lua:93
+msgid "Technology"
+msgstr "Technologie"
+
+#: wallhaven/api.lua:67
+msgid "Topics"
+msgstr "Thèmes"
+
+#: main.lua:60
+msgid "Trending"
+msgstr "Tendances"
+
+#: main.lua:28
+msgid "Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password."
+msgstr "Utilisez une clé API issue des paramètres de votre compte Wallhaven. Ne saisissez pas votre mot de passe Wallhaven."
+
+#: wallhaven/api.lua:94
+msgid "Vehicle"
+msgstr "Véhicules"
+
+#: main.lua:38
+msgid "Wallhaven API key"
+msgstr "Clé API Wallhaven"
+
+#: main.lua:8
+msgid "Wallhaven account"
+msgstr "Compte Wallhaven"
