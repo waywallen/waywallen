@@ -1,0 +1,214 @@
+msgid ""
+msgstr "Project-Id-Version: org.waywallen.wallhaven 0.1.0\nLanguage: es\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+#: wallhaven/api.lua:111
+msgid "1080 x 1920"
+msgstr "1080 x 1920"
+
+#: wallhaven/api.lua:102
+msgid "1280 x 720"
+msgstr "1280 x 720"
+
+#: wallhaven/api.lua:113
+msgid "1440 x 2560"
+msgstr "1440 x 2560"
+
+#: wallhaven/api.lua:103
+msgid "1920 x 1080"
+msgstr "1920 x 1080"
+
+#: wallhaven/api.lua:106
+msgid "2560 x 1080"
+msgstr "2560 x 1080"
+
+#: wallhaven/api.lua:104
+msgid "2560 x 1440"
+msgstr "2560 x 1440"
+
+#: wallhaven/api.lua:107
+msgid "3440 x 1440"
+msgstr "3440 x 1440"
+
+#: wallhaven/api.lua:109
+msgid "3840 x 1080"
+msgstr "3840 x 1080"
+
+#: wallhaven/api.lua:105
+msgid "3840 x 2160"
+msgstr "3840 x 2160"
+
+#: wallhaven/api.lua:108
+msgid "5120 x 1440"
+msgstr "5120 x 1440"
+
+#: wallhaven/api.lua:112
+msgid "720 x 1280"
+msgstr "720 x 1280"
+
+#: wallhaven/api.lua:110
+msgid "7680 x 2160"
+msgstr "7680 x 2160"
+
+#: main.lua:36
+msgid "API key"
+msgstr "Clave de API"
+
+#: wallhaven/api.lua:72
+msgid "Abstract"
+msgstr "Abstracto"
+
+#: wallhaven/api.lua:73
+msgid "Animal"
+msgstr "Animales"
+
+#: wallhaven/api.lua:74
+msgid "Anime"
+msgstr "Anime"
+
+#: wallhaven/api.lua:76
+msgid "CG"
+msgstr "Gráficos por ordenador"
+
+#: wallhaven/api.lua:75
+msgid "Cartoon"
+msgstr "Dibujos animados"
+
+#: main.lua:37
+msgid "Copy the API key from Wallhaven Account Settings: https://wallhaven.cc/settings/account"
+msgstr "Copia la clave de API desde los ajustes de la cuenta de Wallhaven: https://wallhaven.cc/settings/account"
+
+#: wallhaven/api.lua:77
+msgid "Cyberpunk"
+msgstr "Cyberpunk"
+
+#: wallhaven/api.lua:78
+msgid "Fantasy"
+msgstr "Fantasía"
+
+#: wallhaven/api.lua:79
+msgid "Game"
+msgstr "Videojuegos"
+
+#: wallhaven/api.lua:80
+msgid "Girls"
+msgstr "Chicas"
+
+#: wallhaven/api.lua:81
+msgid "Guys"
+msgstr "Chicos"
+
+#: wallhaven/api.lua:82
+msgid "Landscape"
+msgstr "Paisajes"
+
+#: main.lua:27
+msgid "Log in to Wallhaven"
+msgstr "Inicia sesión en Wallhaven"
+
+#: wallhaven/api.lua:85
+msgid "MMD"
+msgstr "MMD"
+
+#: wallhaven/api.lua:83
+msgid "Medieval"
+msgstr "Medieval"
+
+#: wallhaven/api.lua:84
+msgid "Memes"
+msgstr "Memes"
+
+#: wallhaven/api.lua:86
+msgid "Music"
+msgstr "Música"
+
+#: wallhaven/api.lua:58
+msgid "NSFW wallpapers require a Wallhaven API key."
+msgstr "Los fondos de pantalla NSFW requieren una clave de API de Wallhaven."
+
+#: wallhaven/api.lua:87
+msgid "Nature"
+msgstr "Naturaleza"
+
+#: wallhaven/api.lua:62
+msgid "Not safe for work"
+msgstr "No apto para el trabajo"
+
+#: wallhaven/api.lua:88
+msgid "Pixel art"
+msgstr "Pixel art"
+
+#: main.lua:62
+msgid "Popular"
+msgstr "Populares"
+
+#: wallhaven/api.lua:56
+msgid "Purity"
+msgstr "Clasificación del contenido"
+
+#: wallhaven/api.lua:61
+msgid "Questionable"
+msgstr "Cuestionable"
+
+#: main.lua:61
+msgid "Recent"
+msgstr "Recientes"
+
+#: wallhaven/api.lua:89
+msgid "Relaxing"
+msgstr "Relajante"
+
+#: main.lua:47
+msgid "Remove API key"
+msgstr "Eliminar la clave de API"
+
+#: wallhaven/api.lua:99
+msgid "Resolution"
+msgstr "Resolución"
+
+#: wallhaven/api.lua:90
+msgid "Retro"
+msgstr "Retro"
+
+#: wallhaven/api.lua:60
+msgid "Safe for work"
+msgstr "Apto para el trabajo"
+
+#: wallhaven/api.lua:91
+msgid "Sci-Fi"
+msgstr "Ciencia ficción"
+
+#: wallhaven/api.lua:92
+msgid "Sports"
+msgstr "Deportes"
+
+#: main.lua:17
+msgid "Status"
+msgstr "Estado"
+
+#: wallhaven/api.lua:93
+msgid "Technology"
+msgstr "Tecnología"
+
+#: wallhaven/api.lua:67
+msgid "Topics"
+msgstr "Temas"
+
+#: main.lua:60
+msgid "Trending"
+msgstr "Tendencias"
+
+#: main.lua:28
+msgid "Use an API key from your Wallhaven account settings. Do not enter your Wallhaven password."
+msgstr "Usa una clave de API de los ajustes de tu cuenta de Wallhaven. No introduzcas tu contraseña de Wallhaven."
+
+#: wallhaven/api.lua:94
+msgid "Vehicle"
+msgstr "Vehículos"
+
+#: main.lua:38
+msgid "Wallhaven API key"
+msgstr "Clave de API de Wallhaven"
+
+#: main.lua:8
+msgid "Wallhaven account"
+msgstr "Cuenta de Wallhaven"
