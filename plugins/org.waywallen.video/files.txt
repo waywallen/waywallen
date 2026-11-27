@@ -1,5 +1,6 @@
 ../../../../bin/waywallen-video-renderer
 i18n/de.po
+i18n/es.po
 i18n/ru.po
 i18n/uk.po
 i18n/zh-CN.po

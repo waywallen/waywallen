@@ -1,0 +1,70 @@
+msgid ""
+msgstr "Project-Id-Version: org.waywallen.image 0.6.2\nLanguage: es\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+#: main.lua:20
+msgid "A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Auto-detect also finds installed KDE and GNOME system wallpapers."
+msgstr "Una carpeta con archivos de imagen. También se escanean las subcarpetas de hasta dos niveles de profundidad. Formatos compatibles: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. La detección automática también encuentra los fondos de pantalla del sistema instalados de KDE y GNOME."
+
+#: image/wallpaper.lua:17
+msgid "Always dark"
+msgstr "Siempre oscuro"
+
+#: image/wallpaper.lua:16
+msgid "Always light"
+msgstr "Siempre claro"
+
+#: plugin.toml
+msgid "Custom resolution"
+msgstr "Resolución personalizada"
+
+#: main.lua:16
+msgid "Desktop wallpapers"
+msgstr "Fondos de pantalla del escritorio"
+
+#: plugin.toml
+msgid "Frame rate"
+msgstr "Velocidad de fotogramas"
+
+#: main.lua:19
+msgid "Image Folder"
+msgstr "Carpeta de imágenes"
+
+#: main.lua:16
+msgid "Image files"
+msgstr "Archivos de imagen"
+
+#: plugin.toml
+msgid "Render node"
+msgstr "Nodo de renderizado"
+
+#: plugin.toml
+msgid "Rendering"
+msgstr "Renderizado"
+
+#: plugin.toml
+msgid "Resolution"
+msgstr "Resolución"
+
+#: main.lua:17
+msgid "Scan image files or desktop wallpaper definitions such as KDE and GNOME wallpapers."
+msgstr "Escanear archivos de imagen o definiciones de fondos de pantalla del escritorio, como los de KDE y GNOME."
+
+#: main.lua:17
+msgid "Scan mode"
+msgstr "Modo de escaneo"
+
+#: image/wallpaper.lua:6
+msgid "Scheme color"
+msgstr "Color del esquema"
+
+#: image/wallpaper.lua:15
+msgid "Simulated day and night"
+msgstr "Ciclo de día y noche simulado"
+
+#: image/wallpaper.lua:13
+msgid "Wallpaper variant"
+msgstr "Variante del fondo de pantalla"
+
+#: plugin.toml
+msgid "Image"
+msgstr "Imagen"

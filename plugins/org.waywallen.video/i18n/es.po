@@ -1,0 +1,70 @@
+msgid ""
+msgstr "Project-Id-Version: org.waywallen.video 0.6.2\nLanguage: es\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+#: main.lua:15
+msgid "A directory containing video files. Subdirectories up to two levels deep are also scanned. Supported formats: MP4, MKV, WebM, MOV, AVI, and other common containers."
+msgstr "Una carpeta con archivos de vídeo. También se escanean las subcarpetas de hasta dos niveles de profundidad. Formatos compatibles: MP4, MKV, WebM, MOV, AVI y otros contenedores habituales."
+
+#: plugin.toml
+msgid "Audio"
+msgstr "Audio"
+
+#: plugin.toml
+msgid "Custom resolution"
+msgstr "Resolución personalizada"
+
+#: plugin.toml
+msgid "Decoding"
+msgstr "Decodificación"
+
+#: plugin.toml video/wallpaper.lua:11
+msgid "Enable audio"
+msgstr "Activar el audio"
+
+#: plugin.toml
+msgid "Frame rate"
+msgstr "Velocidad de fotogramas"
+
+#: plugin.toml
+msgid "Hardware decoding"
+msgstr "Decodificación por hardware"
+
+#: plugin.toml
+msgid "Loop playback"
+msgstr "Reproducción en bucle"
+
+#: plugin.toml
+msgid "Playback"
+msgstr "Reproducción"
+
+#: video/wallpaper.lua:16
+msgid "Playback speed"
+msgstr "Velocidad de reproducción"
+
+#: plugin.toml
+msgid "Render node"
+msgstr "Nodo de renderizado"
+
+#: plugin.toml
+msgid "Rendering"
+msgstr "Renderizado"
+
+#: plugin.toml
+msgid "Resolution"
+msgstr "Resolución"
+
+#: video/wallpaper.lua:6
+msgid "Scheme color"
+msgstr "Color del esquema"
+
+#: main.lua:14
+msgid "Video Folder"
+msgstr "Carpeta de vídeos"
+
+#: plugin.toml
+msgid "Volume"
+msgstr "Volumen"
+
+#: plugin.toml
+msgid "Video"
+msgstr "Vídeo"
