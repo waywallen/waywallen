@@ -1,0 +1,70 @@
+msgid ""
+msgstr "Project-Id-Version: org.waywallen.image 0.6.2\nLanguage: fr\nMIME-Version: 1.0\nContent-Type: text/plain; charset=UTF-8\nContent-Transfer-Encoding: 8bit\n"
+
+#: main.lua:20
+msgid "A directory containing image files. Subdirectories up to two levels deep are also scanned. Supported formats: PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. Auto-detect also finds installed KDE and GNOME system wallpapers."
+msgstr "Un dossier contenant des fichiers image. Les sous-dossiers jusqu'à deux niveaux de profondeur sont également analysés. Formats pris en charge : PNG, JPEG, WebP, BMP, TIFF, AVIF, GIF. La détection automatique trouve aussi les fonds d'écran système installés de KDE et GNOME."
+
+#: image/wallpaper.lua:17
+msgid "Always dark"
+msgstr "Toujours sombre"
+
+#: image/wallpaper.lua:16
+msgid "Always light"
+msgstr "Toujours clair"
+
+#: plugin.toml
+msgid "Custom resolution"
+msgstr "Résolution personnalisée"
+
+#: main.lua:16
+msgid "Desktop wallpapers"
+msgstr "Fonds d'écran du bureau"
+
+#: plugin.toml
+msgid "Frame rate"
+msgstr "Fréquence d'images"
+
+#: main.lua:19
+msgid "Image Folder"
+msgstr "Dossier d'images"
+
+#: main.lua:16
+msgid "Image files"
+msgstr "Fichiers image"
+
+#: plugin.toml
+msgid "Render node"
+msgstr "Nœud de rendu"
+
+#: plugin.toml
+msgid "Rendering"
+msgstr "Rendu"
+
+#: plugin.toml
+msgid "Resolution"
+msgstr "Résolution"
+
+#: main.lua:17
+msgid "Scan image files or desktop wallpaper definitions such as KDE and GNOME wallpapers."
+msgstr "Analyser les fichiers image ou les définitions de fonds d'écran du bureau, comme ceux de KDE et GNOME."
+
+#: main.lua:17
+msgid "Scan mode"
+msgstr "Mode d'analyse"
+
+#: image/wallpaper.lua:6
+msgid "Scheme color"
+msgstr "Couleur du schéma"
+
+#: image/wallpaper.lua:15
+msgid "Simulated day and night"
+msgstr "Cycle jour/nuit simulé"
+
+#: image/wallpaper.lua:13
+msgid "Wallpaper variant"
+msgstr "Variante du fond d'écran"
+
+#: plugin.toml
+msgid "Image"
+msgstr "Image"
