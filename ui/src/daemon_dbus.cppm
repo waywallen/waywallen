@@ -80,6 +80,11 @@ public:
 
     Q_INVOKABLE bool quitDaemon();
 
+    /// Suppress the automatic quit-on-daemon-shutdown while an in-app update
+    /// restarts the daemon. Process-wide and transient: never written to
+    /// QSettings.
+    Q_INVOKABLE void setShutdownQuitHold(bool hold);
+
     /// Spawn the daemon as a detached child. Returns true on success.
     Q_INVOKABLE bool launchDaemon();
 
